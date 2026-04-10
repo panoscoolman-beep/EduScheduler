@@ -7,6 +7,7 @@ class DataTable {
         this.columns = columns;
         this.api = apiService;
         this.entityName = entityName;
+        this.slug = entityName.replace(/[^a-zA-Zα-ωΑ-Ω0-9]/g, '_').toLowerCase();
         this.formBuilder = formBuilder;
         this.formParser = formParser;
         this.data = [];
@@ -19,18 +20,18 @@ class DataTable {
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">${this.entityName}</h2>
-                    <button class="btn btn-primary" id="dt-add-${this.entityName}">
+                    <button class="btn btn-primary" id="dt-add-${this.slug}">
                         ➕ Προσθήκη
                     </button>
                 </div>
-                <div class="data-table-container" id="dt-table-${this.entityName}">
+                <div class="data-table-container" id="dt-table-${this.slug}">
                     <div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>
                 </div>
             </div>
         `;
 
         this.container.innerHTML = html;
-        this.container.querySelector(`#dt-add-${this.entityName}`).addEventListener('click', () => this.openForm());
+        this.container.querySelector(`#dt-add-${this.slug}`).addEventListener('click', () => this.openForm());
         await this.loadData();
     }
 
@@ -44,7 +45,7 @@ class DataTable {
     }
 
     renderTable() {
-        const tableContainer = this.container.querySelector(`#dt-table-${this.entityName}`);
+        const tableContainer = this.container.querySelector(`#dt-table-${this.slug}`);
 
         if (!this.data || this.data.length === 0) {
             tableContainer.innerHTML = `
