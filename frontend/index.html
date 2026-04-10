@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="EduScheduler — Αυτόματο Ωρολόγιο Πρόγραμμα για Σχολεία & Φροντιστήρια">
+    <title>EduScheduler — Ωρολόγιο Πρόγραμμα</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="app-layout" id="app">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">📚</span>
+                    <span class="logo-text">EduScheduler</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <ul>
+                    <li>
+                        <a href="#" class="nav-item active" data-view="dashboard" id="nav-dashboard">
+                            <span class="nav-icon">📊</span>
+                            <span class="nav-label">Πίνακας Ελέγχου</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="periods" id="nav-periods">
+                            <span class="nav-icon">🕐</span>
+                            <span class="nav-label">Ώρες / Περίοδοι</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="teachers" id="nav-teachers">
+                            <span class="nav-icon">👨‍🏫</span>
+                            <span class="nav-label">Καθηγητές</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="subjects" id="nav-subjects">
+                            <span class="nav-icon">📖</span>
+                            <span class="nav-label">Μαθήματα</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="classes" id="nav-classes">
+                            <span class="nav-icon">🏫</span>
+                            <span class="nav-label">Τάξεις</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="classrooms" id="nav-classrooms">
+                            <span class="nav-icon">🚪</span>
+                            <span class="nav-label">Αίθουσες</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-separator"><span>Προγραμματισμός</span></li>
+
+                    <li>
+                        <a href="#" class="nav-item" data-view="lessons" id="nav-lessons">
+                            <span class="nav-icon">🃏</span>
+                            <span class="nav-label">Μαθήματα-Κάρτες</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="constraints" id="nav-constraints">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-label">Περιορισμοί</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="generate" id="nav-generate">
+                            <span class="nav-icon">🧠</span>
+                            <span class="nav-label">Δημιουργία</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="timetable" id="nav-timetable">
+                            <span class="nav-icon">📋</span>
+                            <span class="nav-label">Ωρολόγιο</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-separator"><span>Σύστημα</span></li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="settings" id="nav-settings">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-label">Ρυθμίσεις</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+
+            <div class="sidebar-footer">
+                <span class="version-badge">v0.1.0</span>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="main-content">
+            <header class="top-bar">
+                <button class="menu-toggle" id="menu-toggle" aria-label="Εναλλαγή μενού">☰</button>
+                <h1 class="page-title" id="page-title">Πίνακας Ελέγχου</h1>
+                <div class="top-bar-actions">
+                    <span class="school-name" id="school-name">EduScheduler</span>
+                </div>
+            </header>
+
+            <div class="content-area" id="content-area">
+                <!-- Dynamic content loaded by JS -->
+                <div class="loading-spinner" id="view-loader">
+                    <div class="spinner"></div>
+                    <p>Φόρτωση...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modal-title">Modal</h2>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer" id="modal-footer">
+                <button class="btn btn-secondary" id="modal-cancel">Ακύρωση</button>
+                <button class="btn btn-primary" id="modal-save">Αποθήκευση</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="js/api.js"></script>
+    <script src="js/components/toast.js"></script>
+    <script src="js/components/modal.js"></script>
+    <script src="js/components/data-table.js"></script>
+    <script src="js/components/timetable-grid.js"></script>
+    <script src="js/views/dashboard.js"></script>
+    <script src="js/views/teachers.js"></script>
+    <script src="js/views/subjects.js"></script>
+    <script src="js/views/classes.js"></script>
+    <script src="js/views/classrooms.js"></script>
+    <script src="js/views/periods.js"></script>
+    <script src="js/views/lessons.js"></script>
+    <script src="js/views/constraints.js"></script>
+    <script src="js/views/generate.js"></script>
+    <script src="js/views/timetable.js"></script>
+    <script src="js/views/settings.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
