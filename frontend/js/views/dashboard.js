@@ -107,7 +107,7 @@ const DashboardView = {
                     </div>
                 </div>
 
-                ${latestSolution ? \`
+                ${latestSolution ? `
                 <div class="card">
                     <div class="card-header">
                         <h2 class="card-title">📋 Τελευταίο Πρόγραμμα</h2>
@@ -121,7 +121,7 @@ const DashboardView = {
                     </p>
                     <button class="btn btn-primary mt-md" id="view-latest">📋 Προβολή</button>
                 </div>
-                \` : ''}
+                ` : ''}
             `;
 
             // Navigation from stat cards
