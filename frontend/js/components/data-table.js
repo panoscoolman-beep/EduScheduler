@@ -2,7 +2,7 @@
  * DataTable Component — Reusable CRUD table with add/edit/delete.
  */
 class DataTable {
-    constructor({ containerId, columns, apiService, entityName, formBuilder, formParser }) {
+    constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -10,7 +10,7 @@ class DataTable {
         this.slug = entityName.replace(/[^a-zA-Zα-ωΑ-Ω0-9]/g, '_').toLowerCase();
         this.formBuilder = formBuilder;
         this.formParser = formParser;
-        this.customActions = arguments[0].customActions || [];
+        this.customActions = customActions || [];
         this.data = [];
     }
 
