@@ -3,7 +3,12 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Student, StudentClassEnrollment
-from backend.schemas import StudentCreate, StudentResponse
+from backend.schemas import (
+    StudentCreate, 
+    StudentResponse,
+    StudentAvailabilityResponse,
+    StudentAvailabilityBulkUpdate
+)
 
 router = APIRouter()
 
@@ -52,3 +57,38 @@ def delete_student(student_id: int, db: Session = Depends(get_db)):
 
     db.delete(db_student)
     db.commit()
+
+
+# ─── Availability ───────────────────────────────────────
+
+@router.get("/{student_id}/availability", response_model=list[StudentAvailabilityResponse])
+def get_availability(student_id: int, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student.availabilities
+
+
+@router.put("/{student_id}/availability", response_model=list[StudentAvailabilityResponse])
+def update_availability(student_id: int, data: StudentAvailabilityBulkUpdate, db: Session = Depends(get_db)):
+    """Replace entire availability matrix for a student."""
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    from backend.models import StudentAvailability
+
+    # Delete existing availability
+    db.query(StudentAvailability).filter(StudentAvailability.student_id == student_id).delete()
+
+    # Insert new entries
+    new_entries = []
+    for avail in data.availabilities:
+        entry = StudentAvailability(student_id=student_id, **avail.model_dump())
+        db.add(entry)
+        new_entries.append(entry)
+
+    db.commit()
+    for entry in new_entries:
+        db.refresh(entry)
+    return new_entries

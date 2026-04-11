@@ -55,6 +55,7 @@ class Teacher(Base):
     phone = Column(String(30))
     max_periods_per_day = Column(Integer)
     max_periods_per_week = Column(Integer)
+    max_days_per_week = Column(Integer)
     min_periods_per_day = Column(Integer, default=0)
     color = Column(String(7), default="#3B82F6")
 
@@ -133,13 +134,37 @@ class Student(Base):
     last_name = Column(String(100), nullable=False)
     email = Column(String(200))
     phone = Column(String(30))
+    max_days_per_week = Column(Integer)
     
     # Relationships
     enrollments = relationship("StudentClassEnrollment", back_populates="student", cascade="all, delete-orphan")
+    availabilities = relationship("StudentAvailability", back_populates="student", cascade="all, delete-orphan")
 
     @property
     def full_name(self):
         return f"{self.last_name} {self.first_name}"
+
+
+class StudentAvailability(Base):
+    """Student time-off / availability per day+period."""
+
+    __tablename__ = "student_availability"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 0=Monday, 4=Friday
+    period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(20), nullable=False, default="available")  # available / unavailable / preferred
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "day_of_week", "period_id", name="uq_student_day_period"),
+        CheckConstraint("day_of_week >= 0 AND day_of_week <= 6", name="ck_sday_range"),
+        CheckConstraint("status IN ('available', 'unavailable', 'preferred')", name="ck_sstatus_values"),
+    )
+
+    # Relationships
+    student = relationship("Student", back_populates="availabilities")
+    period = relationship("Period", back_populates="availabilities")
 
 
 class StudentClassEnrollment(Base):

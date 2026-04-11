@@ -36,6 +36,7 @@ class TeacherBase(BaseModel):
     phone: str | None = None
     max_periods_per_day: int | None = Field(None, ge=1, le=12)
     max_periods_per_week: int | None = Field(None, ge=1, le=60)
+    max_days_per_week: int | None = Field(None, ge=1, le=7)
     min_periods_per_day: int = Field(0, ge=0, le=12)
     color: str = Field("#3B82F6", pattern=r"^#[0-9A-Fa-f]{6}$")
 
@@ -76,6 +77,31 @@ class TeacherAvailabilityBulkUpdate(BaseModel):
     availabilities: list[TeacherAvailabilityCreate]
 
 
+# ─── Student Availability ──────────────────────────────
+
+class StudentAvailabilityBase(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6)
+    period_id: int
+    status: str = Field("available", pattern=r"^(available|unavailable|preferred)$")
+
+
+class StudentAvailabilityCreate(StudentAvailabilityBase):
+    pass
+
+
+class StudentAvailabilityResponse(StudentAvailabilityBase):
+    id: int
+    student_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class StudentAvailabilityBulkUpdate(BaseModel):
+    """Bulk update availability — send the entire matrix."""
+    availabilities: list[StudentAvailabilityCreate]
+
+
 # ─── Subject ────────────────────────────────────────────
 
 class SubjectBase(BaseModel):
@@ -104,6 +130,7 @@ class StudentBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     email: str | None = None
     phone: str | None = None
+    max_days_per_week: int | None = Field(None, ge=1, le=7)
 
 
 class StudentCreate(StudentBase):

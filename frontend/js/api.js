@@ -57,6 +57,15 @@ const API = {
         update: (id, data) => API.put(`/subjects/${id}`, data),
         delete: (id) => API.delete(`/subjects/${id}`),
     },
+    students: {
+        list: () => API.get('/students/'),
+        get: (id) => API.get(`/students/${id}`),
+        create: (data) => API.post('/students/', data),
+        update: (id, data) => API.put(`/students/${id}`, data),
+        delete: (id) => API.delete(`/students/${id}`),
+        getAvailability: (id) => API.get(`/students/${id}/availability`),
+        updateAvailability: (id, data) => API.put(`/students/${id}/availability`, data),
+    },
     classrooms: {
         list: () => API.get('/classrooms/'),
         get: (id) => API.get(`/classrooms/${id}`),

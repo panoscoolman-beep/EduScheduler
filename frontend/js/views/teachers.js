@@ -10,10 +10,19 @@ const TeachersView = {
                 { key: 'short_name', label: 'Συντομογραφία' },
                 { key: 'email', label: 'Email' },
                 { key: 'max_periods_per_day', label: 'Max/Ημέρα', render: v => v || '—' },
-                { key: 'max_periods_per_week', label: 'Max/Εβδ', render: v => v || '—' },
+                { key: 'max_periods_per_week', label: 'Max/Εβδ.', render: v => v || '—' },
+                { key: 'max_days_per_week', label: 'Max Ημέρες', render: v => v || '—' },
             ],
             apiService: API.teachers,
             entityName: 'Καθηγητές',
+            customActions: [
+                {
+                    id: 'availability',
+                    title: 'Πρόγραμμα / Κωλύματα',
+                    icon: '📅',
+                    handler: (item) => AvailabilityModal.open('teachers', item)
+                }
+            ],
             formBuilder: (item) => `
                 <div class="form-grid">
                     <div class="form-group">
@@ -45,8 +54,8 @@ const TeachersView = {
                         <input class="form-input" id="f-max_week" type="number" min="1" max="60" value="${item?.max_periods_per_week || ''}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Min Ώρες / Ημέρα</label>
-                        <input class="form-input" id="f-min_day" type="number" min="0" max="12" value="${item?.min_periods_per_day || 0}">
+                        <label class="form-label">Max Ημέρες / Εβδομάδα</label>
+                        <input class="form-input" id="f-max_days" type="number" min="1" max="7" value="${item?.max_days_per_week || ''}">
                     </div>
                 </div>
                 <div class="form-group">
@@ -64,7 +73,7 @@ const TeachersView = {
                 phone: document.getElementById('f-phone').value.trim() || null,
                 max_periods_per_day: parseInt(document.getElementById('f-max_day').value) || null,
                 max_periods_per_week: parseInt(document.getElementById('f-max_week').value) || null,
-                min_periods_per_day: parseInt(document.getElementById('f-min_day').value) || 0,
+                max_days_per_week: parseInt(document.getElementById('f-max_days').value) || null,
                 color: document.getElementById('f-color').value,
             }),
         });
