@@ -21,7 +21,14 @@ const API = {
         const data = await response.json().catch(() => null);
 
         if (!response.ok) {
-            const message = data?.detail || `Σφάλμα ${response.status}`;
+            let message = `Σφάλμα ${response.status}`;
+            if (data && data.detail) {
+                if (Array.isArray(data.detail)) {
+                    message = data.detail.map(err => `${err.loc.slice(-1)}: ${err.msg}`).join(', ');
+                } else {
+                    message = data.detail;
+                }
+            }
             throw new Error(message);
         }
 

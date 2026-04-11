@@ -77,15 +77,25 @@ const LessonsView = {
                     </div>
                 </div>
             `,
-            formParser: () => ({
-                subject_id: parseInt(document.getElementById('f-subject').value),
-                teacher_id: parseInt(document.getElementById('f-teacher').value),
-                class_id: parseInt(document.getElementById('f-class').value),
-                classroom_id: parseInt(document.getElementById('f-classroom').value) || null,
-                periods_per_week: parseInt(document.getElementById('f-ppw').value) || 1,
-                duration: parseInt(document.getElementById('f-duration').value) || 1,
-                is_locked: false,
-            }),
+            formParser: () => {
+                const subject_id = parseInt(document.getElementById('f-subject').value);
+                const teacher_id = parseInt(document.getElementById('f-teacher').value);
+                const class_id = parseInt(document.getElementById('f-class').value);
+                
+                if (isNaN(subject_id)) throw new Error("Παρακαλώ επιλέξτε Μάθημα.");
+                if (isNaN(teacher_id)) throw new Error("Παρακαλώ επιλέξτε Καθηγητή.");
+                if (isNaN(class_id)) throw new Error("Παρακαλώ επιλέξτε Τάξη.");
+
+                return {
+                    subject_id,
+                    teacher_id,
+                    class_id,
+                    classroom_id: parseInt(document.getElementById('f-classroom').value) || null,
+                    periods_per_week: parseInt(document.getElementById('f-ppw').value) || 1,
+                    duration: parseInt(document.getElementById('f-duration').value) || 1,
+                    is_locked: false,
+                };
+            },
         });
 
         container.innerHTML = '<div id="lessons-table"></div>';
