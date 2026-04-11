@@ -31,7 +31,14 @@ const ClassesView = {
                         <label class="form-label">Βαθμίδα</label>
                         <input class="form-input" id="f-grade" type="number" min="1" max="6" value="${item?.grade_level || ''}">
                     </div>
-                    <div class="form-group col-span-2">
+                    <div class="form-group">
+                        <label class="form-label">Βασική Αίθουσα</label>
+                        <select class="form-select" id="f-homeroom">
+                            <option value="">— Καμία —</option>
+                            ${classrooms.map(r => `<option value="${r.id}" ${item?.home_room_id === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group col-span-3">
                         <label class="form-label">Μαθητές Τμήματος (Επιλογή πολλών - Ctrl/Cmd+Click)</label>
                         <select class="form-select" id="f-students" multiple style="height: 120px;">
                             ${students.map(s => `
