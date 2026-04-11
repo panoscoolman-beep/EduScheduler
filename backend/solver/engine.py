@@ -174,34 +174,74 @@ class TimetableSolver:
 
         return self.classrooms
 
+    def _parse_distribution(self, lesson: Lesson) -> list[int]:
+        """Convert a distribution string like '2,1' to a list of block lengths [2, 1]."""
+        if lesson.distribution:
+            try:
+                blocks = [int(v.strip()) for v in lesson.distribution.split(",") if v.strip()]
+                if sum(blocks) == lesson.periods_per_week:
+                    return blocks
+            except ValueError:
+                pass
+        # Default: all 1s
+        return [1] * lesson.periods_per_week
+
     def _create_variables(self):
-        """Create boolean decision variables: x[lesson, day, period, room]."""
+        """Create decision variables: blocks and coverage (x)."""
         days = range(self.days_per_week)
+        # Mapping for cell coverage: (day, period_id, room_id) -> list of block_start vars that cover it
+        self._covers = {}
 
         for lesson in self.lessons:
+            blocks = self._parse_distribution(lesson)
             available_rooms = self._get_available_rooms(lesson)
+
+            for b_idx, L in enumerate(blocks):
+                # We need exactly one start var for this block
+                block_start_vars = []
+                for day in days:
+                    for i in range(len(self.periods) - L + 1):
+                        p_start = self.periods[i]
+                        for room in available_rooms:
+                            var_name = f"b_l{lesson.id}_b{b_idx}_d{day}_p{p_start.id}_r{room.id}"
+                            b_var = self.model.NewBoolVar(var_name)
+                            block_start_vars.append(b_var)
+
+                            # Record that this start var covers subsequent periods
+                            for offset in range(L):
+                                p_covered = self.periods[i + offset]
+                                key = (lesson.id, day, p_covered.id, room.id)
+                                self._covers.setdefault(key, []).append(b_var)
+
+                # Exactly one start for this block
+                if block_start_vars:
+                    self.model.AddExactlyOne(block_start_vars)
+
+            # Map the block coverage to x
             for day in days:
-                for period in self.periods:
+                for p in self.periods:
                     for room in available_rooms:
-                        var_name = f"x_l{lesson.id}_d{day}_p{period.id}_r{room.id}"
-                        self.x[lesson.id, day, period.id, room.id] = self.model.NewBoolVar(var_name)
+                        var_name = f"x_l{lesson.id}_d{day}_p{p.id}_r{room.id}"
+                        x_var = self.model.NewBoolVar(var_name)
+                        self.x[lesson.id, day, p.id, room.id] = x_var
+
+                        # Get all block start vars of THIS lesson that cover this cell
+                        covering_vars = self._covers.get((lesson.id, day, p.id, room.id), [])
+                        
+                        if not covering_vars:
+                            # Cannot be scheduled here
+                            self.model.Add(x_var == 0)
+                        else:
+                            # x_var is exactly the sum of its covering blocks 
+                            # (since blocks of the same lesson cannot overlap because x is boolean)
+                            self.model.Add(x_var == sum(covering_vars))
 
     def _apply_hard_constraints(self):
         """Apply all hard (non-negotiable) constraints."""
         days = range(self.days_per_week)
 
-        # H1: Each lesson is scheduled exactly periods_per_week times
-        for lesson in self.lessons:
-            available_rooms = self._get_available_rooms(lesson)
-            relevant_vars = [
-                self.x[lesson.id, d, p.id, r.id]
-                for d in days
-                for p in self.periods
-                for r in available_rooms
-                if (lesson.id, d, p.id, r.id) in self.x
-            ]
-            if relevant_vars:
-                self.model.Add(sum(relevant_vars) == lesson.periods_per_week)
+        # H1: (Removed) Each lesson is scheduled exactly periods_per_week times.
+        # This is now implicitly enforced by the Block Distribution mechanics in _create_variables.
 
         # H2: No teacher clash — at most 1 lesson per teacher per (day, period)
         for teacher_id, teacher_lessons in self._lessons_by_teacher.items():

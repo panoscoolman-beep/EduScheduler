@@ -166,6 +166,37 @@ def update_solution_slot(
     if not slot:
         raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
 
+    # Conflict Validations
+    conflict_query = (
+        db.query(TimetableSlot)
+        .join(Lesson)
+        .filter(
+            TimetableSlot.solution_id == solution_id,
+            TimetableSlot.day_of_week == data.day_of_week,
+            TimetableSlot.period_id == data.period_id,
+            TimetableSlot.id != slot_id
+        )
+    )
+
+    # 1. Teacher Conflict
+    if slot.lesson.teacher_id:
+        teacher_conflict = conflict_query.filter(Lesson.teacher_id == slot.lesson.teacher_id).first()
+        if teacher_conflict:
+            raise HTTPException(status_code=400, detail="Ο καθηγητής διδάσκει ήδη σε άλλη τάξη αυτή τη μέρα/ώρα.")
+
+    # 2. Class Conflict
+    if slot.lesson.class_id:
+        class_conflict = conflict_query.filter(Lesson.class_id == slot.lesson.class_id).first()
+        if class_conflict:
+            raise HTTPException(status_code=400, detail="Η συγκεκριμένη τάξη κάνει ήδη άλλο μάθημα αυτή τη μέρα/ώρα.")
+
+    # 3. Classroom Conflict
+    target_room = data.classroom_id if data.classroom_id is not None else slot.classroom_id
+    if target_room:
+        room_conflict = conflict_query.filter(TimetableSlot.classroom_id == target_room).first()
+        if room_conflict:
+            raise HTTPException(status_code=400, detail="Η αίθουσα είναι κατειλημμένη αυτή τη μέρα/ώρα.")
+
     slot.day_of_week = data.day_of_week
     slot.period_id = data.period_id
     

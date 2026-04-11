@@ -192,7 +192,8 @@ class Lesson(Base):
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
     classroom_id = Column(Integer, ForeignKey("classrooms.id", ondelete="SET NULL"))
     periods_per_week = Column(Integer, nullable=False, default=1)
-    duration = Column(Integer, nullable=False, default=1)  # 1=single, 2=double period
+    duration = Column(Integer, nullable=False, default=1)  # Deprecated, kept for backward compat temporarily
+    distribution = Column(String(50), nullable=True)  # e.g., "2,2,1"
     is_locked = Column(Boolean, default=False)
 
     # Relationships

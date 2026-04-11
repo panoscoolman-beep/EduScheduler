@@ -68,12 +68,8 @@ const LessonsView = {
                         <input class="form-input" id="f-ppw" type="number" min="1" max="20" value="${item?.periods_per_week || 1}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Συνεχόμενες Ώρες ανά μάθημα (Block)</label>
-                        <select class="form-select" id="f-duration">
-                            <option value="1" ${item?.duration === 1 ? 'selected' : ''}>Μονή (1 ώρα)</option>
-                            <option value="2" ${item?.duration === 2 ? 'selected' : ''}>Διπλή (2 ώρες)</option>
-                            <option value="3" ${item?.duration === 3 ? 'selected' : ''}>Τριπλή (3 ώρες)</option>
-                        </select>
+                        <label class="form-label">Κατανομή σε Blocks (Κενό=Μονά)</label>
+                        <input class="form-input" id="f-dist" type="text" placeholder="π.χ. 2,2,1" value="${item?.distribution || ''}">
                     </div>
                 </div>
             `,
@@ -92,7 +88,8 @@ const LessonsView = {
                     class_id,
                     classroom_id: parseInt(document.getElementById('f-classroom').value) || null,
                     periods_per_week: parseInt(document.getElementById('f-ppw').value) || 1,
-                    duration: parseInt(document.getElementById('f-duration').value) || 1,
+                    duration: 1, // Deprecated, kept for backward comp
+                    distribution: document.getElementById('f-dist').value.trim() || null,
                     is_locked: false,
                 };
             },

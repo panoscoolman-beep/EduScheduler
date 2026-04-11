@@ -173,6 +173,7 @@ class LessonBase(BaseModel):
     classroom_id: int | None = None
     periods_per_week: int = Field(1, ge=1, le=20)
     duration: int = Field(1, ge=1, le=4)
+    distribution: str | None = Field(None, examples=["2,2,1"])
     is_locked: bool = False
 
 
