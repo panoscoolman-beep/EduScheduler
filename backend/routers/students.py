@@ -5,7 +5,7 @@ from backend.database import get_db
 from backend.models import Student, StudentClassEnrollment
 from backend.schemas import StudentCreate, StudentResponse
 
-router = APIRouter(prefix="/api/students", tags=["students"])
+router = APIRouter()
 
 
 @router.get("/", response_model=list[StudentResponse])
