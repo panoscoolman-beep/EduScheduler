@@ -6,7 +6,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, Float, Text,
-    ForeignKey, DateTime, UniqueConstraint, CheckConstraint,
+    ForeignKey, DateTime, UniqueConstraint, CheckConstraint, Table
 )
 from sqlalchemy.orm import relationship
 
@@ -116,6 +116,49 @@ class SchoolClass(Base):
     # Relationships
     home_room = relationship("Classroom", foreign_keys=[home_room_id])
     lessons = relationship("Lesson", back_populates="school_class", cascade="all, delete-orphan")
+    enrollments = relationship("StudentClassEnrollment", back_populates="school_class", cascade="all, delete-orphan")
+
+    @property
+    def student_ids(self):
+        return [enrollment.student_id for enrollment in self.enrollments]
+
+
+class Student(Base):
+    """A student in the tutoring center."""
+
+    __tablename__ = "students"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    first_name = Column(String(100), nullable=False)
+    last_name = Column(String(100), nullable=False)
+    email = Column(String(200))
+    phone = Column(String(30))
+    
+    # Relationships
+    enrollments = relationship("StudentClassEnrollment", back_populates="student", cascade="all, delete-orphan")
+
+    @property
+    def full_name(self):
+        return f"{self.last_name} {self.first_name}"
+
+
+class StudentClassEnrollment(Base):
+    """Mapping between a Student and a SchoolClass (Many-to-Many)."""
+
+    __tablename__ = "student_class_enrollments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
+    enrolled_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    student = relationship("Student", back_populates="enrollments")
+    school_class = relationship("SchoolClass", back_populates="enrollments")
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "class_id", name="uq_student_class"),
+    )
 
 
 class Classroom(Base):

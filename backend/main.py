@@ -21,6 +21,7 @@ from backend.routers import (
     lessons,
     constraints,
     solver,
+    students,
     settings as settings_router,
 )
 
@@ -54,6 +55,7 @@ app.include_router(classrooms.router, prefix="/api/classrooms", tags=["Αίθο�
 app.include_router(classes.router, prefix="/api/classes", tags=["Τάξεις"])
 app.include_router(periods.router, prefix="/api/periods", tags=["Ώρες"])
 app.include_router(lessons.router, prefix="/api/lessons", tags=["Μαθήματα-Κάρτες"])
+app.include_router(students.router, prefix="/api/students", tags=["Μαθητές"])
 app.include_router(constraints.router, prefix="/api/constraints", tags=["Περιορισμοί"])
 app.include_router(solver.router, prefix="/api/solver", tags=["Solver"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Ρυθμίσεις"])

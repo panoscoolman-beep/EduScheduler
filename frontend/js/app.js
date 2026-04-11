@@ -11,6 +11,7 @@ const App = {
         periods: { title: 'Ώρες / Περίοδοι', renderer: PeriodsView },
         teachers: { title: 'Καθηγητές', renderer: TeachersView },
         subjects: { title: 'Μαθήματα', renderer: SubjectsView },
+        students: { title: 'Μαθητές', renderer: StudentsView },
         classes: { title: 'Τάξεις', renderer: ClassesView },
         classrooms: { title: 'Αίθουσες', renderer: ClassroomsView },
         lessons: { title: 'Μαθήματα-Κάρτες', renderer: LessonsView },

@@ -4,6 +4,7 @@
 const ClassesView = {
     async render(container) {
         const classrooms = await API.classrooms.list();
+        const students = await API.request('/students/');
 
         const table = new DataTable({
             columns: [
@@ -30,26 +31,31 @@ const ClassesView = {
                         <label class="form-label">Βαθμίδα</label>
                         <input class="form-input" id="f-grade" type="number" min="1" max="6" value="${item?.grade_level || ''}">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">Αριθμός Μαθητών</label>
-                        <input class="form-input" id="f-students" type="number" min="0" value="${item?.student_count || 0}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Βασική Αίθουσα</label>
-                        <select class="form-select" id="f-homeroom">
-                            <option value="">— Καμία —</option>
-                            ${classrooms.map(r => `<option value="${r.id}" ${item?.home_room_id === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
+                    <div class="form-group col-span-2">
+                        <label class="form-label">Μαθητές Τμήματος (Επιλογή πολλών - Ctrl/Cmd+Click)</label>
+                        <select class="form-select" id="f-students" multiple style="height: 120px;">
+                            ${students.map(s => `
+                                <option value="${s.id}" ${(item?.student_ids || []).includes(s.id) ? 'selected' : ''}>
+                                    ${s.last_name} ${s.first_name}
+                                </option>
+                            `).join('')}
                         </select>
+                        <div style="font-size: 0.8rem; color: #a0aec0; margin-top: 4px;">Επιλέξτε όσους μαθητές παρακολουθούν αυτό το τμήμα.</div>
                     </div>
                 </div>
             `,
-            formParser: () => ({
-                name: document.getElementById('f-name').value.trim(),
-                short_name: document.getElementById('f-short_name').value.trim(),
-                grade_level: parseInt(document.getElementById('f-grade').value) || null,
-                student_count: parseInt(document.getElementById('f-students').value) || 0,
-                home_room_id: parseInt(document.getElementById('f-homeroom').value) || null,
-            }),
+            formParser: () => {
+                const selectElement = document.getElementById('f-students');
+                const selectedStudentIds = Array.from(selectElement.selectedOptions).map(opt => parseInt(opt.value));
+                
+                return {
+                    name: document.getElementById('f-name').value.trim(),
+                    short_name: document.getElementById('f-short_name').value.trim(),
+                    grade_level: parseInt(document.getElementById('f-grade').value) || null,
+                    student_ids: selectedStudentIds,
+                    home_room_id: parseInt(document.getElementById('f-homeroom').value) || null,
+                };
+            },
         });
 
         container.innerHTML = '<div id="classes-table"></div>';

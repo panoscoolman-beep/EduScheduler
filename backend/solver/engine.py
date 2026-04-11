@@ -16,6 +16,7 @@ from backend.models import (
     Teacher, Subject, SchoolClass, Classroom, Lesson,
     Period, TeacherAvailability, Constraint,
     TimetableSolution, TimetableSlot, SchoolSettings,
+    StudentClassEnrollment
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class TimetableSolver:
         self.periods: list[Period] = []
         self.availabilities: list[TeacherAvailability] = []
         self.constraints: list[Constraint] = []
+        self.enrollments: list[StudentClassEnrollment] = []
         self.days_per_week: int = 5
 
         # OR-Tools
@@ -66,6 +68,7 @@ class TimetableSolver:
         # Index mappings for fast lookup
         self._lessons_by_teacher: dict[int, list[Lesson]] = {}
         self._lessons_by_class: dict[int, list[Lesson]] = {}
+        self._lessons_by_student: dict[int, list[Lesson]] = {}
         self._unavailable: set[tuple[int, int, int]] = set()  # (teacher_id, day, period_id)
         self._teaching_period_ids: list[int] = []
 
@@ -111,6 +114,7 @@ class TimetableSolver:
         self.availabilities = self.db.query(TeacherAvailability).filter(
             TeacherAvailability.status == "unavailable"
         ).all()
+        self.enrollments = self.db.query(StudentClassEnrollment).all()
         self.constraints = self.db.query(Constraint).filter(Constraint.is_active == True).all()
 
         settings = self.db.query(SchoolSettings).first()
@@ -147,6 +151,14 @@ class TimetableSolver:
         for lesson in self.lessons:
             self._lessons_by_teacher.setdefault(lesson.teacher_id, []).append(lesson)
             self._lessons_by_class.setdefault(lesson.class_id, []).append(lesson)
+
+        # Build _lessons_by_student
+        class_to_lessons = self._lessons_by_class
+        for enrollment in self.enrollments:
+            student_id = enrollment.student_id
+            class_id = enrollment.class_id
+            if class_id in class_to_lessons:
+                self._lessons_by_student.setdefault(student_id, []).extend(class_to_lessons[class_id])
 
         for avail in self.availabilities:
             self._unavailable.add((avail.teacher_id, avail.day_of_week, avail.period_id))
@@ -258,6 +270,20 @@ class TimetableSolver:
                                     vars_in_day.append(self.x[key])
                     if vars_in_day:
                         self.model.Add(sum(vars_in_day) <= teacher.max_periods_per_day)
+
+        # H7: No student clash (cross-class overlap)
+        for student_id, student_lessons in self._lessons_by_student.items():
+            for day in days:
+                for period in self.periods:
+                    vars_at_slot = []
+                    for lesson in student_lessons:
+                        available_rooms = self._get_available_rooms(lesson)
+                        for room in available_rooms:
+                            key = (lesson.id, day, period.id, room.id)
+                            if key in self.x:
+                                vars_at_slot.append(self.x[key])
+                    if vars_at_slot:
+                        self.model.Add(sum(vars_at_slot) <= 1)
 
     def _apply_soft_constraints(self):
         """Apply soft constraints as penalty terms in the objective."""

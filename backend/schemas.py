@@ -97,6 +97,26 @@ class SubjectResponse(SubjectBase):
         from_attributes = True
 
 
+# ─── Student ────────────────────────────────────────────
+
+class StudentBase(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    email: str | None = None
+    phone: str | None = None
+
+
+class StudentCreate(StudentBase):
+    pass
+
+
+class StudentResponse(StudentBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 # ─── School Class ───────────────────────────────────────
 
 class SchoolClassBase(BaseModel):
@@ -108,11 +128,16 @@ class SchoolClassBase(BaseModel):
 
 
 class SchoolClassCreate(SchoolClassBase):
-    pass
+    student_ids: list[int] = []
+
+
+class SchoolClassUpdate(SchoolClassBase):
+    student_ids: list[int] = []
 
 
 class SchoolClassResponse(SchoolClassBase):
     id: int
+    student_ids: list[int] = []
 
     class Config:
         from_attributes = True
