@@ -32,11 +32,15 @@ const TimetableView = {
 
             container.innerHTML = `
                 <div class="card mb-lg">
-                    <div class="card-header">
+                    <img src="img/logo.png" class="print-logo" style="display:none;" />
+                    <div class="card-header print-hide">
                         <h2 class="card-title">📋 ${solution.name}</h2>
-                        <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
-                            ${solution.status === 'optimal' ? 'Βέλτιστο' : solution.status}
-                        </span>
+                        <div>
+                            <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση Προγράμματος" style="margin-right:0.5rem">🖨️ Εκτύπωση</button>
+                            <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
+                                ${solution.status === 'optimal' ? 'Βέλτιστο' : solution.status}
+                            </span>
+                        </div>
                     </div>
 
                     <div class="timetable-controls">
@@ -70,6 +74,11 @@ const TimetableView = {
             // Initial render
             const firstFilter = 'all';
             TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, 'class', firstFilter, solutionId);
+
+            // Event: Print
+            document.getElementById('tt-print').addEventListener('click', () => {
+                window.print();
+            });
 
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
