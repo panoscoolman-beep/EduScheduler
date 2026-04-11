@@ -164,7 +164,7 @@ class StudentAvailability(Base):
 
     # Relationships
     student = relationship("Student", back_populates="availabilities")
-    period = relationship("Period", back_populates="availabilities")
+    period = relationship("Period")
 
 
 class StudentClassEnrollment(Base):
