@@ -258,6 +258,7 @@ class TimetableSlotResponse(BaseModel):
     subject_color: str | None = None
     teacher_name: str | None = None
     teacher_short: str | None = None
+    teacher_color: str | None = None
     class_name: str | None = None
     class_short: str | None = None
     classroom_name: str | None = None

@@ -125,6 +125,7 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
             subject_color=lesson.subject.color if lesson.subject else None,
             teacher_name=lesson.teacher.name if lesson.teacher else None,
             teacher_short=lesson.teacher.short_name if lesson.teacher else None,
+            teacher_color=lesson.teacher.color if lesson.teacher else None,
             class_name=lesson.school_class.name if lesson.school_class else None,
             class_short=lesson.school_class.short_name if lesson.school_class else None,
             classroom_name=slot.classroom.name if slot.classroom else None,

@@ -32,7 +32,7 @@ const TimetableView = {
 
             container.innerHTML = `
                 <div class="card mb-lg">
-                    <img src="img/logo.png" class="print-logo" style="display:none;" />
+                    <img src="img/logo.svg" class="print-logo" style="display:none;" />
                     <div class="card-header print-hide">
                         <h2 class="card-title">📋 ${solution.name}</h2>
                         <div>

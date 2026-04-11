@@ -66,11 +66,13 @@ const TimetableGrid = {
 
                     return `
                         <div class="lesson-card"
-                             draggable="true"
+                             draggable="true" 
                              ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
                              ondragend="TimetableGrid.handleDragEnd(event)"
+                             onclick="TimetableGrid.showDetails(this)"
+                             data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
                              style="background:${bgLight}; color:${textColor}; cursor: grab; margin-bottom: 4px;"
-                             title="${slot.subject_name} — ${slot.teacher_name} — ${slot.classroom_name}">
+                             title="Κλικ για Πληροφορίες">
                             <span class="subject-name" style="color:${bgColor}">${line1 || ''}</span>
                             <span class="teacher-name">${line2 || ''}</span>
                             <span class="room-name">${line3 || ''}</span>
@@ -104,6 +106,21 @@ const TimetableGrid = {
                 </table>
             </div>
         `;
+    },
+
+    showDetails(el) {
+        const slot = JSON.parse(el.dataset.json);
+        const days = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        const content = `
+            <div style="font-size:1.1rem; padding-bottom: 1rem;">
+                <p style="margin-bottom:0.5rem">📚 <strong>Μάθημα:</strong> ${slot.subject_name || slot.subject_short || '-'}</p>
+                <p style="margin-bottom:0.5rem">👨‍🏫 <strong>Καθηγητής:</strong> ${slot.teacher_name || slot.teacher_short || '-'}</p>
+                <p style="margin-bottom:0.5rem">🎓 <strong>Τάξη:</strong> ${slot.class_name || slot.class_short || '-'}</p>
+                <p style="margin-bottom:0.5rem">🏫 <strong>Αίθουσα:</strong> ${slot.classroom_name || '-'}</p>
+                <p style="margin-bottom:0.5rem">📅 <strong>Ημέρα:</strong> ${days[slot.day_of_week]}</p>
+            </div>
+        `;
+        Modal.open("Πληροφορίες Μαθήματος", content, () => Modal.close(), { saveText: "Κλείσιμο", saveClass: "btn-secondary" });
     },
 
     handleDragStart(event, slotId) {
