@@ -6,7 +6,7 @@ const AvailabilityModal = {
 
     async open(entityType, item) {
         // entityType is 'teachers' or 'students'
-        const title = \`Πρόγραμμα / Κωλύματα: \${item.name || item.first_name + ' ' + item.last_name}\`;
+        const title = `Πρόγραμμα / Κωλύματα: ${item.name || item.first_name + ' ' + item.last_name}`;
         
         // Show loading in Modal
         Modal.open(title, '<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>');
@@ -37,7 +37,7 @@ const AvailabilityModal = {
 
             // Build Grid HTML
             const days = this.DAY_NAMES.slice(0, daysCount);
-            const headerCells = days.map(d => \`<th>\${d}</th>\`).join('');
+            const headerCells = days.map(d => `<th>${d}</th>`).join('');
             
             const rows = teachingPeriods.map(period => {
                 const dayCells = days.map((_, dayIdx) => {
@@ -45,25 +45,25 @@ const AvailabilityModal = {
                     const className = isUnavail ? 'avail-cell unavail' : 'avail-cell avail';
                     const icon = isUnavail ? '❌' : '✅';
                     
-                    return \`
-                        <td class="\${className}" data-day="\${dayIdx}" data-period="\${period.id}">
-                            \${icon}
+                    return `
+                        <td class="${className}" data-day="${dayIdx}" data-period="${period.id}">
+                            ${icon}
                         </td>
-                    \`;
+                    `;
                 }).join('');
 
-                return \`
+                return `
                     <tr>
                         <td class="period-cell">
-                            \${period.short_name}
-                            <span class="period-time">\${period.start_time}-\${period.end_time}</span>
+                            ${period.short_name}
+                            <span class="period-time">${period.start_time}-${period.end_time}</span>
                         </td>
-                        \${dayCells}
+                        ${dayCells}
                     </tr>
-                \`;
+                `;
             }).join('');
 
-            const html = \`
+            const html = `
                 <p style="margin-bottom: 1rem; color: var(--text-muted);">
                     Κάντε κλικ στα κελιά για να σημειώσετε τις ώρες που <strong>ΔΕΝ ΜΠΟΡΕΙ</strong> (❌) να εργαστεί/έχει μάθημα.
                 </p>
@@ -75,11 +75,11 @@ const AvailabilityModal = {
                         .avail-cell.unavail { background: rgba(239, 68, 68, 0.15); border: 2px solid rgba(239, 68, 68, 0.5); }
                     </style>
                     <table class="timetable-grid" id="avail-table">
-                        <thead><tr><th>Ώρα</th>\${headerCells}</tr></thead>
-                        <tbody>\${rows}</tbody>
+                        <thead><tr><th>Ώρα</th>${headerCells}</tr></thead>
+                        <tbody>${rows}</tbody>
                     </table>
                 </div>
-            \`;
+            `;
 
             Modal.open(title, html, async () => {
                 // Save action
@@ -123,7 +123,7 @@ const AvailabilityModal = {
             });
 
         } catch(err) {
-            Modal.open(title, \`<div class="alert alert-error">Σφάλμα: \${err.message}</div>\`);
+            Modal.open(title, `<div class="alert alert-error">Σφάλμα: ${err.message}</div>`);
             console.error(err);
         }
     }
