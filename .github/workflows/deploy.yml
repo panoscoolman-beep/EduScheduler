@@ -1,0 +1,47 @@
+name: Deploy EduScheduler to Server
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Server
+        run: |
+          APP_DIR="/home/coolman/EduScheduler"
+
+          # Sync repository files to app directory
+          echo "Syncing files to ${APP_DIR}..."
+          mkdir -p "${APP_DIR}"
+          rsync -avz --exclude='.git' --exclude='.github' --exclude='.env' ./ "${APP_DIR}/"
+
+          # Create .env if it doesn't exist
+          if [ ! -f "${APP_DIR}/.env" ]; then
+            echo "Creating .env from template..."
+            cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
+            echo "⚠️  IMPORTANT: Update ${APP_DIR}/.env with secure passwords!"
+          fi
+
+          # Build and start containers
+          echo "Building and starting containers..."
+          cd "${APP_DIR}"
+          docker compose up -d --build
+
+          echo "Deployment complete!"
+
+      - name: Health Check
+        run: |
+          echo "Waiting for application startup..."
+          sleep 15
+          if curl -sf http://localhost:8082/api/settings/ > /dev/null 2>&1; then
+            echo "✅ EduScheduler API is healthy!"
+          else
+            echo "⚠️ API not responding yet — may need more startup time"
+          fi
