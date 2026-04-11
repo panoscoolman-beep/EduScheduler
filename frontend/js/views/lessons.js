@@ -64,11 +64,11 @@ const LessonsView = {
                 </div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label class="form-label">Ώρες / Εβδομάδα *</label>
+                        <label class="form-label">Συνολικές Ώρες Διδ/λίας (Εβδομαδιαίως) *</label>
                         <input class="form-input" id="f-ppw" type="number" min="1" max="20" value="${item?.periods_per_week || 1}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Διάρκεια (ώρες)</label>
+                        <label class="form-label">Συνεχόμενες Ώρες ανά μάθημα (Block)</label>
                         <select class="form-select" id="f-duration">
                             <option value="1" ${item?.duration === 1 ? 'selected' : ''}>Μονή (1 ώρα)</option>
                             <option value="2" ${item?.duration === 2 ? 'selected' : ''}>Διπλή (2 ώρες)</option>

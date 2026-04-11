@@ -238,6 +238,14 @@ class TimetableSlotResponse(BaseModel):
         from_attributes = True
 
 
+class TimetableSlotUpdate(BaseModel):
+    """Payload for manually moving a slot via Drag & Drop."""
+    day_of_week: int = Field(..., ge=0, le=6)
+    period_id: int
+    classroom_id: int | None = None
+    is_locked: bool | None = None
+
+
 class TimetableSolutionResponse(BaseModel):
     id: int
     name: str

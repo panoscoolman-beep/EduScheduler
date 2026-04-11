@@ -15,6 +15,7 @@ from backend.schemas import (
     SolverStatusResponse,
     TimetableSolutionResponse,
     TimetableSlotResponse,
+    TimetableSlotUpdate,
 )
 from backend.solver.engine import TimetableSolver
 
@@ -144,3 +145,35 @@ def delete_solution(solution_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
     db.delete(solution)
     db.commit()
+
+
+@router.put("/solutions/{solution_id}/slots/{slot_id}", response_model=dict)
+def update_solution_slot(
+    solution_id: int,
+    slot_id: int,
+    data: TimetableSlotUpdate,
+    db: Session = Depends(get_db),
+):
+    """Manually update a single slot (Drag and Drop override)."""
+    slot = (
+        db.query(TimetableSlot)
+        .filter(
+            TimetableSlot.id == slot_id,
+            TimetableSlot.solution_id == solution_id
+        )
+        .first()
+    )
+    if not slot:
+        raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
+
+    slot.day_of_week = data.day_of_week
+    slot.period_id = data.period_id
+    
+    if data.classroom_id is not None:
+        slot.classroom_id = data.classroom_id
+
+    if data.is_locked is not None:
+        slot.is_locked = data.is_locked
+
+    db.commit()
+    return {"status": "ok", "message": "Το slot ενημερώθηκε"}

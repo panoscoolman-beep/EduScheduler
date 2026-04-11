@@ -99,6 +99,7 @@ const API = {
         listSolutions: () => API.get('/solver/solutions'),
         getSolution: (id) => API.get(`/solver/solutions/${id}`),
         deleteSolution: (id) => API.delete(`/solver/solutions/${id}`),
+        updateSlot: (solutionId, slotId, data) => API.put(`/solver/solutions/${solutionId}/slots/${slotId}`, data),
     },
     settings: {
         get: () => API.get('/settings/'),

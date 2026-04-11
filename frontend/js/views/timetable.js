@@ -51,6 +51,7 @@ const TimetableView = {
                         <div class="form-group" style="margin:0; min-width: 200px;">
                             <label class="form-label">Φίλτρο</label>
                             <select class="form-select" id="tt-filter">
+                                <option value="all">-- Προβολή Όλων --</option>
                                 ${classNames.map(n => `<option value="${n}">${n}</option>`).join('')}
                             </select>
                         </div>
@@ -67,8 +68,8 @@ const TimetableView = {
             `;
 
             // Initial render
-            const firstFilter = classNames[0] || null;
-            TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, 'class', firstFilter);
+            const firstFilter = 'all';
+            TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, 'class', firstFilter, solutionId);
 
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
@@ -78,14 +79,15 @@ const TimetableView = {
                 else if (e.target.value === 'teacher') options = teacherNames;
                 else options = roomNames;
 
-                filterSelect.innerHTML = options.map(n => `<option value="${n}">${n}</option>`).join('');
-                TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, e.target.value, options[0]);
+                filterSelect.innerHTML = `<option value="all">-- Προβολή Όλων --</option>` + 
+                                         options.map(n => `<option value="${n}">${n}</option>`).join('');
+                TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, e.target.value, 'all', solutionId);
             });
 
             // Event: Filter change
             document.getElementById('tt-filter').addEventListener('change', (e) => {
                 const viewType = document.getElementById('tt-view-type').value;
-                TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, viewType, e.target.value);
+                TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, viewType, e.target.value, solutionId);
             });
 
             // Event: Solution change
