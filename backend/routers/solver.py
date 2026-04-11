@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
-from backend.models import TimetableSolution, TimetableSlot, Lesson
+from backend.models import (
+    TimetableSolution, TimetableSlot, Lesson,
+    TeacherAvailability, StudentAvailability, StudentClassEnrollment
+)
 from backend.schemas import (
     SolverRequest,
     SolverStatusResponse,
@@ -196,6 +199,43 @@ def update_solution_slot(
         room_conflict = conflict_query.filter(TimetableSlot.classroom_id == target_room).first()
         if room_conflict:
             raise HTTPException(status_code=400, detail="Η αίθουσα είναι κατειλημμένη αυτή τη μέρα/ώρα.")
+
+    # 4. Teacher Availability constraints
+    if slot.lesson.teacher_id:
+        teacher_unav = (
+            db.query(TeacherAvailability)
+            .filter(
+                TeacherAvailability.teacher_id == slot.lesson.teacher_id,
+                TeacherAvailability.day_of_week == data.day_of_week,
+                TeacherAvailability.period_id == data.period_id,
+                TeacherAvailability.status == "unavailable"
+            )
+            .first()
+        )
+        if teacher_unav:
+            raise HTTPException(status_code=400, detail="Ο καθηγητής έχει δηλώσει κώλυμα (Μη Διαθέσιμος) αυτή τη μέρα και ώρα.")
+
+    # 5. Student Availability constraints
+    if slot.lesson.class_id:
+        # Get all students in this class
+        enrolled_student_ids = [
+            e.student_id for e in db.query(StudentClassEnrollment.student_id)
+            .filter(StudentClassEnrollment.class_id == slot.lesson.class_id)
+            .all()
+        ]
+        if enrolled_student_ids:
+            student_unav = (
+                db.query(StudentAvailability)
+                .filter(
+                    StudentAvailability.student_id.in_(enrolled_student_ids),
+                    StudentAvailability.day_of_week == data.day_of_week,
+                    StudentAvailability.period_id == data.period_id,
+                    StudentAvailability.status == "unavailable"
+                )
+                .first()
+            )
+            if student_unav:
+                raise HTTPException(status_code=400, detail="Ένας ή περισσότεροι μαθητές του τμήματος έχουν δηλώσει κώλυμα αυτή τη μέρα και ώρα.")
 
     slot.day_of_week = data.day_of_week
     slot.period_id = data.period_id
