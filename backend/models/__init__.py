@@ -6,7 +6,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, Float, Text,
-    ForeignKey, DateTime, UniqueConstraint, CheckConstraint,
+    ForeignKey, DateTime, UniqueConstraint, CheckConstraint, Table
 )
 from sqlalchemy.orm import relationship
 
@@ -55,6 +55,7 @@ class Teacher(Base):
     phone = Column(String(30))
     max_periods_per_day = Column(Integer)
     max_periods_per_week = Column(Integer)
+    max_days_per_week = Column(Integer)
     min_periods_per_day = Column(Integer, default=0)
     color = Column(String(7), default="#3B82F6")
 
@@ -116,6 +117,73 @@ class SchoolClass(Base):
     # Relationships
     home_room = relationship("Classroom", foreign_keys=[home_room_id])
     lessons = relationship("Lesson", back_populates="school_class", cascade="all, delete-orphan")
+    enrollments = relationship("StudentClassEnrollment", back_populates="school_class", cascade="all, delete-orphan")
+
+    @property
+    def student_ids(self):
+        return [enrollment.student_id for enrollment in self.enrollments]
+
+
+class Student(Base):
+    """A student in the tutoring center."""
+
+    __tablename__ = "students"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    first_name = Column(String(100), nullable=False)
+    last_name = Column(String(100), nullable=False)
+    email = Column(String(200))
+    phone = Column(String(30))
+    max_days_per_week = Column(Integer)
+    
+    # Relationships
+    enrollments = relationship("StudentClassEnrollment", back_populates="student", cascade="all, delete-orphan")
+    availabilities = relationship("StudentAvailability", back_populates="student", cascade="all, delete-orphan")
+
+    @property
+    def full_name(self):
+        return f"{self.last_name} {self.first_name}"
+
+
+class StudentAvailability(Base):
+    """Student time-off / availability per day+period."""
+
+    __tablename__ = "student_availability"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 0=Monday, 4=Friday
+    period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(20), nullable=False, default="available")  # available / unavailable / preferred
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "day_of_week", "period_id", name="uq_student_day_period"),
+        CheckConstraint("day_of_week >= 0 AND day_of_week <= 6", name="ck_sday_range"),
+        CheckConstraint("status IN ('available', 'unavailable', 'preferred')", name="ck_sstatus_values"),
+    )
+
+    # Relationships
+    student = relationship("Student", back_populates="availabilities")
+    period = relationship("Period")
+
+
+class StudentClassEnrollment(Base):
+    """Mapping between a Student and a SchoolClass (Many-to-Many)."""
+
+    __tablename__ = "student_class_enrollments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
+    class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
+    enrolled_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    student = relationship("Student", back_populates="enrollments")
+    school_class = relationship("SchoolClass", back_populates="enrollments")
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "class_id", name="uq_student_class"),
+    )
 
 
 class Classroom(Base):
@@ -149,7 +217,8 @@ class Lesson(Base):
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
     classroom_id = Column(Integer, ForeignKey("classrooms.id", ondelete="SET NULL"))
     periods_per_week = Column(Integer, nullable=False, default=1)
-    duration = Column(Integer, nullable=False, default=1)  # 1=single, 2=double period
+    duration = Column(Integer, nullable=False, default=1)  # Deprecated, kept for backward compat temporarily
+    distribution = Column(String(50), nullable=True)  # e.g., "2,2,1"
     is_locked = Column(Boolean, default=False)
 
     # Relationships

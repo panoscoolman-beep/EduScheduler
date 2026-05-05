@@ -1,1 +1,4 @@
-"""Routers package."""
+"""
+Routers package.
+"""
+from . import students

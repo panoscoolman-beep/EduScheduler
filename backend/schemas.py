@@ -36,6 +36,7 @@ class TeacherBase(BaseModel):
     phone: str | None = None
     max_periods_per_day: int | None = Field(None, ge=1, le=12)
     max_periods_per_week: int | None = Field(None, ge=1, le=60)
+    max_days_per_week: int | None = Field(None, ge=1, le=7)
     min_periods_per_day: int = Field(0, ge=0, le=12)
     color: str = Field("#3B82F6", pattern=r"^#[0-9A-Fa-f]{6}$")
 
@@ -76,6 +77,31 @@ class TeacherAvailabilityBulkUpdate(BaseModel):
     availabilities: list[TeacherAvailabilityCreate]
 
 
+# ─── Student Availability ──────────────────────────────
+
+class StudentAvailabilityBase(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6)
+    period_id: int
+    status: str = Field("available", pattern=r"^(available|unavailable|preferred)$")
+
+
+class StudentAvailabilityCreate(StudentAvailabilityBase):
+    pass
+
+
+class StudentAvailabilityResponse(StudentAvailabilityBase):
+    id: int
+    student_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class StudentAvailabilityBulkUpdate(BaseModel):
+    """Bulk update availability — send the entire matrix."""
+    availabilities: list[StudentAvailabilityCreate]
+
+
 # ─── Subject ────────────────────────────────────────────
 
 class SubjectBase(BaseModel):
@@ -97,6 +123,27 @@ class SubjectResponse(SubjectBase):
         from_attributes = True
 
 
+# ─── Student ────────────────────────────────────────────
+
+class StudentBase(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    email: str | None = None
+    phone: str | None = None
+    max_days_per_week: int | None = Field(None, ge=1, le=7)
+
+
+class StudentCreate(StudentBase):
+    pass
+
+
+class StudentResponse(StudentBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 # ─── School Class ───────────────────────────────────────
 
 class SchoolClassBase(BaseModel):
@@ -108,11 +155,16 @@ class SchoolClassBase(BaseModel):
 
 
 class SchoolClassCreate(SchoolClassBase):
-    pass
+    student_ids: list[int] = []
+
+
+class SchoolClassUpdate(SchoolClassBase):
+    student_ids: list[int] = []
 
 
 class SchoolClassResponse(SchoolClassBase):
     id: int
+    student_ids: list[int] = []
 
     class Config:
         from_attributes = True
@@ -148,6 +200,7 @@ class LessonBase(BaseModel):
     classroom_id: int | None = None
     periods_per_week: int = Field(1, ge=1, le=20)
     duration: int = Field(1, ge=1, le=4)
+    distribution: str | None = Field(None, examples=["2,2,1"])
     is_locked: bool = False
 
 
@@ -205,12 +258,21 @@ class TimetableSlotResponse(BaseModel):
     subject_color: str | None = None
     teacher_name: str | None = None
     teacher_short: str | None = None
+    teacher_color: str | None = None
     class_name: str | None = None
     class_short: str | None = None
     classroom_name: str | None = None
 
     class Config:
         from_attributes = True
+
+
+class TimetableSlotUpdate(BaseModel):
+    """Payload for manually moving a slot via Drag & Drop."""
+    day_of_week: int = Field(..., ge=0, le=6)
+    period_id: int
+    classroom_id: int | None = None
+    is_locked: bool | None = None
 
 
 class TimetableSolutionResponse(BaseModel):

@@ -1100,3 +1100,14 @@ a:hover { color: var(--accent-blue-hover); }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .gap-sm { gap: var(--space-sm); }
 .gap-md { gap: var(--space-md); }
+
+/* Print Styles */
+@media print {
+    .sidebar, .topbar, #tt-print, .dt-custom, .dt-edit, .dt-delete, .modal-overlay, #go-generate, .toast-container, .timetable-controls, .print-hide { display: none !important; }
+    body, .app-layout, .main-content, .content-area, .card { overflow: visible !important; height: auto !important; margin: 0 !important; width: 100% !important; padding: 0 !important; }
+    .card { box-shadow: none !important; border: none !important; }
+    .timetable-grid-container { overflow: visible !important; border: none !important; }
+    .timetable-grid { width: 100% !important; min-width: auto !important; page-break-inside: auto; }
+    .timetable-grid tr { page-break-inside: avoid; page-break-after: auto; }
+    .print-logo { display: block !important; max-width: 300px; margin: 0 auto 20px auto !important; }
+}

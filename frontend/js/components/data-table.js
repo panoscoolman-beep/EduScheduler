@@ -2,7 +2,7 @@
  * DataTable Component — Reusable CRUD table with add/edit/delete.
  */
 class DataTable {
-    constructor({ containerId, columns, apiService, entityName, formBuilder, formParser }) {
+    constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -10,6 +10,7 @@ class DataTable {
         this.slug = entityName.replace(/[^a-zA-Zα-ωΑ-Ω0-9]/g, '_').toLowerCase();
         this.formBuilder = formBuilder;
         this.formParser = formParser;
+        this.customActions = customActions || [];
         this.data = [];
     }
 
@@ -68,10 +69,15 @@ class DataTable {
                 return `<td>${value ?? ''}</td>`;
             }).join('');
 
+            const customBtns = this.customActions.map(action => {
+                return `<button class="btn btn-sm btn-secondary dt-custom" data-action="${action.id}" data-id="${item.id}" title="${action.title}">${action.icon}</button>`;
+            }).join(' ');
+
             return `
                 <tr data-id="${item.id}">
                     ${cells}
                     <td class="actions">
+                        ${customBtns}
                         <button class="btn btn-sm btn-secondary dt-edit" data-id="${item.id}" title="Επεξεργασία">✏️</button>
                         <button class="btn btn-sm btn-danger dt-delete" data-id="${item.id}" title="Διαγραφή">🗑️</button>
                     </td>
@@ -92,6 +98,17 @@ class DataTable {
         });
         tableContainer.querySelectorAll('.dt-delete').forEach(btn => {
             btn.addEventListener('click', () => this.confirmDelete(parseInt(btn.dataset.id)));
+        });
+        tableContainer.querySelectorAll('.dt-custom').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const actionId = btn.dataset.action;
+                const itemId = parseInt(btn.dataset.id);
+                const actionDef = this.customActions.find(a => a.id === actionId);
+                const item = this.data.find(d => d.id === itemId);
+                if (actionDef && actionDef.handler && item) {
+                    actionDef.handler(item);
+                }
+            });
         });
     }
 

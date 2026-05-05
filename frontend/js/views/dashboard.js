@@ -6,13 +6,14 @@ const DashboardView = {
         container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>`;
 
         try {
-            const [teachers, subjects, classes, classrooms, lessons, solutions] = await Promise.all([
+            const [teachers, subjects, classes, classrooms, lessons, solutions, students] = await Promise.all([
                 API.teachers.list(),
                 API.subjects.list(),
                 API.classes.list(),
                 API.classrooms.list(),
                 API.lessons.list(),
                 API.solver.listSolutions(),
+                API.request('/students/')
             ]);
 
             const latestSolution = solutions?.[0];
@@ -26,18 +27,25 @@ const DashboardView = {
                             <div class="stat-label">Καθηγητές</div>
                         </div>
                     </div>
-                    <div class="stat-card" data-navigate="subjects">
-                        <div class="stat-icon violet">📖</div>
+                    <div class="stat-card" data-navigate="students">
+                        <div class="stat-icon emerald">🎓</div>
                         <div class="stat-info">
-                            <div class="stat-value">${subjects.length}</div>
-                            <div class="stat-label">Μαθήματα</div>
+                            <div class="stat-value">${students.length}</div>
+                            <div class="stat-label">Μαθητές</div>
                         </div>
                     </div>
                     <div class="stat-card" data-navigate="classes">
                         <div class="stat-icon emerald">🏫</div>
                         <div class="stat-info">
                             <div class="stat-value">${classes.length}</div>
-                            <div class="stat-label">Τάξεις</div>
+                            <div class="stat-label">Τμήματα</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" data-navigate="subjects">
+                        <div class="stat-icon violet">📖</div>
+                        <div class="stat-info">
+                            <div class="stat-value">${subjects.length}</div>
+                            <div class="stat-label">Μαθήματα</div>
                         </div>
                     </div>
                     <div class="stat-card" data-navigate="classrooms">
@@ -67,20 +75,35 @@ const DashboardView = {
                     <div class="card-header">
                         <h2 class="card-title">🚀 Γρήγορη Εκκίνηση</h2>
                     </div>
-                    <div class="quick-start-steps">
-                        <p style="color: var(--text-secondary); margin-bottom: var(--space-md);">
-                            Ακολουθήστε αυτά τα βήματα για να δημιουργήσετε το πρώτο σας πρόγραμμα:
-                        </p>
-                        <ol style="color: var(--text-secondary); padding-left: var(--space-lg); line-height: 2.2;">
-                            <li>Ρυθμίστε τις <strong>Ώρες / Περιόδους</strong> 🕐</li>
-                            <li>Προσθέστε <strong>Καθηγητές</strong> & τη διαθεσιμότητά τους 👨‍🏫</li>
-                            <li>Προσθέστε <strong>Μαθήματα</strong> 📖</li>
-                            <li>Προσθέστε <strong>Τάξεις</strong> 🏫</li>
-                            <li>Προσθέστε <strong>Αίθουσες</strong> 🚪</li>
-                            <li>Δημιουργήστε <strong>Μαθήματα-Κάρτες</strong> (ποιος διδάσκει τι, σε ποια τάξη) 🃏</li>
-                            <li>Ρυθμίστε τους <strong>Περιορισμούς</strong> ⚙️</li>
-                            <li>Πατήστε <strong>Δημιουργία</strong> 🧠!</li>
-                        </ol>
+                    <div class="quick-start-steps" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
+                        <div class="card" style="cursor: pointer; background: var(--surface-hover)" onclick="App.navigateTo('settings')">
+                            <h3>1. Ρυθμίσεις</h3>
+                            <p style="font-size: 0.9em; color: var(--text-secondary)">Βασικές παράμετροι και ωράρια.</p>
+                        </div>
+                        <div class="card" style="cursor: pointer; background: var(--surface-hover)" onclick="App.navigateTo('teachers')">
+                            <h3>2. Καθηγητές & Ωράρια</h3>
+                            <p style="font-size: 0.9em; color: var(--text-secondary)">Προσθήκη καθηγητών & διαθεσιμότητας.</p>
+                        </div>
+                        <div class="card" style="cursor: pointer; background: var(--surface-hover)" onclick="App.navigateTo('students')">
+                            <h3>3. Μαθητές</h3>
+                            <p style="font-size: 0.9em; color: var(--text-secondary)">Καταχώρηση πελατολογίου (προαιρετικό).</p>
+                        </div>
+                        <div class="card" style="cursor: pointer; background: var(--surface-hover)" onclick="App.navigateTo('classes')">
+                            <h3>4. Τμήματα</h3>
+                            <p style="font-size: 0.9em; color: var(--text-secondary)">Δημιουργία τμημάτων και προσθήκη μαθητών για έλεγχο επικαλύψεων (conflict detection).</p>
+                        </div>
+                        <div class="card" style="cursor: pointer; background: var(--surface-hover)" onclick="App.navigateTo('lessons')">
+                            <h3>5. Μαθήματα (Κάρτες)</h3>
+                            <p style="font-size: 0.9em; color: var(--text-secondary)">Ανάθεση: "Ο κ. Παπαδόπουλος διδάσκει Άλγεβρα στο Α1".</p>
+                        </div>
+                        <div class="card" style="cursor: pointer; background: var(--surface-hover)" onclick="App.navigateTo('constraints')">
+                            <h3>6. Κανόνες</h3>
+                            <p style="font-size: 0.9em; color: var(--text-secondary)">Συνθήκες πχ. "Κανένα κενό για τους καθηγητές".</p>
+                        </div>
+                        <div class="card highlight" style="cursor: pointer;" onclick="App.navigateTo('generate')">
+                            <h3>7. Δημιουργία!</h3>
+                            <p style="font-size: 0.9em; opacity: 0.9;">Εκκίνηση Αλγορίθμου Τεχνητής Νοημοσύνης.</p>
+                        </div>
                     </div>
                 </div>
 

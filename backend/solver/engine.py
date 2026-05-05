@@ -16,6 +16,7 @@ from backend.models import (
     Teacher, Subject, SchoolClass, Classroom, Lesson,
     Period, TeacherAvailability, Constraint,
     TimetableSolution, TimetableSlot, SchoolSettings,
+    StudentClassEnrollment, StudentAvailability
 )
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,9 @@ class TimetableSolver:
         self.lessons: list[Lesson] = []
         self.periods: list[Period] = []
         self.availabilities: list[TeacherAvailability] = []
+        self.student_availabilities: list[StudentAvailability] = []
         self.constraints: list[Constraint] = []
+        self.enrollments: list[StudentClassEnrollment] = []
         self.days_per_week: int = 5
 
         # OR-Tools
@@ -66,7 +69,9 @@ class TimetableSolver:
         # Index mappings for fast lookup
         self._lessons_by_teacher: dict[int, list[Lesson]] = {}
         self._lessons_by_class: dict[int, list[Lesson]] = {}
+        self._lessons_by_student: dict[int, list[Lesson]] = {}
         self._unavailable: set[tuple[int, int, int]] = set()  # (teacher_id, day, period_id)
+        self._student_unavailable: set[tuple[int, int, int]] = set() # (student_id, day, period_id)
         self._teaching_period_ids: list[int] = []
 
     def solve(self) -> SolverResult:
@@ -111,6 +116,10 @@ class TimetableSolver:
         self.availabilities = self.db.query(TeacherAvailability).filter(
             TeacherAvailability.status == "unavailable"
         ).all()
+        self.student_availabilities = self.db.query(StudentAvailability).filter(
+            StudentAvailability.status == "unavailable"
+        ).all()
+        self.enrollments = self.db.query(StudentClassEnrollment).all()
         self.constraints = self.db.query(Constraint).filter(Constraint.is_active == True).all()
 
         settings = self.db.query(SchoolSettings).first()
@@ -148,8 +157,19 @@ class TimetableSolver:
             self._lessons_by_teacher.setdefault(lesson.teacher_id, []).append(lesson)
             self._lessons_by_class.setdefault(lesson.class_id, []).append(lesson)
 
+        # Build _lessons_by_student
+        class_to_lessons = self._lessons_by_class
+        for enrollment in self.enrollments:
+            student_id = enrollment.student_id
+            class_id = enrollment.class_id
+            if class_id in class_to_lessons:
+                self._lessons_by_student.setdefault(student_id, []).extend(class_to_lessons[class_id])
+
         for avail in self.availabilities:
             self._unavailable.add((avail.teacher_id, avail.day_of_week, avail.period_id))
+
+        for savail in self.student_availabilities:
+            self._student_unavailable.add((savail.student_id, savail.day_of_week, savail.period_id))
 
     def _get_available_rooms(self, lesson: Lesson) -> list[Classroom]:
         """Get rooms that can host this lesson."""
@@ -162,34 +182,74 @@ class TimetableSolver:
 
         return self.classrooms
 
+    def _parse_distribution(self, lesson: Lesson) -> list[int]:
+        """Convert a distribution string like '2,1' to a list of block lengths [2, 1]."""
+        if lesson.distribution:
+            try:
+                blocks = [int(v.strip()) for v in lesson.distribution.split(",") if v.strip()]
+                if sum(blocks) == lesson.periods_per_week:
+                    return blocks
+            except ValueError:
+                pass
+        # Default: all 1s
+        return [1] * lesson.periods_per_week
+
     def _create_variables(self):
-        """Create boolean decision variables: x[lesson, day, period, room]."""
+        """Create decision variables: blocks and coverage (x)."""
         days = range(self.days_per_week)
+        # Mapping for cell coverage: (day, period_id, room_id) -> list of block_start vars that cover it
+        self._covers = {}
 
         for lesson in self.lessons:
+            blocks = self._parse_distribution(lesson)
             available_rooms = self._get_available_rooms(lesson)
+
+            for b_idx, L in enumerate(blocks):
+                # We need exactly one start var for this block
+                block_start_vars = []
+                for day in days:
+                    for i in range(len(self.periods) - L + 1):
+                        p_start = self.periods[i]
+                        for room in available_rooms:
+                            var_name = f"b_l{lesson.id}_b{b_idx}_d{day}_p{p_start.id}_r{room.id}"
+                            b_var = self.model.NewBoolVar(var_name)
+                            block_start_vars.append(b_var)
+
+                            # Record that this start var covers subsequent periods
+                            for offset in range(L):
+                                p_covered = self.periods[i + offset]
+                                key = (lesson.id, day, p_covered.id, room.id)
+                                self._covers.setdefault(key, []).append(b_var)
+
+                # Exactly one start for this block
+                if block_start_vars:
+                    self.model.AddExactlyOne(block_start_vars)
+
+            # Map the block coverage to x
             for day in days:
-                for period in self.periods:
+                for p in self.periods:
                     for room in available_rooms:
-                        var_name = f"x_l{lesson.id}_d{day}_p{period.id}_r{room.id}"
-                        self.x[lesson.id, day, period.id, room.id] = self.model.NewBoolVar(var_name)
+                        var_name = f"x_l{lesson.id}_d{day}_p{p.id}_r{room.id}"
+                        x_var = self.model.NewBoolVar(var_name)
+                        self.x[lesson.id, day, p.id, room.id] = x_var
+
+                        # Get all block start vars of THIS lesson that cover this cell
+                        covering_vars = self._covers.get((lesson.id, day, p.id, room.id), [])
+                        
+                        if not covering_vars:
+                            # Cannot be scheduled here
+                            self.model.Add(x_var == 0)
+                        else:
+                            # x_var is exactly the sum of its covering blocks 
+                            # (since blocks of the same lesson cannot overlap because x is boolean)
+                            self.model.Add(x_var == sum(covering_vars))
 
     def _apply_hard_constraints(self):
         """Apply all hard (non-negotiable) constraints."""
         days = range(self.days_per_week)
 
-        # H1: Each lesson is scheduled exactly periods_per_week times
-        for lesson in self.lessons:
-            available_rooms = self._get_available_rooms(lesson)
-            relevant_vars = [
-                self.x[lesson.id, d, p.id, r.id]
-                for d in days
-                for p in self.periods
-                for r in available_rooms
-                if (lesson.id, d, p.id, r.id) in self.x
-            ]
-            if relevant_vars:
-                self.model.Add(sum(relevant_vars) == lesson.periods_per_week)
+        # H1: (Removed) Each lesson is scheduled exactly periods_per_week times.
+        # This is now implicitly enforced by the Block Distribution mechanics in _create_variables.
 
         # H2: No teacher clash — at most 1 lesson per teacher per (day, period)
         for teacher_id, teacher_lessons in self._lessons_by_teacher.items():
@@ -258,6 +318,83 @@ class TimetableSolver:
                                     vars_in_day.append(self.x[key])
                     if vars_in_day:
                         self.model.Add(sum(vars_in_day) <= teacher.max_periods_per_day)
+
+        # H7: No student clash (cross-class overlap)
+        for student_id, student_lessons in self._lessons_by_student.items():
+            for day in days:
+                for period in self.periods:
+                    vars_at_slot = []
+                    for lesson in student_lessons:
+                        available_rooms = self._get_available_rooms(lesson)
+                        for room in available_rooms:
+                            key = (lesson.id, day, period.id, room.id)
+                            if key in self.x:
+                                vars_at_slot.append(self.x[key])
+                    if vars_at_slot:
+                        self.model.Add(sum(vars_at_slot) <= 1)
+
+        # H8: Student availability — block unavailable slots
+        for student_id, student_lessons in self._lessons_by_student.items():
+            for lesson in student_lessons:
+                available_rooms = self._get_available_rooms(lesson)
+                for day in days:
+                    for period in self.periods:
+                        if (student_id, day, period.id) in self._student_unavailable:
+                            for room in available_rooms:
+                                key = (lesson.id, day, period.id, room.id)
+                                if key in self.x:
+                                    self.model.Add(self.x[key] == 0)
+
+        # H9: Teacher Max Days Per Week
+        for teacher in self.teachers:
+            if teacher.max_days_per_week and teacher.max_days_per_week < self.days_per_week:
+                teacher_lessons = self._lessons_by_teacher.get(teacher.id, [])
+                if not teacher_lessons:
+                    continue
+                days_working_vars = []
+                for day in days:
+                    day_var = self.model.NewBoolVar(f"t_day_{teacher.id}_{day}")
+                    days_working_vars.append(day_var)
+                    vars_in_day = []
+                    for lesson in teacher_lessons:
+                        available_rooms = self._get_available_rooms(lesson)
+                        for period in self.periods:
+                            for room in available_rooms:
+                                key = (lesson.id, day, period.id, room.id)
+                                if key in self.x:
+                                    vars_in_day.append(self.x[key])
+                    if vars_in_day:
+                        self.model.AddMaxEquality(day_var, vars_in_day)
+                    else:
+                        self.model.Add(day_var == 0)
+                
+                self.model.Add(sum(days_working_vars) <= teacher.max_days_per_week)
+
+        # H10: Student Max Days Per Week
+        for enrollment in self.enrollments:
+            student = enrollment.student
+            if student.max_days_per_week and student.max_days_per_week < self.days_per_week:
+                student_lessons = self._lessons_by_student.get(student.id, [])
+                if not student_lessons:
+                    continue
+                days_working_vars = []
+                for day in days:
+                    day_var = self.model.NewBoolVar(f"s_day_{student.id}_{day}")
+                    days_working_vars.append(day_var)
+                    vars_in_day = []
+                    for lesson in student_lessons:
+                        available_rooms = self._get_available_rooms(lesson)
+                        for period in self.periods:
+                            for room in available_rooms:
+                                key = (lesson.id, day, period.id, room.id)
+                                if key in self.x:
+                                    vars_in_day.append(self.x[key])
+                    if vars_in_day:
+                        self.model.AddMaxEquality(day_var, vars_in_day)
+                    else:
+                        self.model.Add(day_var == 0)
+                
+                self.model.Add(sum(days_working_vars) <= student.max_days_per_week)
 
     def _apply_soft_constraints(self):
         """Apply soft constraints as penalty terms in the objective."""

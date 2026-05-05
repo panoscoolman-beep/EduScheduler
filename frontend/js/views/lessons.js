@@ -64,28 +64,35 @@ const LessonsView = {
                 </div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label class="form-label">Ώρες / Εβδομάδα *</label>
+                        <label class="form-label">Συνολικές Ώρες Διδ/λίας (Εβδομαδιαίως) *</label>
                         <input class="form-input" id="f-ppw" type="number" min="1" max="20" value="${item?.periods_per_week || 1}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Διάρκεια (ώρες)</label>
-                        <select class="form-select" id="f-duration">
-                            <option value="1" ${item?.duration === 1 ? 'selected' : ''}>Μονή (1 ώρα)</option>
-                            <option value="2" ${item?.duration === 2 ? 'selected' : ''}>Διπλή (2 ώρες)</option>
-                            <option value="3" ${item?.duration === 3 ? 'selected' : ''}>Τριπλή (3 ώρες)</option>
-                        </select>
+                        <label class="form-label">Κατανομή σε Blocks (Κενό=Μονά)</label>
+                        <input class="form-input" id="f-dist" type="text" placeholder="π.χ. 2,2,1" value="${item?.distribution || ''}">
                     </div>
                 </div>
             `,
-            formParser: () => ({
-                subject_id: parseInt(document.getElementById('f-subject').value),
-                teacher_id: parseInt(document.getElementById('f-teacher').value),
-                class_id: parseInt(document.getElementById('f-class').value),
-                classroom_id: parseInt(document.getElementById('f-classroom').value) || null,
-                periods_per_week: parseInt(document.getElementById('f-ppw').value) || 1,
-                duration: parseInt(document.getElementById('f-duration').value) || 1,
-                is_locked: false,
-            }),
+            formParser: () => {
+                const subject_id = parseInt(document.getElementById('f-subject').value);
+                const teacher_id = parseInt(document.getElementById('f-teacher').value);
+                const class_id = parseInt(document.getElementById('f-class').value);
+                
+                if (isNaN(subject_id)) throw new Error("Παρακαλώ επιλέξτε Μάθημα.");
+                if (isNaN(teacher_id)) throw new Error("Παρακαλώ επιλέξτε Καθηγητή.");
+                if (isNaN(class_id)) throw new Error("Παρακαλώ επιλέξτε Τάξη.");
+
+                return {
+                    subject_id,
+                    teacher_id,
+                    class_id,
+                    classroom_id: parseInt(document.getElementById('f-classroom').value) || null,
+                    periods_per_week: parseInt(document.getElementById('f-ppw').value) || 1,
+                    duration: 1, // Deprecated, kept for backward comp
+                    distribution: document.getElementById('f-dist').value.trim() || null,
+                    is_locked: false,
+                };
+            },
         });
 
         container.innerHTML = '<div id="lessons-table"></div>';

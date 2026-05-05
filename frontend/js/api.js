@@ -21,7 +21,14 @@ const API = {
         const data = await response.json().catch(() => null);
 
         if (!response.ok) {
-            const message = data?.detail || `Σφάλμα ${response.status}`;
+            let message = `Σφάλμα ${response.status}`;
+            if (data && data.detail) {
+                if (Array.isArray(data.detail)) {
+                    message = data.detail.map(err => `${err.loc.slice(-1)}: ${err.msg}`).join(', ');
+                } else {
+                    message = data.detail;
+                }
+            }
             throw new Error(message);
         }
 
@@ -49,6 +56,15 @@ const API = {
         create: (data) => API.post('/subjects/', data),
         update: (id, data) => API.put(`/subjects/${id}`, data),
         delete: (id) => API.delete(`/subjects/${id}`),
+    },
+    students: {
+        list: () => API.get('/students/'),
+        get: (id) => API.get(`/students/${id}`),
+        create: (data) => API.post('/students/', data),
+        update: (id, data) => API.put(`/students/${id}`, data),
+        delete: (id) => API.delete(`/students/${id}`),
+        getAvailability: (id) => API.get(`/students/${id}/availability`),
+        updateAvailability: (id, data) => API.put(`/students/${id}/availability`, data),
     },
     classrooms: {
         list: () => API.get('/classrooms/'),
@@ -92,6 +108,7 @@ const API = {
         listSolutions: () => API.get('/solver/solutions'),
         getSolution: (id) => API.get(`/solver/solutions/${id}`),
         deleteSolution: (id) => API.delete(`/solver/solutions/${id}`),
+        updateSlot: (solutionId, slotId, data) => API.put(`/solver/solutions/${solutionId}/slots/${slotId}`, data),
     },
     settings: {
         get: () => API.get('/settings/'),
