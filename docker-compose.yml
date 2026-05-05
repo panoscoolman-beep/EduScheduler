@@ -33,10 +33,13 @@ services:
       - ./frontend:/app/frontend
     networks:
       - edscheduler-net
+      - korifi-integration   # Path C: lets korifi-crm reach this backend by container name
 
 networks:
   edscheduler-net:
     driver: bridge
+  korifi-integration:
+    external: true   # shared with korifi-crm-v2 (Path C)
 
 volumes:
   postgres_data:
