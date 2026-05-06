@@ -19,9 +19,22 @@ const GenerateView = {
                     <input class="form-input" id="gen-name" value="Πρόγραμμα ${new Date().toLocaleDateString('el-GR')}">
                 </div>
 
-                <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-lg);">
+                <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-md);">
                     <label class="form-label">Μέγιστος Χρόνος (δευτερόλεπτα)</label>
                     <input class="form-input" id="gen-time" type="number" min="10" max="600" value="120">
+                </div>
+
+                <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-lg);">
+                    <label class="form-label">Λειτουργία</label>
+                    <select class="form-select" id="gen-mode">
+                        <option value="strict" selected>Strict — όλα ή τίποτα</option>
+                        <option value="permissive">Permissive — βάλε όσα μπορείς</option>
+                    </select>
+                    <p class="text-muted" style="font-size: 0.85em; margin-top: 0.5rem; text-align: left;">
+                        <b>Strict</b>: αν δεν χωράνε όλες οι ώρες → INFEASIBLE.<br>
+                        <b>Permissive</b>: τοποθετεί ό,τι χωράει· τα υπόλοιπα πάνε στο
+                        🅿️ Parking Lot (κάτω από το πρόγραμμα) και τα τοποθετείς χειροκίνητα με drag.
+                    </p>
                 </div>
 
                 <button class="btn btn-success btn-lg" id="gen-start">
@@ -55,6 +68,7 @@ const GenerateView = {
     async _startGeneration() {
         const name = document.getElementById('gen-name').value.trim() || 'Πρόγραμμα';
         const maxTime = parseInt(document.getElementById('gen-time').value) || 120;
+        const mode = document.getElementById('gen-mode').value || 'strict';
 
         const startBtn = document.getElementById('gen-start');
         const statusDiv = document.getElementById('gen-status');
@@ -74,31 +88,43 @@ const GenerateView = {
             progress.style.width = `${width}%`;
         }, 500);
 
-        message.textContent = 'Ο solver εργάζεται...';
+        message.textContent = `Ο solver εργάζεται (${mode} mode)...`;
 
         try {
-            const result = await API.solver.generate({ name, max_time_seconds: maxTime });
+            const result = await API.solver.generate({
+                name, max_time_seconds: maxTime, mode,
+            });
 
             clearInterval(progressInterval);
             progress.style.width = '100%';
 
             if (result.status === 'optimal' || result.status === 'feasible') {
                 message.textContent = result.message;
-                Toast.success(result.message);
+                if (result.unplaced_count > 0) {
+                    Toast.info(result.message);
+                } else {
+                    Toast.success(result.message);
+                }
 
                 statsDiv.classList.remove('hidden');
+                const placed = result.placed_count || 0;
+                const unplaced = result.unplaced_count || 0;
                 statsDiv.innerHTML = `
                     <div class="solver-stat">
                         <div class="value">${result.status === 'optimal' ? '✅' : '⚡'}</div>
                         <div class="label">Κατάσταση</div>
                     </div>
                     <div class="solver-stat">
-                        <div class="value">${result.score?.toFixed(0) || '0'}</div>
-                        <div class="label">Σκορ</div>
+                        <div class="value">${placed}</div>
+                        <div class="label">Τοποθετήθηκαν</div>
+                    </div>
+                    <div class="solver-stat" style="${unplaced > 0 ? 'color: var(--warning, #F59E0B);' : ''}">
+                        <div class="value">${unplaced}</div>
+                        <div class="label">${unplaced > 0 ? '🅿️ Στο Parking Lot' : 'Στο Parking Lot'}</div>
                     </div>
                     <div class="solver-stat">
-                        <div class="value">${result.solution_id}</div>
-                        <div class="label">ID Λύσης</div>
+                        <div class="value">${result.score?.toFixed(0) || '0'}</div>
+                        <div class="label">Σκορ</div>
                     </div>
                 `;
             } else {

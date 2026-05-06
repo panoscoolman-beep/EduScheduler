@@ -11,16 +11,19 @@ const TimetableGrid = {
         const teachingPeriods = periods.filter(p => !p.is_break);
         const days = this.DAY_NAMES.slice(0, daysCount);
 
-        // Build grid lookup: [dayIndex][periodId] -> slot data
+        // Build grid lookup: [dayIndex][periodId] -> slot data.
+        // Parking-lot rows (is_unplaced=true, day_of_week=null) are
+        // rendered separately by the timetable view, never on the grid.
         const grid = {};
+        const placedSlots = slots.filter(s => !s.is_unplaced);
         const filteredSlots = (filterValue && filterValue !== 'all')
-            ? slots.filter(s => {
+            ? placedSlots.filter(s => {
                 if (viewType === 'class') return s.class_short === filterValue || s.class_name === filterValue;
                 if (viewType === 'teacher') return s.teacher_short === filterValue || s.teacher_name === filterValue;
                 if (viewType === 'room') return s.classroom_name === filterValue;
                 return true;
             })
-            : slots;
+            : placedSlots;
 
         for (const slot of filteredSlots) {
             const key = `${slot.day_of_week}_${slot.period_id}`;

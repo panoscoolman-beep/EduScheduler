@@ -69,11 +69,14 @@ const TimetableView = {
 
                     <div id="timetable-grid-view"></div>
                 </div>
+
+                <div id="parking-lot-container"></div>
             `;
 
             // Initial render
             const firstFilter = 'all';
             TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, 'class', firstFilter, solutionId);
+            this._renderParkingLot('parking-lot-container', solution.slots, solutionId);
 
             // Event: Print
             document.getElementById('tt-print').addEventListener('click', () => {
@@ -113,5 +116,73 @@ const TimetableView = {
                 </div>
             `;
         }
+    },
+
+    /**
+     * Render the parking-lot panel below the grid. Lists every slot with
+     * is_unplaced=true. Each card is draggable into any grid cell — the
+     * drop handler in TimetableGrid will flip is_unplaced to false on
+     * the backend and re-render.
+     */
+    _renderParkingLot(containerId, allSlots, solutionId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const unplaced = allSlots.filter(s => s.is_unplaced);
+        if (unplaced.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const cards = unplaced.map(slot => {
+            const bgColor = slot.subject_color || '#9CA3AF';
+            const bgLight = this._hexToRgba(bgColor, 0.15);
+            const reasonText = slot.unplaced_reason
+                ? ` <span class="text-muted" style="font-size:0.8em">— ${slot.unplaced_reason}</span>`
+                : '';
+            return `
+                <div class="lesson-card parking-card"
+                     draggable="true"
+                     ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
+                     ondragend="TimetableGrid.handleDragEnd(event)"
+                     onclick="TimetableGrid.showDetails(this)"
+                     data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
+                     style="background:${bgLight}; cursor: grab; padding: 10px 14px;
+                            border-left: 4px solid ${bgColor}; margin-bottom: 6px;
+                            border-radius: 6px;"
+                     title="Σύρε στο πρόγραμμα για να τοποθετηθεί">
+                    <div style="font-weight: 600; color: ${bgColor};">
+                        ${slot.subject_name || slot.subject_short || '?'}
+                    </div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">
+                        ${slot.class_name || slot.class_short || ''}
+                        ${slot.teacher_name ? ' • ' + slot.teacher_name : ''}
+                    </div>
+                    ${reasonText ? `<div style="font-size:0.8em; color:var(--text-muted); margin-top:4px;">${slot.unplaced_reason || ''}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="card mt-lg parking-lot" style="border-left: 4px solid var(--warning, #F59E0B);">
+                <div class="card-header">
+                    <h2 class="card-title">🅿️ Parking Lot — ${unplaced.length}
+                        ${unplaced.length === 1 ? 'ώρα δεν τοποθετήθηκε' : 'ώρες δεν τοποθετήθηκαν'}
+                    </h2>
+                </div>
+                <p class="text-muted" style="margin-bottom: 1rem;">
+                    Σύρε ένα μάθημα στο πρόγραμμα για να το τοποθετήσεις χειροκίνητα.
+                    Οι περιορισμοί επικυρώνονται κατά το drop — αν συγκρούεται με κάτι, θα δεις σφάλμα.
+                </p>
+                ${cards}
+            </div>
+        `;
+    },
+
+    _hexToRgba(hex, alpha = 1) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     },
 };
