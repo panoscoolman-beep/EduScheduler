@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 
+# Alembic migrations (so `alembic upgrade head` works inside the container)
+COPY alembic.ini ./alembic.ini
+COPY alembic/ ./alembic/
+
 EXPOSE 8000
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

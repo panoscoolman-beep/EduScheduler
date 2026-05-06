@@ -25,10 +25,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SolverResult:
     """Result from the solver engine."""
-    status: str  # optimal / feasible / infeasible / error
+    status: str  # optimal / feasible / infeasible / timeout / error
     message: str
     score: float | None = None
     slots: list[dict] = field(default_factory=list)
+    unplaced: list[dict] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
 
 
@@ -44,9 +45,24 @@ class TimetableSolver:
     5. Solve and extract solution
     """
 
-    def __init__(self, db: Session, max_time_seconds: int = 120):
+    # In permissive mode each unplaced block adds this much penalty so
+    # the solver always prefers placing whenever feasible. Tuned to be
+    # an order of magnitude larger than typical soft-constraint weights.
+    UNPLACED_PENALTY: int = 100_000
+
+    def __init__(self, db: Session, max_time_seconds: int = 120,
+                 mode: str = "strict"):
+        """
+        Args:
+            db: SQLAlchemy session
+            max_time_seconds: solver wall-time cap
+            mode: "strict" (every block must be placed — INFEASIBLE if
+                any can't fit) or "permissive" (blocks are placed when
+                possible, otherwise reported in `result.unplaced`).
+        """
         self.db = db
         self.max_time_seconds = max_time_seconds
+        self.mode = mode if mode in ("strict", "permissive") else "strict"
 
         # Data from DB (loaded in _load_data)
         self.teachers: list[Teacher] = []
@@ -157,8 +173,13 @@ class TimetableSolver:
             )
 
         # Per-lesson placement checks — these are the silent-drop traps.
-        unplaceable: list[str] = []
+        # In permissive mode they're not fatal — undeplaceable lessons end
+        # up in the parking lot. We record them in `_pre_unplaced` so
+        # `_extract_result` can surface them with a reason.
+        self._pre_unplaced: list[dict] = []
+        unplaceable_messages: list[str] = []
         n_periods = len(self.periods)
+
         for lesson in self.lessons:
             label = self._lesson_label(lesson)
 
@@ -176,22 +197,30 @@ class TimetableSolver:
                         f"το μάθημα απαιτεί αίθουσα τύπου '{rt}' αλλά "
                         "δεν υπάρχει καμία τέτοια"
                     )
-                unplaceable.append(f"  • {label}: {reason}")
+                unplaceable_messages.append(f"  • {label}: {reason}")
+                self._pre_unplaced.append(
+                    {"lesson_id": lesson.id, "reason": reason}
+                )
                 continue
 
             for L in self._parse_distribution(lesson):
                 if L > n_periods:
-                    unplaceable.append(
-                        f"  • {label}: ζητάει block {L} ωρών αλλά η μέρα "
-                        f"έχει μόνο {n_periods} διαθέσιμες περιόδους"
+                    reason = (
+                        f"ζητάει block {L} ωρών αλλά η μέρα έχει μόνο "
+                        f"{n_periods} διαθέσιμες περιόδους"
+                    )
+                    unplaceable_messages.append(f"  • {label}: {reason}")
+                    self._pre_unplaced.append(
+                        {"lesson_id": lesson.id, "reason": reason}
                     )
                     break
 
-        if unplaceable:
+        if unplaceable_messages and self.mode == "strict":
             return (
                 "Δεν μπορούν να τοποθετηθούν τα παρακάτω μαθήματα:\n"
-                + "\n".join(unplaceable)
-                + "\n\nΔιόρθωσε αυτά πρώτα και ξανατρέξε τον solver."
+                + "\n".join(unplaceable_messages)
+                + "\n\nΔιόρθωσε αυτά πρώτα ή χρησιμοποίησε permissive mode "
+                "για να σταλούν στο parking lot."
             )
 
         return None
@@ -248,10 +277,22 @@ class TimetableSolver:
         return [1] * lesson.periods_per_week
 
     def _create_variables(self):
-        """Create decision variables: blocks and coverage (x)."""
+        """Create decision variables: blocks and coverage (x).
+
+        In strict mode, each lesson block must be placed exactly once
+        (AddExactlyOne hard constraint).
+
+        In permissive mode, each block has a 'placed' bool that the solver
+        is heavily penalized for setting to 0 — so it will always prefer
+        to place a block when feasible, and only leave one unplaced when
+        no legal slot exists. `_block_placed` is recorded so we can read
+        back which blocks ended up in the parking lot.
+        """
         days = range(self.days_per_week)
         # Mapping for cell coverage: (day, period_id, room_id) -> list of block_start vars that cover it
         self._covers = {}
+        # In permissive mode: list of (lesson_id, block_idx, length, placed_var, reason_if_no_starts)
+        self._block_placed: list[tuple] = []
 
         for lesson in self.lessons:
             blocks = self._parse_distribution(lesson)
@@ -274,9 +315,27 @@ class TimetableSolver:
                                 key = (lesson.id, day, p_covered.id, room.id)
                                 self._covers.setdefault(key, []).append(b_var)
 
-                # Exactly one start for this block
-                if block_start_vars:
+                if not block_start_vars:
+                    # No legal placement (e.g. block too long for any day)
+                    if self.mode == "permissive":
+                        self._block_placed.append(
+                            (lesson.id, b_idx, L, None,
+                             "Δεν υπάρχει νόμιμη θέση για αυτό το block")
+                        )
+                    continue
+
+                if self.mode == "strict":
                     self.model.AddExactlyOne(block_start_vars)
+                else:
+                    # Permissive: placed = sum(starts), penalize 1 - placed.
+                    placed = self.model.NewBoolVar(
+                        f"placed_l{lesson.id}_b{b_idx}"
+                    )
+                    self.model.Add(sum(block_start_vars) == placed)
+                    self.penalties.append((1 - placed) * self.UNPLACED_PENALTY)
+                    self._block_placed.append(
+                        (lesson.id, b_idx, L, placed, None)
+                    )
 
             # Map the block coverage to x
             for day in days:
@@ -580,6 +639,49 @@ class TimetableSolver:
                     self.model.Add(deviation >= int(ideal_per_day) - total)
                     self.penalties.append(deviation * (weight // 2))
 
+    def _collect_unplaced(self, solver: cp_model.CpSolver) -> list[dict]:
+        """Build the parking-lot list. Combines:
+        - lessons rejected pre-solve (no available rooms / block too long)
+        - lesson blocks the solver chose to leave unplaced in permissive mode
+        """
+        out: list[dict] = []
+
+        # Pre-validation rejections (only populated in permissive mode —
+        # strict mode short-circuits in _validate_data)
+        for entry in getattr(self, "_pre_unplaced", []):
+            out.append({
+                "lesson_id": entry["lesson_id"],
+                "block_index": 0,
+                "block_length": None,
+                "reason": entry["reason"],
+            })
+
+        # Solver-decided unplaced blocks
+        for lesson_id, b_idx, length, placed_var, reason in self._block_placed:
+            if placed_var is None:
+                # Already added via _pre_unplaced (no legal slot at all)
+                if not any(e["lesson_id"] == lesson_id for e in out):
+                    out.append({
+                        "lesson_id": lesson_id,
+                        "block_index": b_idx,
+                        "block_length": length,
+                        "reason": reason or "Δεν βρέθηκε κατάλληλη θέση",
+                    })
+                continue
+
+            if solver.Value(placed_var) == 0:
+                out.append({
+                    "lesson_id": lesson_id,
+                    "block_index": b_idx,
+                    "block_length": length,
+                    "reason": (
+                        "Ο solver δεν βρήκε χωρητικό slot ταυτόχρονα με "
+                        "τους υπόλοιπους περιορισμούς"
+                    ),
+                })
+
+        return out
+
     def _extract_result(self, solver: cp_model.CpSolver, status: int) -> SolverResult:
         """Extract the solution from the solver."""
         status_map = {
@@ -603,22 +705,33 @@ class TimetableSolver:
                         "classroom_id": room_id,
                     })
 
+            unplaced = self._collect_unplaced(solver)
+
             score = solver.ObjectiveValue() if self.penalties else 0.0
-            message = (
-                "Βρέθηκε βέλτιστη λύση!" if result_status == "optimal"
-                else "Βρέθηκε λύση (μη βέλτιστη)"
-            )
+            if unplaced:
+                message = (
+                    f"Βρέθηκε λύση — τοποθετήθηκαν {len(slots)} ώρες, "
+                    f"{len(unplaced)} ώρες έμειναν στο parking lot."
+                )
+            else:
+                message = (
+                    "Βρέθηκε βέλτιστη λύση!" if result_status == "optimal"
+                    else "Βρέθηκε λύση (μη βέλτιστη)"
+                )
 
             return SolverResult(
                 status=result_status,
                 message=message,
                 score=score,
                 slots=slots,
+                unplaced=unplaced,
                 stats={
                     "wall_time": solver.WallTime(),
                     "branches": solver.NumBranches(),
                     "conflicts": solver.NumConflicts(),
                     "total_lessons_placed": len(slots),
+                    "total_lessons_unplaced": len(unplaced),
+                    "mode": self.mode,
                 },
             )
 

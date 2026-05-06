@@ -280,17 +280,26 @@ class TimetableSolution(Base):
 
 
 class TimetableSlot(Base):
-    """A single assigned slot in a timetable solution."""
+    """A single slot in a timetable solution.
+
+    Permissive solver mode (Phase 2 — parking lot): a slot may be created
+    with `is_unplaced=True` and NULL day_of_week/period_id/classroom_id
+    to represent a lesson the solver could not fit. The frontend lists
+    these in a sidebar parking lot so the user can drag them onto the
+    grid manually.
+    """
 
     __tablename__ = "timetable_slots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     solution_id = Column(Integer, ForeignKey("timetable_solutions.id", ondelete="CASCADE"), nullable=False)
     lesson_id = Column(Integer, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False)
-    day_of_week = Column(Integer, nullable=False)  # 0-4
-    period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
-    classroom_id = Column(Integer, ForeignKey("classrooms.id", ondelete="CASCADE"), nullable=False)
+    day_of_week = Column(Integer, nullable=True)  # 0-4, NULL when is_unplaced
+    period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=True)
+    classroom_id = Column(Integer, ForeignKey("classrooms.id", ondelete="CASCADE"), nullable=True)
     is_locked = Column(Boolean, default=False)
+    is_unplaced = Column(Boolean, nullable=False, default=False)
+    unplaced_reason = Column(String(500), nullable=True)
 
     # Relationships
     solution = relationship("TimetableSolution", back_populates="slots")
@@ -299,5 +308,13 @@ class TimetableSlot(Base):
     classroom = relationship("Classroom", back_populates="timetable_slots")
 
     __table_args__ = (
-        CheckConstraint("day_of_week >= 0 AND day_of_week <= 6", name="ck_slot_day_range"),
+        CheckConstraint(
+            "day_of_week IS NULL OR (day_of_week >= 0 AND day_of_week <= 6)",
+            name="ck_slot_day_range",
+        ),
+        CheckConstraint(
+            "(is_unplaced = TRUE AND day_of_week IS NULL AND period_id IS NULL AND classroom_id IS NULL)"
+            " OR (is_unplaced = FALSE AND day_of_week IS NOT NULL AND period_id IS NOT NULL AND classroom_id IS NOT NULL)",
+            name="ck_slot_placement_consistent",
+        ),
     )

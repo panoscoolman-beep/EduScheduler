@@ -248,10 +248,12 @@ class ConstraintResponse(ConstraintBase):
 class TimetableSlotResponse(BaseModel):
     id: int
     lesson_id: int
-    day_of_week: int
-    period_id: int
-    classroom_id: int
+    day_of_week: int | None = None
+    period_id: int | None = None
+    classroom_id: int | None = None
     is_locked: bool
+    is_unplaced: bool = False
+    unplaced_reason: str | None = None
     # Enriched fields
     subject_name: str | None = None
     subject_short: str | None = None
@@ -268,7 +270,9 @@ class TimetableSlotResponse(BaseModel):
 
 
 class TimetableSlotUpdate(BaseModel):
-    """Payload for manually moving a slot via Drag & Drop."""
+    """Payload for manually moving a slot via Drag & Drop, OR placing a
+    parking-lot lesson onto the grid (in which case the source slot has
+    is_unplaced=True and we'll flip it to False on success)."""
     day_of_week: int = Field(..., ge=0, le=6)
     period_id: int
     classroom_id: int | None = None
@@ -291,6 +295,14 @@ class SolverRequest(BaseModel):
     """Request to start timetable generation."""
     name: str = Field("Νέο Πρόγραμμα", min_length=1, max_length=200)
     max_time_seconds: int = Field(120, ge=10, le=600)
+    mode: str = Field(
+        "strict",
+        pattern=r"^(strict|permissive)$",
+        description=(
+            "strict: every lesson must be placed (INFEASIBLE if not). "
+            "permissive: place what fits, drop the rest in the parking lot."
+        ),
+    )
 
 
 class SolverStatusResponse(BaseModel):
@@ -298,6 +310,8 @@ class SolverStatusResponse(BaseModel):
     status: str
     message: str
     score: float | None = None
+    placed_count: int = 0
+    unplaced_count: int = 0
 
 
 # ─── Settings ───────────────────────────────────────────

@@ -39,7 +39,11 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
     db.refresh(solution)
 
     # Run solver
-    solver = TimetableSolver(db, max_time_seconds=request.max_time_seconds)
+    solver = TimetableSolver(
+        db,
+        max_time_seconds=request.max_time_seconds,
+        mode=request.mode,
+    )
     result = solver.solve()
 
     # Update solution record
@@ -48,7 +52,7 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
     solution.metadata_json = json.dumps(result.stats, default=str)
 
     if result.status in ("optimal", "feasible"):
-        # Save slots
+        # Save placed slots
         for slot_data in result.slots:
             slot = TimetableSlot(
                 solution_id=solution.id,
@@ -56,6 +60,20 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
                 day_of_week=slot_data["day_of_week"],
                 period_id=slot_data["period_id"],
                 classroom_id=slot_data["classroom_id"],
+                is_unplaced=False,
+            )
+            db.add(slot)
+
+        # Save unplaced rows for the parking lot (permissive mode only)
+        for entry in result.unplaced:
+            slot = TimetableSlot(
+                solution_id=solution.id,
+                lesson_id=entry["lesson_id"],
+                day_of_week=None,
+                period_id=None,
+                classroom_id=None,
+                is_unplaced=True,
+                unplaced_reason=entry.get("reason"),
             )
             db.add(slot)
 
@@ -67,6 +85,8 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
         status=result.status,
         message=result.message,
         score=result.score,
+        placed_count=len(result.slots),
+        unplaced_count=len(result.unplaced),
     )
 
 
@@ -120,6 +140,8 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
             period_id=slot.period_id,
             classroom_id=slot.classroom_id,
             is_locked=slot.is_locked,
+            is_unplaced=slot.is_unplaced,
+            unplaced_reason=slot.unplaced_reason,
             subject_name=lesson.subject.name if lesson.subject else None,
             subject_short=lesson.subject.short_name if lesson.subject else None,
             subject_color=lesson.subject.color if lesson.subject else None,
@@ -240,12 +262,24 @@ def update_solution_slot(
 
     slot.day_of_week = data.day_of_week
     slot.period_id = data.period_id
-    
+
     if data.classroom_id is not None:
         slot.classroom_id = data.classroom_id
 
     if data.is_locked is not None:
         slot.is_locked = data.is_locked
+
+    # If we're moving a parking-lot slot onto the grid, flip is_unplaced.
+    # Required: classroom_id must be present (otherwise the constraint
+    # ck_slot_placement_consistent would be violated).
+    if slot.is_unplaced:
+        if not slot.classroom_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Πρέπει να ορίσεις αίθουσα όταν τοποθετείς μάθημα από το parking lot.",
+            )
+        slot.is_unplaced = False
+        slot.unplaced_reason = None
 
     db.commit()
     return {"status": "ok", "message": "Το slot ενημερώθηκε"}
