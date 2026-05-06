@@ -126,7 +126,15 @@ class TimetableSolver:
         self.days_per_week = settings.days_per_week if settings else 5
 
     def _validate_data(self) -> str | None:
-        """Validate that we have enough data to generate a schedule."""
+        """Validate that we have enough data to generate a schedule.
+
+        Beyond quantity checks, we look for individual lessons that **cannot
+        be placed** with the current configuration so the solver doesn't
+        silently drop them (issue: lessons with deleted classroom_id, or
+        special_room_type with no matching room, or block size larger than
+        the school day). Surface those as a friendly error instead of
+        producing a partial schedule.
+        """
         if not self.teachers:
             return "Δεν υπάρχουν καθηγητές"
         if not self.classes:
@@ -147,7 +155,52 @@ class TimetableSolver:
                 f"αλλά υπάρχουν μόνο {total_slots_available} "
                 f"({self.days_per_week} μέρες × {len(self.periods)} ώρες × {len(self.classrooms)} αίθουσες)"
             )
+
+        # Per-lesson placement checks — these are the silent-drop traps.
+        unplaceable: list[str] = []
+        n_periods = len(self.periods)
+        for lesson in self.lessons:
+            label = self._lesson_label(lesson)
+
+            rooms = self._get_available_rooms(lesson)
+            if not rooms:
+                if lesson.classroom_id:
+                    reason = (
+                        f"αίθουσα id={lesson.classroom_id} δεν υπάρχει "
+                        "(διαγράφηκε χωρίς να ενημερωθεί το lesson)"
+                    )
+                else:
+                    sub = lesson.subject
+                    rt = sub.special_room_type if sub else "?"
+                    reason = (
+                        f"το μάθημα απαιτεί αίθουσα τύπου '{rt}' αλλά "
+                        "δεν υπάρχει καμία τέτοια"
+                    )
+                unplaceable.append(f"  • {label}: {reason}")
+                continue
+
+            for L in self._parse_distribution(lesson):
+                if L > n_periods:
+                    unplaceable.append(
+                        f"  • {label}: ζητάει block {L} ωρών αλλά η μέρα "
+                        f"έχει μόνο {n_periods} διαθέσιμες περιόδους"
+                    )
+                    break
+
+        if unplaceable:
+            return (
+                "Δεν μπορούν να τοποθετηθούν τα παρακάτω μαθήματα:\n"
+                + "\n".join(unplaceable)
+                + "\n\nΔιόρθωσε αυτά πρώτα και ξανατρέξε τον solver."
+            )
+
         return None
+
+    def _lesson_label(self, lesson: Lesson) -> str:
+        """Human-readable label για μηνύματα προς τον χρήστη."""
+        subj = lesson.subject.name if lesson.subject else "?"
+        cls = lesson.school_class.name if lesson.school_class else "?"
+        return f"{subj} (τμήμα {cls}, lesson id={lesson.id})"
 
     def _build_indices(self):
         """Build lookup indices for fast constraint checking."""
@@ -534,6 +587,7 @@ class TimetableSolver:
             cp_model.FEASIBLE: "feasible",
             cp_model.INFEASIBLE: "infeasible",
             cp_model.MODEL_INVALID: "error",
+            cp_model.UNKNOWN: "timeout",
         }
 
         result_status = status_map.get(status, "error")
@@ -568,7 +622,35 @@ class TimetableSolver:
                 },
             )
 
+        if result_status == "timeout":
+            return SolverResult(
+                status="timeout",
+                message=(
+                    f"Ο solver έκανε timeout μετά από {self.max_time_seconds}s "
+                    "χωρίς να βρει πλήρη λύση. Δοκίμασε:\n"
+                    "  • Αύξησε το max_time_seconds (π.χ. 300)\n"
+                    "  • Χαλάρωσε κάποιους hard constraints\n"
+                    "  • Δοκίμασε permissive mode (parking lot για ό,τι δεν χωράει)"
+                ),
+                stats={
+                    "wall_time": solver.WallTime(),
+                    "branches": solver.NumBranches(),
+                    "conflicts": solver.NumConflicts(),
+                },
+            )
+
+        if result_status == "infeasible":
+            return SolverResult(
+                status="infeasible",
+                message=(
+                    "Οι περιορισμοί σου είναι αντιφατικοί — δεν υπάρχει "
+                    "πρόγραμμα που να τους ικανοποιεί όλους. Δοκίμασε να "
+                    "χαλαρώσεις constraints (π.χ. teacher availability ή "
+                    "max_periods_per_day) ή χρησιμοποίησε permissive mode."
+                ),
+            )
+
         return SolverResult(
             status=result_status,
-            message="Δεν βρέθηκε λύση — ελέγξτε τους περιορισμούς. Μπορεί να είναι αντιφατικοί.",
+            message="Σφάλμα στον solver — επικοινώνησε με τον διαχειριστή.",
         )
