@@ -139,13 +139,18 @@ open http://localhost:8082/docs
 
 ## Known issues
 
-1. **No versioned migrations**: schema ορίζεται από SQLAlchemy models. Αν αλλάξει
-   model, χρειάζεται manual ALTER στο prod DB ή drop+recreate (loss of data).
-   Σύσταση: introduce Alembic σε επόμενο iteration.
+1. ~~No versioned migrations~~ ✅ **Resolved (2026-05-06)** — Alembic
+   εισήχθη στο commit `fa8d556` ("chore: introduce Alembic for versioned
+   schema migrations").
 2. **No authentication**: το API είναι ανοιχτό (κανένα bearer token). Πρόσβαση
    ελέγχεται μόνο μέσω network isolation (το container είναι σε ξεχωριστό
    docker network).
-3. **Self-hosted runner failed** (όπως και το korifi-crm).
+3. **Self-hosted runner τρέχει manual** (όχι μέσω systemd) — επιβιώνει
+   όσο δεν γίνει reboot. Recent deploys δουλεύουν κανονικά.
+   Recommendation: εφαρμογή του pattern που εφαρμόστηκε στο korifi-crm
+   (`/home/coolman/korifi-crm-v2/tools/migrate_runner_to_systemd.sh`)
+   προσαρμοσμένο για το `actions.runner.panoscoolman-beep-EduScheduler.*`
+   service — drop-in override με `Restart=on-failure`.
 4. **Frontend είναι vanilla JS** — λιγότερο maintainable από framework. Για
    τώρα δουλεύει — refactor σε React/Svelte θα ήταν επόμενη εργασία.
 
