@@ -516,83 +516,266 @@ class TimetableSolver:
         for constraint in active_soft:
             rule = json.loads(constraint.rule)
             rule_type = rule.get("type")
+            weight = max(1, constraint.weight)
 
             if rule_type == "min_teacher_gaps":
-                self._soft_min_teacher_gaps(days, constraint.weight)
+                self._soft_min_teacher_gaps(days, weight)
             elif rule_type == "min_class_gaps":
-                self._soft_min_class_gaps(days, constraint.weight)
+                self._soft_min_class_gaps(days, weight)
             elif rule_type == "subject_distribution":
-                self._soft_subject_distribution(days, constraint.weight)
+                self._soft_subject_distribution(days, weight)
             elif rule_type == "teacher_day_balance":
-                self._soft_teacher_day_balance(days, constraint.weight)
+                self._soft_teacher_day_balance(days, weight)
+            elif rule_type == "no_late_day":
+                # rule: {"type":"no_late_day", "max_period_index": 5,
+                #        "scope": "class"|"teacher"|"all", "id": <int>|null}
+                self._soft_no_late_day(days, weight, rule)
+            elif rule_type == "teacher_preferred_days":
+                # rule: {"type":"teacher_preferred_days",
+                #        "teacher_id": <int>, "days": [0,2,4]}
+                self._soft_teacher_preferred_days(days, weight, rule)
+            elif rule_type == "consecutive_blocks_preference":
+                # rule: {"type":"consecutive_blocks_preference"} — no params
+                self._soft_consecutive_blocks(days, weight)
+            elif rule_type == "class_compactness":
+                # rule: {"type":"class_compactness"} — soft penalty per
+                # additional teaching day a class occupies beyond minimum
+                self._soft_class_compactness(days, weight)
+
+    def _build_busy_indicators(self, days: range, owner_lessons_map: dict[int, list]):
+        """For each (owner_id, day, period_idx) build a BoolVar that is 1
+        if any of `owner_lessons_map[owner_id]` is taught at that slot
+        (across any room). Used by gap/late-day/preferred-day constraints
+        so the OR-tools logic is identical regardless of whose schedule
+        we're examining (teacher / class / room / student).
+
+        Returns dict[(owner_id, day, period_idx)] -> BoolVar.
+        """
+        busy: dict[tuple[int, int, int], cp_model.IntVar] = {}
+        period_ids = self._teaching_period_ids
+
+        for owner_id, owner_lessons in owner_lessons_map.items():
+            for day in days:
+                for p_idx, p_id in enumerate(period_ids):
+                    vars_at = []
+                    for lesson in owner_lessons:
+                        for room in self._get_available_rooms(lesson):
+                            key = (lesson.id, day, p_id, room.id)
+                            if key in self.x:
+                                vars_at.append(self.x[key])
+                    if not vars_at:
+                        # owner cannot teach/learn at this slot — encode as 0
+                        zero = self.model.NewIntVar(0, 0, f"zero_{owner_id}_{day}_{p_idx}")
+                        busy[(owner_id, day, p_idx)] = zero
+                        continue
+                    is_busy = self.model.NewBoolVar(
+                        f"busy_{owner_id}_d{day}_p{p_idx}"
+                    )
+                    # is_busy = max(vars_at)
+                    self.model.AddMaxEquality(is_busy, vars_at)
+                    busy[(owner_id, day, p_idx)] = is_busy
+        return busy
+
+    def _count_blocks_per_day(self, busy: dict, owner_id: int, day: int,
+                              n_periods: int, label: str) -> cp_model.IntVar:
+        """Count how many separate teaching blocks (consecutive runs of
+        busy=1 periods) the owner has on this day. Returns an IntVar.
+        """
+        # A "block start" at period i = busy[i]=1 AND (i==0 OR busy[i-1]=0).
+        # Number of blocks = sum of block_starts.
+        starts = []
+        for i in range(n_periods):
+            s = self.model.NewBoolVar(f"start_{label}_{owner_id}_d{day}_p{i}")
+            curr = busy[(owner_id, day, i)]
+            if i == 0:
+                # s = curr
+                self.model.Add(s == curr)
+            else:
+                prev = busy[(owner_id, day, i - 1)]
+                # s = 1 iff curr=1 AND prev=0
+                # Reified: s <= curr, s <= 1-prev, s >= curr - prev
+                self.model.Add(s <= curr)
+                self.model.Add(s <= 1 - prev)
+                self.model.Add(s >= curr - prev)
+            starts.append(s)
+        n_blocks = self.model.NewIntVar(0, n_periods, f"nblocks_{label}_{owner_id}_d{day}")
+        self.model.Add(n_blocks == sum(starts))
+        return n_blocks
 
     def _soft_min_teacher_gaps(self, days: range, weight: int):
-        """Minimize gaps in teacher schedules (penalize free periods between lessons)."""
-        for teacher_id, teacher_lessons in self._lessons_by_teacher.items():
+        """Penalize fragmented teacher days. Σκορ = (blocks - 1) ανά μέρα,
+        scaled by weight. Δουλεύει σωστά: όταν ο καθηγητής έχει 1 block
+        (consecutive teaching) η ποινή είναι 0· για κάθε επιπλέον block
+        προστίθεται weight."""
+        busy = self._build_busy_indicators(days, self._lessons_by_teacher)
+        n_periods = len(self._teaching_period_ids)
+        for teacher_id in self._lessons_by_teacher:
             for day in days:
-                # For each pair of non-consecutive teaching slots, penalize if gap
-                period_ids = self._teaching_period_ids
-                for i in range(len(period_ids)):
-                    for j in range(i + 2, len(period_ids)):
-                        # Teacher teaches at period i and j but not at periods between
-                        teaches_at_i = []
-                        teaches_at_j = []
-                        teaches_between = []
-
-                        for lesson in teacher_lessons:
-                            rooms = self._get_available_rooms(lesson)
-                            for room in rooms:
-                                key_i = (lesson.id, day, period_ids[i], room.id)
-                                key_j = (lesson.id, day, period_ids[j], room.id)
-                                if key_i in self.x:
-                                    teaches_at_i.append(self.x[key_i])
-                                if key_j in self.x:
-                                    teaches_at_j.append(self.x[key_j])
-
-                                for k in range(i + 1, j):
-                                    key_k = (lesson.id, day, period_ids[k], room.id)
-                                    if key_k in self.x:
-                                        teaches_between.append(self.x[key_k])
-
-                        # Only penalize single-period gaps to keep model manageable
-                        if j == i + 2 and teaches_at_i and teaches_at_j and not teaches_between:
-                            gap_penalty = self.model.NewBoolVar(
-                                f"gap_t{teacher_id}_d{day}_p{i}_{j}"
-                            )
-                            # gap_penalty = 1 if teacher teaches at i and j but not between
-                            self.model.AddBoolOr(
-                                [gap_penalty.Not()] +
-                                [v.Not() for v in teaches_at_i]
-                            )
-                            self.model.AddBoolOr(
-                                [gap_penalty.Not()] +
-                                [v.Not() for v in teaches_at_j]
-                            )
-                            self.penalties.append(gap_penalty * weight)
+                n_blocks = self._count_blocks_per_day(
+                    busy, teacher_id, day, n_periods, "tgap"
+                )
+                # gaps = max(0, blocks - 1)
+                gaps = self.model.NewIntVar(0, n_periods, f"tgaps_{teacher_id}_d{day}")
+                self.model.Add(gaps >= n_blocks - 1)
+                self.model.Add(gaps >= 0)
+                self.penalties.append(gaps * weight)
 
     def _soft_min_class_gaps(self, days: range, weight: int):
-        """Minimize gaps in class schedules."""
-        for class_id, class_lessons in self._lessons_by_class.items():
+        """Penalize fragmented class days — ίδιο pattern με τους
+        καθηγητές αλλά για τα τμήματα. Σημαντικό για user experience:
+        τμήμα Α' Λυκείου με 1ω-κενό-1ω-κενό-1ω είναι UX disaster."""
+        busy = self._build_busy_indicators(days, self._lessons_by_class)
+        n_periods = len(self._teaching_period_ids)
+        for class_id in self._lessons_by_class:
             for day in days:
-                period_ids = self._teaching_period_ids
-                for i in range(len(period_ids) - 2):
-                    teaches_at_i = []
-                    teaches_at_next = []
+                n_blocks = self._count_blocks_per_day(
+                    busy, class_id, day, n_periods, "cgap"
+                )
+                gaps = self.model.NewIntVar(0, n_periods, f"cgaps_{class_id}_d{day}")
+                self.model.Add(gaps >= n_blocks - 1)
+                self.model.Add(gaps >= 0)
+                self.penalties.append(gaps * weight)
 
-                    for lesson in class_lessons:
-                        rooms = self._get_available_rooms(lesson)
-                        for room in rooms:
-                            key_i = (lesson.id, day, period_ids[i], room.id)
-                            key_next = (lesson.id, day, period_ids[i + 2], room.id)
-                            if key_i in self.x:
-                                teaches_at_i.append(self.x[key_i])
-                            if key_next in self.x:
-                                teaches_at_next.append(self.x[key_next])
+    def _soft_no_late_day(self, days: range, weight: int, rule: dict):
+        """Penalize teaching after a configurable late-period threshold.
 
-                    # Simple gap detection for adjacent pairs
-                    if teaches_at_i and teaches_at_next:
-                        gap_var = self.model.NewBoolVar(f"cgap_c{class_id}_d{day}_p{i}")
-                        self.penalties.append(gap_var * weight)
+        Rule format:
+            {"type": "no_late_day",
+             "max_period_index": 5,            # 0-indexed; teach beyond this = penalty
+             "scope": "class"|"teacher"|"all", # whose schedule to check
+             "id": <int>|null}                 # specific owner if not "all"
+        """
+        max_idx = int(rule.get("max_period_index", len(self._teaching_period_ids) - 1))
+        scope = rule.get("scope", "all")
+        target_id = rule.get("id")
+
+        if scope == "teacher":
+            owners = self._lessons_by_teacher
+        elif scope == "class":
+            owners = self._lessons_by_class
+        else:
+            # 'all' = sum over each class (roof penalty for everyone)
+            owners = self._lessons_by_class
+
+        if target_id is not None:
+            owners = {target_id: owners.get(target_id, [])} if target_id in owners else {}
+
+        busy = self._build_busy_indicators(days, owners)
+        n_periods = len(self._teaching_period_ids)
+        for owner_id in owners:
+            for day in days:
+                for i in range(max_idx + 1, n_periods):
+                    # Each late period busy = 1 contributes weight to penalty.
+                    self.penalties.append(busy[(owner_id, day, i)] * weight)
+
+    def _soft_teacher_preferred_days(self, days: range, weight: int, rule: dict):
+        """Penalize teaching on a teacher's non-preferred days.
+
+        Rule format:
+            {"type": "teacher_preferred_days",
+             "teacher_id": <int>,
+             "days": [0, 2, 4]}     # preferred day indices (Mon=0)
+        """
+        teacher_id = rule.get("teacher_id")
+        preferred = set(rule.get("days") or [])
+        if teacher_id is None or not preferred:
+            return
+        if teacher_id not in self._lessons_by_teacher:
+            return
+
+        busy = self._build_busy_indicators(
+            days, {teacher_id: self._lessons_by_teacher[teacher_id]}
+        )
+        n_periods = len(self._teaching_period_ids)
+        for day in days:
+            if day in preferred:
+                continue
+            for i in range(n_periods):
+                # Each unwanted-day teaching slot adds weight
+                self.penalties.append(busy[(teacher_id, day, i)] * weight)
+
+    def _soft_consecutive_blocks(self, days: range, weight: int):
+        """For lessons with periods_per_week >= 2 και distribution κενό
+        (= όλα 1ωρα μπλοκ), προτίμησε τα 1ωρα να γίνουν διπλά consecutive.
+
+        Δηλαδή: για μάθημα 4 ωρών την εβδομάδα, αντί 4×1ω σκόρπια,
+        προτίμησε 2×2ω (αν δεν υπάρχει explicit distribution).
+        Είναι soft: αν δεν χωράνε διπλά, ο solver τα κάνει 1ωρα κανονικά.
+        """
+        for lesson in self.lessons:
+            if lesson.periods_per_week < 2:
+                continue
+            if lesson.distribution and lesson.distribution.strip():
+                continue  # user explicitly specified distribution — respect it
+
+            rooms = self._get_available_rooms(lesson)
+            if not rooms:
+                continue
+
+            for day in days:
+                # consec_pairs[i] = 1 if lesson active at i AND i+1 (same room)
+                consec_count = []
+                for room in rooms:
+                    for i in range(len(self.periods) - 1):
+                        p1 = self.periods[i]
+                        p2 = self.periods[i + 1]
+                        k1 = (lesson.id, day, p1.id, room.id)
+                        k2 = (lesson.id, day, p2.id, room.id)
+                        if k1 in self.x and k2 in self.x:
+                            pair = self.model.NewBoolVar(
+                                f"consec_l{lesson.id}_d{day}_p{i}_r{room.id}"
+                            )
+                            self.model.Add(pair <= self.x[k1])
+                            self.model.Add(pair <= self.x[k2])
+                            self.model.Add(pair >= self.x[k1] + self.x[k2] - 1)
+                            consec_count.append(pair)
+
+                # Reward consecutive pairs by NEGATIVE penalty (=bonus).
+                # Each pair on this day is worth `weight` toward the goal.
+                for c in consec_count:
+                    self.penalties.append((1 - c) * (weight // 4 if weight >= 4 else 1))
+
+    def _soft_class_compactness(self, days: range, weight: int):
+        """Penalize spreading a class's lessons across more days than
+        necessary. A class with 6 lessons/week distributed over 5 days
+        feels worse than 6 over 3 days."""
+        n_periods = len(self._teaching_period_ids)
+        for class_id, class_lessons in self._lessons_by_class.items():
+            total_lessons = sum(l.periods_per_week for l in class_lessons)
+            if total_lessons == 0:
+                continue
+            # Minimum days needed = ceil(total / n_periods)
+            min_days = -(-total_lessons // n_periods)
+
+            day_active_vars = []
+            for day in days:
+                vars_in_day = []
+                for lesson in class_lessons:
+                    for room in self._get_available_rooms(lesson):
+                        for period in self.periods:
+                            key = (lesson.id, day, period.id, room.id)
+                            if key in self.x:
+                                vars_in_day.append(self.x[key])
+                if not vars_in_day:
+                    continue
+                day_active = self.model.NewBoolVar(
+                    f"comp_c{class_id}_d{day}"
+                )
+                self.model.AddMaxEquality(day_active, vars_in_day)
+                day_active_vars.append(day_active)
+
+            if not day_active_vars:
+                continue
+            n_active_days = self.model.NewIntVar(
+                0, self.days_per_week, f"comp_c{class_id}_n"
+            )
+            self.model.Add(n_active_days == sum(day_active_vars))
+            excess = self.model.NewIntVar(
+                0, self.days_per_week, f"comp_c{class_id}_x"
+            )
+            self.model.Add(excess >= n_active_days - min_days)
+            self.model.Add(excess >= 0)
+            self.penalties.append(excess * weight)
 
     def _soft_subject_distribution(self, days: range, weight: int):
         """Try to spread lessons of same subject across different days."""
