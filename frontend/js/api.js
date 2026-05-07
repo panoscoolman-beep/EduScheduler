@@ -105,6 +105,7 @@ const API = {
     },
     solver: {
         generate: (data) => API.post('/solver/generate', data),
+        regenerateWithLocks: (sourceId, data) => API.post(`/solver/regenerate/${sourceId}`, data),
         listSolutions: () => API.get('/solver/solutions'),
         getSolution: (id) => API.get(`/solver/solutions/${id}`),
         deleteSolution: (id) => API.delete(`/solver/solutions/${id}`),

@@ -90,6 +90,129 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/regenerate/{source_solution_id}", response_model=SolverStatusResponse)
+def regenerate_with_locks(
+    source_solution_id: int,
+    request: SolverRequest,
+    db: Session = Depends(get_db),
+):
+    """Run the solver again, keeping every is_locked=TRUE slot from a
+    source solution as hard fixed points. The unlocked slots are
+    redistributed.
+
+    The result is a NEW solution (we don't mutate the source) so
+    history is preserved and the user can compare the two.
+    """
+    source = db.query(TimetableSolution).filter(
+        TimetableSolution.id == source_solution_id
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Η λύση πηγή δεν βρέθηκε")
+
+    locked_slots = (
+        db.query(TimetableSlot)
+        .filter(
+            TimetableSlot.solution_id == source_solution_id,
+            TimetableSlot.is_locked == True,  # noqa: E712
+            TimetableSlot.is_unplaced == False,  # noqa: E712
+        )
+        .all()
+    )
+
+    if not locked_slots:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Δεν έχει κλειδωθεί κανένα μάθημα. Πάτησε το 🔒 σε "
+                "όσα θες να διατηρήσεις και ξανατρέξε."
+            ),
+        )
+
+    locked_assignments = [
+        {
+            "lesson_id": s.lesson_id,
+            "day_of_week": s.day_of_week,
+            "period_id": s.period_id,
+            "classroom_id": s.classroom_id,
+        }
+        for s in locked_slots
+    ]
+
+    # Create the new solution record
+    solution = TimetableSolution(
+        name=request.name or f"{source.name} (regenerated)",
+        status="generating",
+        created_at=datetime.utcnow(),
+    )
+    db.add(solution)
+    db.commit()
+    db.refresh(solution)
+
+    solver = TimetableSolver(
+        db,
+        max_time_seconds=request.max_time_seconds,
+        mode=request.mode,
+        locked_assignments=locked_assignments,
+    )
+    result = solver.solve()
+
+    solution.status = result.status
+    solution.score = result.score
+    stats = dict(result.stats)
+    stats["locked_from_solution"] = source_solution_id
+    stats["locked_count"] = len(locked_assignments)
+    solution.metadata_json = json.dumps(stats, default=str)
+
+    if result.status in ("optimal", "feasible"):
+        # Determine which placed slots correspond to the original locks
+        # so we can preserve their is_locked flag in the new solution.
+        locked_keys = {
+            (la["lesson_id"], la["day_of_week"], la["period_id"], la["classroom_id"])
+            for la in locked_assignments
+        }
+        for slot_data in result.slots:
+            key = (
+                slot_data["lesson_id"],
+                slot_data["day_of_week"],
+                slot_data["period_id"],
+                slot_data["classroom_id"],
+            )
+            slot = TimetableSlot(
+                solution_id=solution.id,
+                lesson_id=slot_data["lesson_id"],
+                day_of_week=slot_data["day_of_week"],
+                period_id=slot_data["period_id"],
+                classroom_id=slot_data["classroom_id"],
+                is_unplaced=False,
+                is_locked=key in locked_keys,
+            )
+            db.add(slot)
+
+        for entry in result.unplaced:
+            slot = TimetableSlot(
+                solution_id=solution.id,
+                lesson_id=entry["lesson_id"],
+                day_of_week=None,
+                period_id=None,
+                classroom_id=None,
+                is_unplaced=True,
+                unplaced_reason=entry.get("reason"),
+            )
+            db.add(slot)
+
+    db.commit()
+    db.refresh(solution)
+
+    return SolverStatusResponse(
+        solution_id=solution.id,
+        status=result.status,
+        message=result.message,
+        score=result.score,
+        placed_count=len(result.slots),
+        unplaced_count=len(result.unplaced),
+    )
+
+
 @router.get("/solutions", response_model=list[TimetableSolutionResponse])
 def list_solutions(db: Session = Depends(get_db)):
     """List all generated timetable solutions."""

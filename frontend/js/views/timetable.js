@@ -36,6 +36,7 @@ const TimetableView = {
                     <div class="card-header print-hide">
                         <h2 class="card-title">📋 ${solution.name}</h2>
                         <div>
+                            <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση Προγράμματος" style="margin-right:0.5rem">🖨️ Εκτύπωση</button>
                             <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
                                 ${solution.status === 'optimal' ? 'Βέλτιστο' : solution.status}
@@ -81,6 +82,47 @@ const TimetableView = {
             // Event: Print
             document.getElementById('tt-print').addEventListener('click', () => {
                 window.print();
+            });
+
+            // Event: Lock & Regenerate
+            document.getElementById('tt-regen').addEventListener('click', async () => {
+                const lockedCount = solution.slots.filter(s => s.is_locked && !s.is_unplaced).length;
+                if (lockedCount === 0) {
+                    Toast.error('Δεν έχει κλειδωθεί κανένα μάθημα. Πάτησε το 🔒 σε όσα θες να διατηρήσεις πρώτα.');
+                    return;
+                }
+
+                const newName = prompt(
+                    `Νέα έκδοση προγράμματος βασισμένη σε ${lockedCount} κλειδωμένα μαθήματα.\n` +
+                    'Δώσε όνομα για τη νέα λύση:',
+                    `${solution.name} v2`
+                );
+                if (!newName) return;
+
+                const mode = confirm(
+                    'Θες strict mode; (OK = strict, Cancel = permissive — βάζει ό,τι μπορεί + parking lot)'
+                ) ? 'strict' : 'permissive';
+
+                Toast.success('🧠 Solver εργάζεται…');
+                try {
+                    const result = await API.solver.regenerateWithLocks(solutionId, {
+                        name: newName,
+                        max_time_seconds: 120,
+                        mode,
+                    });
+                    if (result.status === 'optimal' || result.status === 'feasible') {
+                        Toast.success(
+                            `✅ ${result.message} ` +
+                            `(${result.placed_count} placed, ${result.unplaced_count} στο parking)`
+                        );
+                        App._currentSolutionId = result.solution_id;
+                        await this.render(container);
+                    } else {
+                        Toast.error(result.message);
+                    }
+                } catch (err) {
+                    Toast.error(`Regenerate απέτυχε: ${err.message}`);
+                }
             });
 
             // Event: View type change

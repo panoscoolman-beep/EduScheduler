@@ -51,7 +51,8 @@ class TimetableSolver:
     UNPLACED_PENALTY: int = 100_000
 
     def __init__(self, db: Session, max_time_seconds: int = 120,
-                 mode: str = "strict"):
+                 mode: str = "strict",
+                 locked_assignments: list[dict] | None = None):
         """
         Args:
             db: SQLAlchemy session
@@ -59,10 +60,17 @@ class TimetableSolver:
             mode: "strict" (every block must be placed — INFEASIBLE if
                 any can't fit) or "permissive" (blocks are placed when
                 possible, otherwise reported in `result.unplaced`).
+            locked_assignments: optional list of slot dicts that the
+                solver must keep at their (day, period, room). Each
+                entry has lesson_id / day_of_week / period_id /
+                classroom_id. Used by the "lock & regenerate" flow:
+                user marks slots they like, solver redistributes the
+                rest.
         """
         self.db = db
         self.max_time_seconds = max_time_seconds
         self.mode = mode if mode in ("strict", "permissive") else "strict"
+        self.locked_assignments: list[dict] = locked_assignments or []
 
         # Data from DB (loaded in _load_data)
         self.teachers: list[Teacher] = []
@@ -101,6 +109,7 @@ class TimetableSolver:
             self._build_indices()
             self._create_variables()
             self._apply_hard_constraints()
+            self._apply_locked_assignments()
             self._apply_soft_constraints()
 
             # Objective: minimize total penalty
@@ -507,6 +516,42 @@ class TimetableSolver:
                         self.model.Add(day_var == 0)
                 
                 self.model.Add(sum(days_working_vars) <= student.max_days_per_week)
+
+    def _apply_locked_assignments(self):
+        """Force the cells named in self.locked_assignments to 1.
+
+        Used by the "Lock & Regenerate" workflow: the user marks slots
+        they want kept, we run the solver again, and these cells become
+        hard fixed points that the solver builds around.
+
+        If a locked cell points at an x-var that doesn't exist (e.g.
+        because the lesson now has a different classroom_id constraint),
+        we silently skip it rather than make the model infeasible.
+        Genuinely impossible combinations will surface as INFEASIBLE
+        from the regular constraint network.
+        """
+        if not self.locked_assignments:
+            return
+
+        applied = 0
+        for entry in self.locked_assignments:
+            key = (
+                entry.get("lesson_id"),
+                entry.get("day_of_week"),
+                entry.get("period_id"),
+                entry.get("classroom_id"),
+            )
+            if any(v is None for v in key):
+                continue
+            x_var = self.x.get(key)
+            if x_var is None:
+                logger.warning(
+                    "Locked slot %s has no matching x-var, skipping", key
+                )
+                continue
+            self.model.Add(x_var == 1)
+            applied += 1
+        logger.info("Applied %d locked assignments", applied)
 
     def _apply_soft_constraints(self):
         """Apply soft constraints as penalty terms in the objective."""
