@@ -1,0 +1,45 @@
+{
+  "key": "gymnasio",
+  "label": "Φροντιστήριο Γυμνασίου",
+  "description": "Subjects + 3 τάξεις γυμνασίου. Πιο ελαφρύ από Λύκειο, εστίαση σε βασικά μαθήματα.",
+  "school_settings": {
+    "school_name": "Φροντιστήριο Γυμνασίου",
+    "days_per_week": 5,
+    "academic_year": "2026-2027",
+    "institution_type": "frontistirio"
+  },
+  "subjects": [
+    {"name": "Μαθηματικά",       "short_name": "ΜΑΘ", "color": "#3B82F6"},
+    {"name": "Φυσική",           "short_name": "ΦΥΣ", "color": "#10B981"},
+    {"name": "Χημεία",           "short_name": "ΧΗΜ", "color": "#F59E0B"},
+    {"name": "Νεοελληνική",      "short_name": "ΝΕΛ", "color": "#EF4444"},
+    {"name": "Αρχαία",           "short_name": "ΑΡΧ", "color": "#8B5CF6"},
+    {"name": "Ιστορία",          "short_name": "ΙΣΤ", "color": "#F97316"},
+    {"name": "Αγγλικά",          "short_name": "ΑΓΓ", "color": "#A855F7"}
+  ],
+  "classes": [
+    {"name": "Α' Γυμνασίου",     "short_name": "Α-ΓΥΜ"},
+    {"name": "Β' Γυμνασίου",     "short_name": "Β-ΓΥΜ"},
+    {"name": "Γ' Γυμνασίου",     "short_name": "Γ-ΓΥΜ"}
+  ],
+  "classrooms": [
+    {"name": "Αίθουσα 1",        "short_name": "ΑΙΘ-1", "capacity": 15},
+    {"name": "Αίθουσα 2",        "short_name": "ΑΙΘ-2", "capacity": 15}
+  ],
+  "constraints": [
+    {
+      "name": "Ελάχιστα κενά καθηγητών",
+      "constraint_type": "soft",
+      "category": "teacher",
+      "weight": 70,
+      "rule": {"type": "min_teacher_gaps"}
+    },
+    {
+      "name": "Ελάχιστα κενά τμημάτων",
+      "constraint_type": "soft",
+      "category": "class",
+      "weight": 80,
+      "rule": {"type": "min_class_gaps"}
+    }
+  ]
+}

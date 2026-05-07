@@ -118,5 +118,8 @@ const API = {
     settings: {
         get: () => API.get('/settings/'),
         update: (data) => API.put('/settings/', data),
+        listTemplates: () => API.get('/settings/templates'),
+        previewTemplate: (key) => API.post(`/settings/templates/${key}/preview`, {}),
+        applyTemplate: (key) => API.post(`/settings/templates/${key}/apply`, {}),
     },
 };

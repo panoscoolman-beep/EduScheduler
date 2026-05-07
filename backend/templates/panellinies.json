@@ -1,0 +1,57 @@
+{
+  "key": "panellinies",
+  "label": "Πανελλήνιες (4 ομάδες προσανατολισμού)",
+  "description": "Εστιασμένο για τμήματα Γ' Λυκείου που προετοιμάζονται για Πανελλαδικές. Μία τάξη ανά ομάδα + όλα τα εξεταζόμενα μαθήματα.",
+  "school_settings": {
+    "school_name": "Πανελλήνιες",
+    "days_per_week": 6,
+    "academic_year": "2026-2027",
+    "institution_type": "frontistirio"
+  },
+  "subjects": [
+    {"name": "Μαθηματικά Προσανατολισμού",     "short_name": "ΜΑΘ-Π", "color": "#3B82F6"},
+    {"name": "Φυσική Προσανατολισμού",         "short_name": "ΦΥΣ-Π", "color": "#10B981"},
+    {"name": "Χημεία Προσανατολισμού",         "short_name": "ΧΗΜ-Π", "color": "#F59E0B"},
+    {"name": "Βιολογία Προσανατολισμού",       "short_name": "ΒΙΟ-Π", "color": "#84CC16"},
+    {"name": "Πληροφορική",                    "short_name": "ΠΛΗ",   "color": "#06B6D4"},
+    {"name": "Αρχαία Ομάδα 1",                 "short_name": "ΑΡΧ-1", "color": "#8B5CF6"},
+    {"name": "Λατινικά",                       "short_name": "ΛΑΤ",   "color": "#EC4899"},
+    {"name": "Ιστορία",                        "short_name": "ΙΣΤ",   "color": "#F97316"},
+    {"name": "Νεοελληνική Γλώσσα",             "short_name": "ΝΕΓ",   "color": "#EF4444"},
+    {"name": "ΑΟΘ",                            "short_name": "ΑΟΘ",   "color": "#14B8A6"}
+  ],
+  "classes": [
+    {"name": "Ομάδα 1 (Ανθρωπιστικών)",        "short_name": "Π-1"},
+    {"name": "Ομάδα 2 (Θετικών)",              "short_name": "Π-2"},
+    {"name": "Ομάδα 3 (Υγείας/Βιολογικών)",    "short_name": "Π-3"},
+    {"name": "Ομάδα 4 (Οικονομίας/Πληρ.)",     "short_name": "Π-4"}
+  ],
+  "classrooms": [
+    {"name": "Αίθουσα 1",                      "short_name": "ΑΙΘ-1", "capacity": 10},
+    {"name": "Αίθουσα 2",                      "short_name": "ΑΙΘ-2", "capacity": 10},
+    {"name": "Αίθουσα 3",                      "short_name": "ΑΙΘ-3", "capacity": 8}
+  ],
+  "constraints": [
+    {
+      "name": "Ελάχιστα κενά καθηγητών",
+      "constraint_type": "soft",
+      "category": "teacher",
+      "weight": 80,
+      "rule": {"type": "min_teacher_gaps"}
+    },
+    {
+      "name": "Συμπτυγμένο πρόγραμμα τμήματος",
+      "constraint_type": "soft",
+      "category": "class",
+      "weight": 70,
+      "rule": {"type": "class_compactness"}
+    },
+    {
+      "name": "Πανελλαδικά μαθήματα όχι αργά",
+      "constraint_type": "soft",
+      "category": "general",
+      "weight": 50,
+      "rule": {"type": "no_late_day", "max_period_index": 5, "scope": "all"}
+    }
+  ]
+}

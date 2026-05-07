@@ -1,0 +1,64 @@
+{
+  "key": "frontistirio_lykeio",
+  "label": "Φροντιστήριο Λυκείου",
+  "description": "Subjects + classes για φροντιστήριο που καλύπτει Α', Β', Γ' Λυκείου με πανελληνιακή προετοιμασία.",
+  "school_settings": {
+    "school_name": "Φροντιστήριο Λυκείου",
+    "days_per_week": 6,
+    "academic_year": "2026-2027",
+    "institution_type": "frontistirio"
+  },
+  "subjects": [
+    {"name": "Μαθηματικά",       "short_name": "ΜΑΘ", "color": "#3B82F6"},
+    {"name": "Φυσική",           "short_name": "ΦΥΣ", "color": "#10B981"},
+    {"name": "Χημεία",           "short_name": "ΧΗΜ", "color": "#F59E0B"},
+    {"name": "Βιολογία",         "short_name": "ΒΙΟ", "color": "#84CC16"},
+    {"name": "Νεοελληνική",      "short_name": "ΝΕΛ", "color": "#EF4444"},
+    {"name": "Αρχαία",           "short_name": "ΑΡΧ", "color": "#8B5CF6"},
+    {"name": "Λατινικά",         "short_name": "ΛΑΤ", "color": "#EC4899"},
+    {"name": "Ιστορία",          "short_name": "ΙΣΤ", "color": "#F97316"},
+    {"name": "Κοινωνιολογία",    "short_name": "ΚΟΙ", "color": "#06B6D4"},
+    {"name": "Αγγλικά",          "short_name": "ΑΓΓ", "color": "#A855F7"},
+    {"name": "ΑΟΘ",              "short_name": "ΑΟΘ", "color": "#14B8A6"}
+  ],
+  "classes": [
+    {"name": "Α' Λυκείου",       "short_name": "Α-ΛΥΚ"},
+    {"name": "Β' Λυκείου",       "short_name": "Β-ΛΥΚ"},
+    {"name": "Γ' Λυκείου",       "short_name": "Γ-ΛΥΚ"}
+  ],
+  "classrooms": [
+    {"name": "Αίθουσα 1",        "short_name": "ΑΙΘ-1", "capacity": 12},
+    {"name": "Αίθουσα 2",        "short_name": "ΑΙΘ-2", "capacity": 12},
+    {"name": "Αίθουσα 3",        "short_name": "ΑΙΘ-3", "capacity": 8}
+  ],
+  "constraints": [
+    {
+      "name": "Ελάχιστα κενά καθηγητών",
+      "constraint_type": "soft",
+      "category": "teacher",
+      "weight": 70,
+      "rule": {"type": "min_teacher_gaps"}
+    },
+    {
+      "name": "Ελάχιστα κενά τμημάτων",
+      "constraint_type": "soft",
+      "category": "class",
+      "weight": 80,
+      "rule": {"type": "min_class_gaps"}
+    },
+    {
+      "name": "Διασπορά ίδιου μαθήματος σε διαφορετικές μέρες",
+      "constraint_type": "soft",
+      "category": "subject",
+      "weight": 60,
+      "rule": {"type": "subject_distribution"}
+    },
+    {
+      "name": "Συμπτυγμένο πρόγραμμα τμήματος",
+      "constraint_type": "soft",
+      "category": "class",
+      "weight": 50,
+      "rule": {"type": "class_compactness"}
+    }
+  ]
+}
