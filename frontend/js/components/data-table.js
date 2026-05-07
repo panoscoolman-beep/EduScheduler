@@ -2,7 +2,7 @@
  * DataTable Component — Reusable CRUD table with add/edit/delete.
  */
 class DataTable {
-    constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser }) {
+    constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -10,6 +10,7 @@ class DataTable {
         this.slug = entityName.replace(/[^a-zA-Zα-ωΑ-Ω0-9]/g, '_').toLowerCase();
         this.formBuilder = formBuilder;
         this.formParser = formParser;
+        this.onFormReady = onFormReady;  // optional: fired after form DOM is ready
         this.customActions = customActions || [];
         this.data = [];
     }
@@ -133,6 +134,14 @@ class DataTable {
                 Toast.error(err.message);
             }
         });
+
+        // Fire onFormReady after the modal DOM has settled so the
+        // consumer can attach listeners or render dynamic sub-fields.
+        if (typeof this.onFormReady === 'function') {
+            // microtask delay — Modal.open is sync but wait one tick
+            // for any browser layout work to finish
+            setTimeout(() => this.onFormReady(item), 0);
+        }
     }
 
     confirmDelete(id) {
