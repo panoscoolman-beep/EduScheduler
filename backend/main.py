@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend.auth import BearerTokenMiddleware
 from backend.config import settings
 from backend.database import engine, Base
 from backend.routers import (
@@ -47,6 +48,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Bearer auth — guards /api/* unless the request is a same-origin
+# browser call or there's no EDSCHEDULER_API_TOKEN configured (dev mode).
+app.add_middleware(BearerTokenMiddleware)
 
 # API Routes
 app.include_router(teachers.router, prefix="/api/teachers", tags=["Καθηγητές"])
