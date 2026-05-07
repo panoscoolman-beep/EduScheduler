@@ -37,6 +37,7 @@ const TimetableView = {
                         <h2 class="card-title">📋 ${solution.name}</h2>
                         <div>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
+                            <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.5rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση Προγράμματος" style="margin-right:0.5rem">🖨️ Εκτύπωση</button>
                             <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
                                 ${solution.status === 'optimal' ? 'Βέλτιστο' : solution.status}
@@ -82,6 +83,11 @@ const TimetableView = {
             // Event: Print
             document.getElementById('tt-print').addEventListener('click', () => {
                 window.print();
+            });
+
+            // Event: Compare με άλλη λύση
+            document.getElementById('tt-compare').addEventListener('click', async () => {
+                this._openCompareModal(solutions, solutionId);
             });
 
             // Event: Lock & Regenerate
@@ -226,5 +232,117 @@ const TimetableView = {
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
         return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    },
+
+    _esc(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    },
+
+    /**
+     * Open a modal that lets the user pick a second (or third) solution
+     * to compare against the current one. Shows a side-by-side metrics
+     * grid with the winner per row highlighted.
+     */
+    _openCompareModal(solutions, currentId) {
+        const others = solutions.filter(s => s.id !== currentId);
+        if (others.length === 0) {
+            Toast.error('Χρειάζονται ≥2 solutions για σύγκριση. Δημιούργησε άλλο πρώτα.');
+            return;
+        }
+
+        const optionsHtml = others.map(s =>
+            `<label style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0;">
+                <input type="checkbox" class="cmp-pick" value="${s.id}">
+                <span><strong>${s.name}</strong>
+                <span class="text-muted" style="font-size:0.85em">— ${s.status}, score=${s.score?.toFixed(0) || '—'}</span></span>
+            </label>`
+        ).join('');
+
+        Modal.open(
+            '📊 Σύγκριση Λύσεων',
+            `
+            <p class="text-muted" style="margin-bottom:1rem;">
+                Η τρέχουσα λύση συμπεριλαμβάνεται αυτόματα. Επίλεξε
+                ≥1 ακόμα για side-by-side metrics.
+            </p>
+            <div style="margin-bottom:1rem;">${optionsHtml}</div>
+            <div style="text-align:right;">
+                <button class="btn btn-primary" id="cmp-run">📊 Σύγκρινε</button>
+            </div>
+            <div id="cmp-result" style="margin-top:1.5rem;"></div>
+            `,
+            null,
+            { hideFooter: true }
+        );
+
+        document.getElementById('cmp-run').addEventListener('click', async () => {
+            const picked = Array.from(document.querySelectorAll('.cmp-pick:checked'))
+                .map(cb => parseInt(cb.value));
+            if (picked.length === 0) {
+                Toast.error('Επίλεξε τουλάχιστον μία λύση να συγκρίνεις');
+                return;
+            }
+            const ids = [currentId, ...picked];
+            try {
+                const result = await API.solver.compare(ids);
+                this._renderCompareResult(result, document.getElementById('cmp-result'));
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        });
+    },
+
+    _renderCompareResult(result, mountEl) {
+        if (!result.metrics?.length) {
+            mountEl.innerHTML = '<p class="text-muted">Δεν επιστράφηκαν metrics.</p>';
+            return;
+        }
+
+        const metricLabels = {
+            score:               'Σκορ (penalty)',
+            placed_count:        '✅ Τοποθετήθηκαν',
+            unplaced_count:      '🅿️ Στο parking',
+            teacher_gap_total:   'Παράθυρα καθηγητών (σύνολο)',
+            workload_stddev:     'Ανισορροπία ωρών (σ)',
+            avg_days_per_class:  'Μέσος όρος ημερών/τμήμα',
+            max_days_per_class:  'Max ημέρες σε τμήμα',
+            late_periods_used:   'Αργές ώρες (μετά τη μέση)',
+        };
+
+        const metricKeys = Object.keys(metricLabels);
+        const winners = result.winners || {};
+
+        const headerCells = result.metrics.map(m =>
+            `<th>${this._esc(m.name)}</th>`
+        ).join('');
+
+        const rows = metricKeys.map(key => {
+            const cells = result.metrics.map(m => {
+                const value = m[key];
+                const isWinner = winners[key] === m.solution_id;
+                const display = value === null || value === undefined
+                    ? '—'
+                    : (typeof value === 'number' ? value : String(value));
+                return `<td style="${isWinner ? 'background:#D1FAE5; font-weight:600;' : ''}">
+                    ${display}${isWinner ? ' ⭐' : ''}
+                </td>`;
+            }).join('');
+            return `<tr><td><strong>${metricLabels[key]}</strong></td>${cells}</tr>`;
+        }).join('');
+
+        mountEl.innerHTML = `
+            <p class="text-muted" style="font-size:0.85em; margin-bottom:0.5rem;">
+                ⭐ = καλύτερη τιμή για κάθε metric (lower is better, εκτός από Τοποθετήθηκαν).
+            </p>
+            <table class="data-table" style="font-size:0.9em;">
+                <thead>
+                    <tr><th>Metric</th>${headerCells}</tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
     },
 };

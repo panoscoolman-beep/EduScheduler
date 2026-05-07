@@ -286,6 +286,26 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/compare")
+def compare_solutions(ids: str, db: Session = Depends(get_db)):
+    """Side-by-side comparison of 2+ solutions.
+
+    Query: GET /api/solver/compare?ids=1,2,3
+    Returns: {metrics: [...], winners: {metric_name: solution_id}}
+    Lower is better for everything except placed_count.
+    """
+    from backend.services.solution_metrics import compare as svc_compare
+
+    try:
+        id_list = [int(x.strip()) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, detail="ids must be a comma-separated list of integers")
+    if len(id_list) < 1:
+        raise HTTPException(400, detail="At least one solution_id is required")
+
+    return svc_compare(id_list, db)
+
+
 @router.delete("/solutions/{solution_id}", status_code=204)
 def delete_solution(solution_id: int, db: Session = Depends(get_db)):
     """Delete a timetable solution."""

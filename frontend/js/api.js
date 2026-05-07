@@ -114,6 +114,7 @@ const API = {
         getSolution: (id) => API.get(`/solver/solutions/${id}`),
         deleteSolution: (id) => API.delete(`/solver/solutions/${id}`),
         updateSlot: (solutionId, slotId, data) => API.put(`/solver/solutions/${solutionId}/slots/${slotId}`, data),
+        compare: (ids) => API.get(`/solver/compare?ids=${ids.join(',')}`),
     },
     settings: {
         get: () => API.get('/settings/'),
