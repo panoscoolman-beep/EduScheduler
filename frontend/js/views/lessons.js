@@ -271,8 +271,17 @@ const LessonsView = {
                     <input class="form-input" id="f-ppw" type="number" min="1" max="20" value="${item?.periods_per_week || 1}">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Κατανομή σε Blocks (Κενό=Μονά)</label>
-                    <input class="form-input" id="f-dist" type="text" placeholder="π.χ. 2,2,1" value="${item?.distribution || ''}">
+                    <label class="form-label">Κατανομή σε Blocks</label>
+                    <div id="f-dist-chips" style="
+                        display: flex; flex-wrap: wrap; gap: 0.4rem;
+                        margin-bottom: 0.5rem; min-height: 2rem;">
+                        <span class="text-muted" style="font-size:0.85em;">
+                            Συμπλήρωσε ώρες/εβδομάδα και επίλεξε…
+                        </span>
+                    </div>
+                    <input class="form-input" id="f-dist" type="text"
+                           placeholder="π.χ. 2,2,1 (ή κάνε κλικ σε επιλογή)"
+                           value="${item?.distribution || ''}">
                     <p class="text-muted" style="font-size:0.8em; margin-top:0.3rem;">${periodsHint}</p>
                 </div>
             </div>
@@ -304,7 +313,108 @@ const LessonsView = {
                 el.addEventListener('change', update);
             }
         });
+
+        // Wire the distribution chips: re-fetch suggestions whenever
+        // the user changes ppw, and let chip clicks set the dist input.
+        const ppwInput = document.getElementById('f-ppw');
+        const distInput = document.getElementById('f-dist');
+        const refreshChips = () => this._refreshDistributionChips(
+            parseInt(ppwInput.value) || 0, distInput
+        );
+        ppwInput.addEventListener('input', refreshChips);
+        ppwInput.addEventListener('change', refreshChips);
+        // Initial render (use the current ppw value, important for edit mode)
+        refreshChips();
+
         update();
+    },
+
+    /**
+     * Fetch the canonical splits for the current ppw and render them
+     * as clickable chips. Highlights the chip whose `value` matches
+     * what's already in the dist text input (so edit-mode shows the
+     * pre-selected split).
+     */
+    async _refreshDistributionChips(ppw, distInput) {
+        const chipsEl = document.getElementById('f-dist-chips');
+        if (!chipsEl) return;
+        if (!ppw || ppw < 1) {
+            chipsEl.innerHTML = `<span class="text-muted" style="font-size:0.85em;">
+                Συμπλήρωσε ώρες/εβδομάδα και επίλεξε…
+            </span>`;
+            return;
+        }
+
+        try {
+            const resp = await this._cachedSuggestions(ppw);
+            const current = (distInput.value || '').replace(/\s/g, '');
+
+            const chips = resp.options.map(opt => {
+                const isActive = opt.value === current;
+                return `
+                    <button type="button"
+                            class="dist-chip"
+                            data-dist-value="${opt.value}"
+                            style="
+                                padding: 0.35rem 0.7rem;
+                                border-radius: 999px;
+                                border: 1px solid ${isActive ? 'var(--primary, #3B82F6)' : 'var(--border, #d1d5db)'};
+                                background: ${isActive ? 'var(--primary, #3B82F6)' : 'transparent'};
+                                color: ${isActive ? '#fff' : 'inherit'};
+                                font-size: 0.85em;
+                                cursor: pointer;
+                                white-space: nowrap;
+                            "
+                            title="${opt.value}">
+                        ${opt.label}
+                    </button>
+                `;
+            }).join('');
+
+            // Add an "Empty" chip too — sets distribution to blank
+            const emptyActive = current === '';
+            chipsEl.innerHTML = `
+                <button type="button" class="dist-chip" data-dist-value=""
+                        style="
+                            padding: 0.35rem 0.7rem;
+                            border-radius: 999px;
+                            border: 1px dashed ${emptyActive ? 'var(--primary, #3B82F6)' : 'var(--border, #d1d5db)'};
+                            background: ${emptyActive ? 'rgba(59, 130, 246, 0.1)' : 'transparent'};
+                            font-size: 0.85em; cursor: pointer;
+                        ">
+                    χωρίς κατανομή (default)
+                </button>
+                ${chips}
+            `;
+
+            // Wire clicks
+            chipsEl.querySelectorAll('.dist-chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    distInput.value = btn.dataset.distValue || '';
+                    distInput.dispatchEvent(new Event('input'));
+                    // Re-render to update active highlight
+                    this._refreshDistributionChips(ppw, distInput);
+                });
+            });
+        } catch (err) {
+            chipsEl.innerHTML = `<span class="text-muted" style="font-size:0.85em;">
+                ⚠️ Σφάλμα: ${err.message}
+            </span>`;
+        }
+    },
+
+    /**
+     * Tiny memoization so we don't pound the API while the user
+     * types numbers in the ppw input.
+     */
+    async _cachedSuggestions(ppw) {
+        if (!this._suggestionsCache) this._suggestionsCache = new Map();
+        if (this._suggestionsCache.has(ppw)) {
+            return this._suggestionsCache.get(ppw);
+        }
+        const resp = await API.lessonsDistributionSuggestions(ppw);
+        this._suggestionsCache.set(ppw, resp);
+        return resp;
     },
 
     _renderValidationHint() {

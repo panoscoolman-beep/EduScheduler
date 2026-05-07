@@ -46,6 +46,38 @@ def list_lessons(db: Session = Depends(get_db)):
     return [_enrich_lesson(l) for l in lessons]
 
 
+# IMPORTANT: This route must be declared BEFORE `/{lesson_id}` so
+# FastAPI doesn't try to parse 'distribution-suggestions' as an int.
+@router.get("/distribution-suggestions")
+def distribution_suggestions(
+    ppw: int,
+    db: Session = Depends(get_db),
+):
+    """User-friendly suggestions για το πώς να σπάσει `ppw` ώρες
+    σε blocks. Διαβάζει το max_block από `Period` rows (μη-break)."""
+    from backend.services.distribution_helper import common_distributions, label
+    from backend.models import Period
+
+    teaching_periods = (
+        db.query(Period).filter(Period.is_break == False).count()  # noqa: E712
+    )
+    max_block = teaching_periods if teaching_periods > 0 else 8
+
+    splits = common_distributions(ppw, max_block=max_block)
+    return {
+        "ppw": ppw,
+        "max_block": max_block,
+        "options": [
+            {
+                "blocks": s,
+                "label": label(s),
+                "value": ",".join(str(x) for x in s),
+            }
+            for s in splits
+        ],
+    }
+
+
 @router.get("/{lesson_id}", response_model=LessonResponse)
 def get_lesson(lesson_id: int, db: Session = Depends(get_db)):
     lesson = (

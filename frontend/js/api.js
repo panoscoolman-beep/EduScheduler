@@ -92,6 +92,8 @@ const API = {
         preview: (csv) => API.post('/lessons/bulk-import/preview', { csv }),
         commit: (csv) => API.post('/lessons/bulk-import/commit', { csv }),
     },
+    lessonsDistributionSuggestions: (ppw) =>
+        API.get(`/lessons/distribution-suggestions?ppw=${ppw}`),
     lessons: {
         list: () => API.get('/lessons/'),
         get: (id) => API.get(`/lessons/${id}`),
