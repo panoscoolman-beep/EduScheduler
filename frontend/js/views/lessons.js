@@ -50,8 +50,181 @@ const LessonsView = {
             onFormReady: () => self._wireValidation(),
         });
 
-        container.innerHTML = '<div id="lessons-table"></div>';
+        container.innerHTML = `
+            <div class="flex-between mb-lg">
+                <div></div>
+                <button class="btn btn-secondary" id="bulk-import-lessons">
+                    📥 Bulk Import (CSV)
+                </button>
+            </div>
+            <div id="lessons-table"></div>
+        `;
         await table.render(document.getElementById('lessons-table'));
+
+        document.getElementById('bulk-import-lessons')
+            .addEventListener('click', () => self._openBulkImportModal(table));
+    },
+
+    // ---------- bulk import modal -----------------------------------------
+
+    async _openBulkImportModal(table) {
+        const csvHeader = 'subject,teacher,class,classroom,periods_per_week,distribution';
+        const csvSample = [
+            csvHeader,
+            'Μαθηματικά,ΠΠ,Α-ΛΥΚ,ΑΙΘ-1,4,2,2',
+            'Φυσική,ΠΠ,Α-ΛΥΚ,,3,2,1',
+        ].join('\n');
+
+        Modal.open(
+            '📥 Bulk Import Lessons',
+            `
+            <p class="text-muted" style="margin-bottom:1rem;">
+                Επικόλλησε CSV ή ανέβασε αρχείο. Μπορείς να χρησιμοποιήσεις
+                πλήρες όνομα ή <em>short_name</em> για subject/teacher/class/classroom.
+                Η στήλη <code>distribution</code> αποδέχεται κόμμα-χωρισμένα
+                blocks (π.χ. 2,2 για 4 ώρες).
+            </p>
+            <div class="form-group">
+                <label class="form-label">CSV αρχείο</label>
+                <input type="file" id="bulk-csv-file" accept=".csv,.txt"
+                       class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">ή paste CSV εδώ</label>
+                <textarea class="form-input" id="bulk-csv-text" rows="8"
+                          style="font-family: monospace; font-size: 0.9em;"
+                          placeholder="${csvHeader}\n...">${csvSample}</textarea>
+            </div>
+            <div style="margin: 0.5rem 0;">
+                <button class="btn btn-primary" id="bulk-preview-btn">
+                    👁️ Preview
+                </button>
+            </div>
+            <div id="bulk-preview-result" style="margin-top:1rem;"></div>
+            `,
+            null,  // No save handler — we use our own footer
+            { hideFooter: true }
+        );
+
+        const fileInput = document.getElementById('bulk-csv-file');
+        const textArea = document.getElementById('bulk-csv-text');
+        const previewBtn = document.getElementById('bulk-preview-btn');
+        const resultArea = document.getElementById('bulk-preview-result');
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                textArea.value = await file.text();
+            }
+        });
+
+        previewBtn.addEventListener('click', async () => {
+            const csv = textArea.value;
+            if (!csv.trim()) {
+                Toast.error('Παρακαλώ δώσε CSV πρώτα');
+                return;
+            }
+            previewBtn.disabled = true;
+            previewBtn.textContent = '⏳ Validating...';
+            try {
+                const result = await API.lessonsBulkImport.preview(csv);
+                this._renderPreviewResult(result, csv, table, resultArea);
+            } catch (err) {
+                Toast.error(err.message);
+            }
+            previewBtn.disabled = false;
+            previewBtn.textContent = '👁️ Preview';
+        });
+    },
+
+    _renderPreviewResult(result, csvText, table, resultArea) {
+        if (result.fatal_error) {
+            resultArea.innerHTML = `
+                <div style="background:#FEE2E2; color:#991B1B; padding:0.75rem; border-radius:4px;">
+                    ⛔ ${result.fatal_error}
+                </div>
+            `;
+            return;
+        }
+
+        const total = result.rows.length;
+        const hasErrors = result.error_count > 0;
+
+        const rowsHtml = result.rows.map(r => {
+            const icon = r.is_valid ? '✅' : '⛔';
+            const bg = r.is_valid ? '' : 'background:#FEF3C7;';
+            const errorsHtml = r.errors.length
+                ? `<div style="color:#991B1B; font-size:0.85em;">${r.errors.map(e => '• ' + e).join('<br>')}</div>`
+                : '';
+            return `
+                <tr style="${bg}">
+                    <td>${icon}</td>
+                    <td>${r.line_number}</td>
+                    <td>${this._esc(r.raw.subject || '')}</td>
+                    <td>${this._esc(r.raw.teacher || '')}</td>
+                    <td>${this._esc(r.raw.class || '')}</td>
+                    <td>${this._esc(r.raw.classroom || '—')}</td>
+                    <td>${this._esc(r.raw.periods_per_week || '')}</td>
+                    <td>${this._esc(r.raw.distribution || '—')}${errorsHtml}</td>
+                </tr>
+            `;
+        }).join('');
+
+        resultArea.innerHTML = `
+            <div style="display:flex; gap:1rem; margin-bottom:0.5rem;">
+                <div style="background:#D1FAE5; padding:0.5rem 0.75rem; border-radius:4px;">
+                    ✅ ${result.valid_count} έγκυρες
+                </div>
+                <div style="background:${hasErrors ? '#FEE2E2' : '#D1FAE5'}; padding:0.5rem 0.75rem; border-radius:4px;">
+                    ${hasErrors ? '⛔' : '✅'} ${result.error_count} με σφάλμα
+                </div>
+                <div style="background:#F3F4F6; padding:0.5rem 0.75rem; border-radius:4px;">
+                    Σύνολο: ${total}
+                </div>
+            </div>
+            <table class="data-table" style="font-size:0.9em;">
+                <thead>
+                    <tr><th></th><th>#</th><th>Subject</th><th>Teacher</th><th>Class</th><th>Room</th><th>ppw</th><th>Distribution</th></tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+            <div style="margin-top:1rem; display:flex; gap:0.5rem; justify-content:flex-end;">
+                <button class="btn btn-secondary" id="bulk-cancel">Άκυρο</button>
+                <button class="btn btn-success" id="bulk-commit"
+                        ${hasErrors ? 'disabled' : ''}
+                        title="${hasErrors ? 'Διόρθωσε πρώτα τα σφάλματα' : ''}">
+                    ✅ Εισαγωγή ${result.valid_count} lessons
+                </button>
+            </div>
+        `;
+
+        document.getElementById('bulk-cancel').addEventListener('click', () => Modal.close());
+        document.getElementById('bulk-commit').addEventListener('click', async () => {
+            const btn = document.getElementById('bulk-commit');
+            btn.disabled = true;
+            btn.textContent = '⏳ Commit...';
+            try {
+                const summary = await API.lessonsBulkImport.commit(csvText);
+                if (summary.status === 'ok') {
+                    Toast.success(summary.message);
+                    Modal.close();
+                    await table.loadData();
+                } else {
+                    Toast.error(summary.message);
+                }
+            } catch (err) {
+                Toast.error(err.message);
+            }
+            btn.disabled = false;
+            btn.textContent = '✅ Εισαγωγή';
+        });
+    },
+
+    _esc(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     },
 
     // ---------- form -------------------------------------------------------

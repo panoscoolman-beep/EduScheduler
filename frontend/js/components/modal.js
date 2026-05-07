@@ -11,10 +11,19 @@ const Modal = {
         document.getElementById('modal-body').innerHTML = bodyHTML;
 
         const saveBtn = document.getElementById('modal-save');
-        saveBtn.textContent = options.saveText || 'Αποθήκευση';
-        saveBtn.className = `btn ${options.saveClass || 'btn-primary'}`;
+        const cancelBtn = document.getElementById('modal-cancel');
+        const footer = saveBtn?.parentElement;
 
-        if (options.wide) {
+        if (options.hideFooter && footer) {
+            footer.style.display = 'none';
+        } else if (footer) {
+            footer.style.display = '';
+            saveBtn.textContent = options.saveText || 'Αποθήκευση';
+            saveBtn.className = `btn ${options.saveClass || 'btn-primary'}`;
+        }
+
+        if (options.wide || options.hideFooter) {
+            // Wide modal also when we hide the default footer (bulk import etc.)
             modalEl.style.width = 'min(95vw, 800px)';
         } else {
             modalEl.style.width = 'min(90vw, 560px)';

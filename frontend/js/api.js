@@ -88,6 +88,10 @@ const API = {
         delete: (id) => API.delete(`/periods/${id}`),
         seedDefaults: () => API.post('/periods/seed-defaults', {}),
     },
+    lessonsBulkImport: {
+        preview: (csv) => API.post('/lessons/bulk-import/preview', { csv }),
+        commit: (csv) => API.post('/lessons/bulk-import/commit', { csv }),
+    },
     lessons: {
         list: () => API.get('/lessons/'),
         get: (id) => API.get(`/lessons/${id}`),

@@ -125,3 +125,60 @@ def delete_lesson(lesson_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
     db.delete(lesson)
     db.commit()
+
+
+@router.post("/bulk-import/preview")
+def bulk_import_preview(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """Parse CSV text and return per-row validation. Read-only — no
+    rows are inserted yet. The user reviews, then calls /commit.
+
+    Body: {"csv": "<header line>\\n<data...>"}
+    """
+    from backend.services.lesson_importer import preview as svc_preview
+
+    csv_text = payload.get("csv", "")
+    result = svc_preview(csv_text, db)
+    return {
+        "fatal_error": result.fatal_error,
+        "valid_count": result.valid_count,
+        "error_count": result.error_count,
+        "rows": [
+            {
+                "line_number": r.line_number,
+                "raw": r.raw,
+                "is_valid": r.is_valid,
+                "errors": r.errors,
+                "subject_id": r.subject_id,
+                "teacher_id": r.teacher_id,
+                "class_id": r.class_id,
+                "classroom_id": r.classroom_id,
+                "periods_per_week": r.periods_per_week,
+                "distribution": r.distribution,
+            }
+            for r in result.rows
+        ],
+    }
+
+
+@router.post("/bulk-import/commit")
+def bulk_import_commit(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """Commit a previously-previewed import. Body must echo the same
+    CSV text — we re-parse and re-validate server-side to defend
+    against tampering between preview and commit."""
+    from backend.services.lesson_importer import (
+        preview as svc_preview,
+        commit as svc_commit,
+    )
+
+    csv_text = payload.get("csv", "")
+    result = svc_preview(csv_text, db)
+    if result.fatal_error:
+        return {"status": "error", "message": result.fatal_error, "created": 0}
+
+    return svc_commit(result.rows, db)
