@@ -6,8 +6,14 @@ const TimetableView = {
         container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>`;
 
         try {
-            const solutions = await API.solver.listSolutions();
-            const periods = await API.periods.list();
+            const [solutions, periods, settings] = await Promise.all([
+                API.solver.listSolutions(),
+                API.periods.list(),
+                API.settings.get(),
+            ]);
+            // Honour school_settings.days_per_week — until now this was
+            // hardcoded to 5, hiding any slots placed on Σάβ/Κυρ.
+            const daysCount = settings.days_per_week || 5;
 
             if (!solutions.length) {
                 container.innerHTML = `
@@ -77,7 +83,7 @@ const TimetableView = {
 
             // Initial render
             const firstFilter = 'all';
-            TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, 'class', firstFilter, solutionId);
+            TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,'class', firstFilter, solutionId);
             this._renderParkingLot('parking-lot-container', solution.slots, solutionId);
 
             // Event: Print
@@ -141,13 +147,13 @@ const TimetableView = {
 
                 filterSelect.innerHTML = `<option value="all">-- Προβολή Όλων --</option>` + 
                                          options.map(n => `<option value="${n}">${n}</option>`).join('');
-                TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, e.target.value, 'all', solutionId);
+                TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,e.target.value, 'all', solutionId);
             });
 
             // Event: Filter change
             document.getElementById('tt-filter').addEventListener('change', (e) => {
                 const viewType = document.getElementById('tt-view-type').value;
-                TimetableGrid.render('timetable-grid-view', solution.slots, periods, 5, viewType, e.target.value, solutionId);
+                TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,viewType, e.target.value, solutionId);
             });
 
             // Event: Solution change
