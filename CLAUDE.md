@@ -1,5 +1,10 @@
 # EduScheduler — Master Documentation
 
+> **🎯 Resuming work?** Read
+> [`/home/coolman/korifi-crm-v2/SESSION_STATE.md`](../korifi-crm-v2/SESSION_STATE.md)
+> first — has the live state from the last session across both repos.
+> Updated 2026-05-08.
+
 Αυτόματο ωρολόγιο πρόγραμμα για σχολεία & φροντιστήρια. Χρησιμοποιεί Google
 OR-Tools CP-SAT solver για να βγάλει βέλτιστα προγράμματα με δεκάδες
 περιορισμούς (διαθεσιμότητα καθηγητών, μαθητών, αιθουσών, σύγκρουση αδειών,
