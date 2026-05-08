@@ -29,12 +29,27 @@ const TimetableView = {
 
             // Pick solution (latest or specified)
             const solutionId = App._currentSolutionId || solutions[0].id;
-            const solution = await API.solver.getSolution(solutionId);
+            const [solution, students] = await Promise.all([
+                API.solver.getSolution(solutionId),
+                API.students.list().catch(() => []),
+            ]);
 
             // Extract unique values for filters
             const classNames = [...new Set(solution.slots.map(s => s.class_name).filter(Boolean))];
             const teacherNames = [...new Set(solution.slots.map(s => s.teacher_name).filter(Boolean))];
             const roomNames = [...new Set(solution.slots.map(s => s.classroom_name).filter(Boolean))];
+
+            // Student dropdown shows "Last First" labels. Each label maps
+            // to the set of class_ids the student is enrolled in, so the
+            // grid can filter slots whose lesson belongs to those classes.
+            const studentByLabel = new Map();
+            for (const st of students) {
+                const label = `${st.last_name} ${st.first_name}`.trim();
+                studentByLabel.set(label, new Set(st.class_ids || []));
+            }
+            const studentNames = Array.from(studentByLabel.keys()).sort((a, b) =>
+                a.localeCompare(b, 'el')
+            );
 
             container.innerHTML = `
                 <div class="card mb-lg">
@@ -61,6 +76,7 @@ const TimetableView = {
                                 <option value="class">Τάξη</option>
                                 <option value="teacher">Καθηγητή</option>
                                 <option value="room">Αίθουσα</option>
+                                <option value="student">Μαθητή</option>
                             </select>
                         </div>
                         <div class="form-group" style="margin:0; min-width: 200px;">
@@ -145,23 +161,41 @@ const TimetableView = {
                 }
             });
 
+            // Slots passed to the grid. For "student" view we pre-filter
+            // to only the slots whose class the selected student attends;
+            // the grid itself doesn't know about students. "all" shows
+            // every slot across every class the students collectively
+            // touch — not super useful but consistent with other views.
+            const slotsForView = (viewType, filterValue) => {
+                if (viewType !== 'student' || !filterValue || filterValue === 'all') {
+                    return solution.slots;
+                }
+                const allowedClassIds = studentByLabel.get(filterValue);
+                if (!allowedClassIds || allowedClassIds.size === 0) {
+                    return [];
+                }
+                return solution.slots.filter(s => allowedClassIds.has(s.class_id));
+            };
+
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
                 const filterSelect = document.getElementById('tt-filter');
+                const vt = e.target.value;
                 let options = [];
-                if (e.target.value === 'class') options = classNames;
-                else if (e.target.value === 'teacher') options = teacherNames;
+                if (vt === 'class') options = classNames;
+                else if (vt === 'teacher') options = teacherNames;
+                else if (vt === 'student') options = studentNames;
                 else options = roomNames;
 
-                filterSelect.innerHTML = `<option value="all">-- Προβολή Όλων --</option>` + 
-                                         options.map(n => `<option value="${n}">${n}</option>`).join('');
-                TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,e.target.value, 'all', solutionId);
+                filterSelect.innerHTML = `<option value="all">-- Προβολή Όλων --</option>` +
+                                         options.map(n => `<option value="${this._esc(n)}">${this._esc(n)}</option>`).join('');
+                TimetableGrid.render('timetable-grid-view', slotsForView(vt, 'all'), periods, daysCount, vt, 'all', solutionId);
             });
 
             // Event: Filter change
             document.getElementById('tt-filter').addEventListener('change', (e) => {
                 const viewType = document.getElementById('tt-view-type').value;
-                TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,viewType, e.target.value, solutionId);
+                TimetableGrid.render('timetable-grid-view', slotsForView(viewType, e.target.value), periods, daysCount, viewType, e.target.value, solutionId);
             });
 
             // Event: Solution change

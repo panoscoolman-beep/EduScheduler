@@ -139,6 +139,7 @@ class StudentCreate(StudentBase):
 
 class StudentResponse(StudentBase):
     id: int
+    class_ids: list[int] = []
 
     class Config:
         from_attributes = True

@@ -61,6 +61,14 @@ const TimetableGrid = {
                         line1 = slot.subject_short || slot.subject_name;
                         line2 = slot.class_short || slot.class_name;
                         line3 = slot.classroom_name;
+                    } else if (viewType === 'student') {
+                        // Student: priority is subject + which class
+                        // it's with + which room. Teacher takes a back
+                        // seat since a student usually knows them from
+                        // the class.
+                        line1 = slot.subject_short || slot.subject_name;
+                        line2 = slot.class_short || slot.class_name;
+                        line3 = slot.classroom_name;
                     } else {
                         line1 = slot.subject_short || slot.subject_name;
                         line2 = slot.class_short || slot.class_name;

@@ -144,6 +144,12 @@ class Student(Base):
     def full_name(self):
         return f"{self.last_name} {self.first_name}"
 
+    @property
+    def class_ids(self) -> list[int]:
+        """Return the list of class_ids the student is enrolled in.
+        Mirrors SchoolClass.student_ids for symmetry."""
+        return [e.class_id for e in self.enrollments]
+
 
 class StudentAvailability(Base):
     """Student time-off / availability per day+period."""
