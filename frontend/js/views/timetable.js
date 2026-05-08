@@ -257,6 +257,7 @@ const TimetableView = {
                 : '';
             return `
                 <div class="lesson-card parking-card"
+                     data-slot-id="${slot.id}"
                      draggable="true"
                      ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
                      ondragend="TimetableGrid.handleDragEnd(event)"
