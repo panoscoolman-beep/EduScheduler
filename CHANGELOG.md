@@ -5,6 +5,54 @@
 
 ## [Unreleased]
 
+### 2026-05-09 — UI polish + προβολή ανά Μαθητή + bug fixes (167 tests)
+
+Συνέχεια του evening push, με focus σε UX problems που εμφανίστηκαν στη
+χρήση και μία νέα προβολή.
+
+**Bug fixes**
+
+- **🔒 λουκέτο reliability** (`bc90d89`) — μεγαλύτερο button (28×26
+  hit area, semi-opaque λευκό background, hover scale), optimistic
+  flip χωρίς full re-render. Το single click πιάνει πάντα.
+- **drag-drop preserves view filter** (`f231d30`) — handleDrop κάνει
+  πλέον optimistic move αντί για App.navigateTo. Ο user μένει στην
+  προβολή ανά καθηγητή/τάξη/αίθουσα που είχε επιλέξει.
+- **parking-lot drop without classroom** (`b9d3c06`) — backend πιάνει
+  default classroom (lesson.classroom_id → special_room_type → first
+  regular → any). Πριν, drag από parking → 400.
+- **boot recovery για stuck "generating" λύσεις** (`ad91ca4`) — όταν
+  deploy κόβει σύνδεση mid-solve, το TimetableSolution row κολλούσε
+  σε generating forever. Lifespan hook το γυρίζει σε 'error' με
+  metadata explanation. Νέο status 'error' στο schema (migration
+  c5d6e7f8a9b0). Entrypoint script που τρέχει `alembic upgrade head`
+  πριν το uvicorn — auto-applies migrations σε κάθε deploy.
+- **student view δεν έδειχνε πρόγραμμα** (`10be23b`) — TimetableSlot
+  Response εκθέτε class_name αλλά όχι class_id, οπότε το frontend
+  filter πάντα έβγαζε άδειο grid. Πρόσθεσα class_id, subject_id,
+  teacher_id στο response.
+
+**Νέα features**
+
+- **🅿️ νέα μαθήματα μπαίνουν αυτόματα στο parking lot** (`6a7ad56`) —
+  POST /lessons/ καλεί parking_lot_sync.add_lesson_to_open_solutions
+  που γεμίζει N unplaced slots σε κάθε ενεργή λύση. Ίδιο και για
+  bulk-import. Idempotent.
+- **PUT lesson συγχρονίζει parking lot** (`1532b36`) — αύξηση
+  periods_per_week → προστίθενται unplaced. Μείωση → αφαιρούνται
+  ΜΟΝΟ unplaced (ποτέ placed). Surplus_placed reported.
+- **compact mode στην "Προβολή Όλων"** (`0e03fd8`) — flex-wrap στα
+  cells, mini cards, hover scale 1.4. Λύνει το "πέφτουν το ένα πάνω
+  στο άλλο" όταν δεν φιλτράρεις. Auto-disabled όταν επιλέγεις
+  συγκεκριμένο φίλτρο.
+- **👤 προβολή ανά Μαθητή** (`b4f1803`) — 4η επιλογή στο view
+  selector. Student.class_ids property + StudentResponse field
+  + frontend filtering των slots κατά enrollment.
+
+**Tests**: 138 → 167 (+29 σε αυτό το block).
+
+---
+
 ### 2026-05-08 — Solver + workflow improvements (138 unit tests)
 
 Four atomic features added to the scheduler — three around the solver
