@@ -256,12 +256,15 @@ class TimetableSlotResponse(BaseModel):
     is_unplaced: bool = False
     unplaced_reason: str | None = None
     # Enriched fields
+    subject_id: int | None = None
     subject_name: str | None = None
     subject_short: str | None = None
     subject_color: str | None = None
+    teacher_id: int | None = None
     teacher_name: str | None = None
     teacher_short: str | None = None
     teacher_color: str | None = None
+    class_id: int | None = None
     class_name: str | None = None
     class_short: str | None = None
     classroom_name: str | None = None

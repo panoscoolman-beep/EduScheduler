@@ -100,3 +100,19 @@ def test_two_students_have_independent_class_id_lists(db):
 
     assert s1.class_ids == [cls.id]
     assert s2.class_ids == []
+
+
+def test_timetable_slot_response_exposes_class_id():
+    """The 'Προβολή ανά Μαθητή' filter on the frontend cross-references
+    slot.class_id against the student's class_ids set. If TimetableSlot
+    Response forgot to expose class_id (regression bug 2026-05-09) the
+    set lookup is always undefined and the grid renders empty."""
+    from backend.schemas import TimetableSlotResponse
+
+    fields = TimetableSlotResponse.model_fields
+    assert "class_id" in fields, (
+        "TimetableSlotResponse must expose class_id so the student "
+        "view can filter by enrollment"
+    )
+    assert "subject_id" in fields
+    assert "teacher_id" in fields
