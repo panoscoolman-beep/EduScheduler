@@ -20,6 +20,12 @@ COPY frontend/ ./frontend/
 COPY alembic.ini ./alembic.ini
 COPY alembic/ ./alembic/
 
+# Entrypoint runs `alembic upgrade head` before launching uvicorn so a
+# rebuilt container always picks up new migrations automatically. The
+# previous CMD-only setup left freshly-shipped migrations un-applied.
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./entrypoint.sh"]

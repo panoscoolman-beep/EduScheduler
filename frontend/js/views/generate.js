@@ -250,8 +250,29 @@ const GenerateView = {
             }
         } catch (err) {
             clearInterval(progressInterval);
-            message.textContent = `Σφάλμα: ${err.message}`;
-            Toast.error(err.message);
+            // "Failed to fetch" / NetworkError = browser couldn't reach
+            // the backend. Most common cause is a deploy mid-request
+            // (the container restarted while the solver was running).
+            // The solver record is left in 'generating' but the startup
+            // recovery hook will mark it 'error' on next boot, so we
+            // don't have to clean up client-side. Surface a clear
+            // explanation and offer to re-poll the solutions list in
+            // case the run actually finished.
+            const isNetworkError =
+                err instanceof TypeError ||
+                /failed to fetch|networkerror|load failed/i.test(err.message || '');
+            if (isNetworkError) {
+                const explanation = (
+                    'Σύνδεση χάθηκε με τον server. Συνήθως συμβαίνει αν ' +
+                    'γίνει deploy ενώ τρέχει ο solver. Δοκίμασε ξανά σε ' +
+                    'λίγα δευτερόλεπτα — η εργασία ξεκινά από την αρχή.'
+                );
+                message.textContent = explanation;
+                Toast.error(explanation);
+            } else {
+                message.textContent = `Σφάλμα: ${err.message}`;
+                Toast.error(err.message);
+            }
         }
 
         startBtn.disabled = false;
@@ -281,18 +302,35 @@ const GenerateView = {
                         </tr>
                     </thead>
                     <tbody>
-                        ${solutions.map(s => `
+                        ${solutions.map(s => {
+                            const statusLabels = {
+                                optimal:    'Βέλτιστο',
+                                feasible:   'OK',
+                                infeasible: 'Αδύνατο',
+                                generating: '⏳ Σε εξέλιξη',
+                                error:      '⚠️ Σφάλμα',
+                                draft:      'Πρόχειρο',
+                            };
+                            const statusClass = s.status === 'optimal' || s.status === 'feasible'
+                                ? 'soft'
+                                : 'hard';
+                            const statusTitle = s.status === 'error'
+                                ? 'Ο solver διακόπηκε από restart του container — μη ολοκληρωμένη λύση. Διέγραψέ την και ξανατρέξε.'
+                                : (s.status === 'generating'
+                                    ? 'Ο solver έτρεχε όταν φόρτωσε η σελίδα — αν παραμένει ώρα, διέγραψέ την.'
+                                    : '');
+                            return `
                             <tr>
-                                <td>${s.name}</td>
-                                <td><span class="constraint-badge ${s.status === 'optimal' ? 'soft' : 'hard'}">${s.status}</span></td>
+                                <td>${this._escape(s.name)}</td>
+                                <td><span class="constraint-badge ${statusClass}" title="${statusTitle}">${statusLabels[s.status] || s.status}</span></td>
                                 <td>${s.score?.toFixed(0) || '—'}</td>
                                 <td>${s.created_at ? new Date(s.created_at).toLocaleString('el-GR') : '—'}</td>
                                 <td class="actions">
-                                    <button class="btn btn-sm btn-primary view-sol" data-id="${s.id}">📋 Προβολή</button>
+                                    <button class="btn btn-sm btn-primary view-sol" data-id="${s.id}" ${s.status === 'error' || s.status === 'generating' ? 'disabled' : ''}>📋 Προβολή</button>
                                     <button class="btn btn-sm btn-danger del-sol" data-id="${s.id}">🗑️</button>
                                 </td>
-                            </tr>
-                        `).join('')}
+                            </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             `;

@@ -29,9 +29,58 @@ from backend.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create database tables on startup."""
+    """Create database tables on startup, then recover any solver run
+    that was in flight when the previous container died.
+
+    Why: a `docker compose up -d --build` mid-solve kills the worker
+    while the TimetableSolution row sits at status='generating'. The
+    user sees a "Failed to fetch" toast and the orphan record stays
+    forever in their solutions list. This hook flips every stuck
+    'generating' row to 'error' on boot so the UI shows a clear
+    explanation instead of a phantom job.
+    """
     Base.metadata.create_all(bind=engine)
+    _recover_stuck_runs()
     yield
+
+
+def _recover_stuck_runs() -> None:
+    import json
+    import logging
+    from datetime import datetime
+    from sqlalchemy.orm import Session as _Session
+    from backend.models import TimetableSolution
+
+    logger = logging.getLogger(__name__)
+    session = _Session(bind=engine)
+    try:
+        stuck = (
+            session.query(TimetableSolution)
+            .filter(TimetableSolution.status == "generating")
+            .all()
+        )
+        if not stuck:
+            return
+        for sol in stuck:
+            sol.status = "error"
+            existing = {}
+            if sol.metadata_json:
+                try:
+                    existing = json.loads(sol.metadata_json)
+                except (TypeError, ValueError):
+                    existing = {}
+            existing["recovered_at"] = datetime.utcnow().isoformat()
+            existing["recovery_reason"] = (
+                "Ο solver διακόπηκε από restart του container. Δοκίμασε ξανά."
+            )
+            sol.metadata_json = json.dumps(existing, default=str)
+        session.commit()
+        logger.warning(
+            "Recovered %d stuck 'generating' solver runs to 'error' status",
+            len(stuck),
+        )
+    finally:
+        session.close()
 
 
 app = FastAPI(

@@ -273,7 +273,7 @@ class TimetableSolution(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('draft', 'generating', 'optimal', 'feasible', 'infeasible')",
+            "status IN ('draft', 'generating', 'optimal', 'feasible', 'infeasible', 'error')",
             name="ck_solution_status",
         ),
     )
