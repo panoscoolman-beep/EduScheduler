@@ -77,17 +77,20 @@ const TimetableGrid = {
 
                     return `
                         <div class="lesson-card ${slot.is_locked ? 'locked' : ''}"
+                             data-slot-id="${slot.id}"
                              draggable="${slot.is_locked ? 'false' : 'true'}"
                              ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
                              ondragend="TimetableGrid.handleDragEnd(event)"
                              onclick="TimetableGrid.showDetails(this)"
                              data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
-                             style="background:${bgLight}; color:${textColor}; cursor: grab; margin-bottom: 4px; position: relative; ${lockBorder}"
+                             style="background:${bgLight}; color:${textColor}; cursor: grab; margin-bottom: 4px; position: relative; padding-right: 32px; ${lockBorder}"
                              title="Κλικ για Πληροφορίες">
                             <button class="lesson-lock-btn"
-                                    onclick="event.stopPropagation(); TimetableGrid.toggleLock(${slot.id}, ${solutionId}, ${!slot.is_locked})"
-                                    title="${lockTitle}"
-                                    style="position:absolute; top:2px; right:4px; background:transparent; border:none; cursor:pointer; padding:0; font-size:0.85em; opacity:0.7;">
+                                    data-slot-id="${slot.id}"
+                                    onmousedown="event.stopPropagation();"
+                                    ondragstart="event.stopPropagation(); event.preventDefault();"
+                                    onclick="event.stopPropagation(); TimetableGrid.toggleLock(${slot.id}, ${solutionId})"
+                                    title="${lockTitle}">
                                 ${lockIcon}
                             </button>
                             <span class="subject-name" style="color:${bgColor}">${line1 || ''}</span>
@@ -208,24 +211,55 @@ const TimetableGrid = {
     },
 
     /**
-     * Toggle the is_locked flag on a single slot. Reuses the existing
-     * update-slot endpoint, then re-renders by triggering a refresh of
-     * the parent view through App.navigateTo (cheaper than diffing the
-     * grid manually and guarantees we stay consistent with the server).
+     * Toggle the is_locked flag on a single slot.
+     *
+     * Optimistic UI: flip icon/state in the DOM immediately, then fire
+     * the API call in the background. If the call fails we roll the
+     * card back. No full view re-render — that's what was making
+     * second/third clicks feel unresponsive (every click triggered a
+     * full re-fetch of solutions/getSolution which clobbered any
+     * in-flight click).
+     *
+     * The button is also disabled while the request is in flight so
+     * double-clicks don't queue two opposite ops.
      */
-    async toggleLock(slotId, solutionId, newLockedValue) {
+    async toggleLock(slotId, solutionId) {
+        const card = document.querySelector(
+            `.lesson-card[data-slot-id="${slotId}"]`
+        );
+        const btn = card?.querySelector(
+            `.lesson-lock-btn[data-slot-id="${slotId}"]`
+        );
+        if (!card || !btn) {
+            Toast.error('Δεν βρέθηκε το slot στο DOM');
+            return;
+        }
+        if (btn.disabled) return;  // already in flight
+
+        // Read current state from the DOM (single source of truth here)
+        let slot;
         try {
-            // The existing slot row already has its day/period; we
-            // only need to flip is_locked. Find the slot's current
-            // placement from the DOM data-json blob.
-            const card = document.querySelector(
-                `.lesson-card[data-json*='"id":${slotId}']`
-            );
-            const slot = card ? JSON.parse(card.dataset.json) : null;
-            if (!slot) {
-                Toast.error('Δεν βρέθηκαν τα στοιχεία του slot');
-                return;
-            }
+            slot = JSON.parse(card.dataset.json);
+        } catch (err) {
+            Toast.error('Δεν διαβάστηκαν τα στοιχεία του slot');
+            return;
+        }
+        const newLockedValue = !slot.is_locked;
+
+        // 1) Optimistic flip
+        btn.disabled = true;
+        btn.classList.add('busy');
+        btn.textContent = newLockedValue ? '🔒' : '🔓';
+        btn.title = newLockedValue
+            ? 'Κλικ για ξεκλείδωμα'
+            : 'Κλικ για κλείδωμα — θα διατηρηθεί στο επόμενο regenerate';
+        card.classList.toggle('locked', newLockedValue);
+        card.draggable = !newLockedValue;
+        slot.is_locked = newLockedValue;
+        card.dataset.json = JSON.stringify(slot).replace(/'/g, '&#39;');
+
+        // 2) Fire-and-await API
+        try {
             await API.solver.updateSlot(solutionId, slotId, {
                 day_of_week: slot.day_of_week,
                 period_id: slot.period_id,
@@ -233,12 +267,17 @@ const TimetableGrid = {
                 is_locked: newLockedValue,
             });
             Toast.success(newLockedValue ? '🔒 Κλειδώθηκε' : '🔓 Ξεκλειδώθηκε');
-            // Re-render the current view (which is timetable here)
-            if (typeof App !== 'undefined' && App._currentView) {
-                App.navigateTo(App._currentView);
-            }
         } catch (err) {
+            // 3) Rollback the optimistic flip
+            btn.textContent = newLockedValue ? '🔓' : '🔒';
+            card.classList.toggle('locked', !newLockedValue);
+            card.draggable = newLockedValue;
+            slot.is_locked = !newLockedValue;
+            card.dataset.json = JSON.stringify(slot).replace(/'/g, '&#39;');
             Toast.error(`Lock toggle απέτυχε: ${err.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.classList.remove('busy');
         }
     },
 };
