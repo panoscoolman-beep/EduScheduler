@@ -44,6 +44,7 @@ const TimetableView = {
                         <div>
                             <button class="btn btn-secondary" id="tt-undo" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" style="margin-right:0.25rem" disabled>↩ Αναίρεση</button>
                             <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.5rem" disabled>↪ Επανάληψη</button>
+                            <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.5rem">👤 Αντικατάσταση</button>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.5rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση Προγράμματος" style="margin-right:0.5rem">🖨️ Εκτύπωση</button>
@@ -96,6 +97,11 @@ const TimetableView = {
             // Event: Compare με άλλη λύση
             document.getElementById('tt-compare').addEventListener('click', async () => {
                 this._openCompareModal(solutions, solutionId);
+            });
+
+            // Event: Substitute teacher mode
+            document.getElementById('tt-substitute').addEventListener('click', () => {
+                this._openSubstituteModal(solutionId, periods, daysCount);
             });
 
             // Event: Lock & Regenerate
@@ -354,6 +360,141 @@ const TimetableView = {
                 Toast.error(err.message);
             }
         });
+    },
+
+    /**
+     * Find substitute teachers / reschedule slots for a teacher who's
+     * absent on a given day. Shows the affected slots with two columns
+     * each: candidate substitutes and reschedule options. Read-only —
+     * the user applies the choice through the existing drag-drop UI.
+     */
+    async _openSubstituteModal(solutionId, periods, daysCount) {
+        let teachers;
+        try {
+            teachers = await API.teachers.list();
+        } catch (err) {
+            Toast.error(`Αποτυχία φόρτωσης καθηγητών: ${err.message}`);
+            return;
+        }
+
+        const dayNames = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη',
+                          'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        const teacherOptions = teachers.map(t =>
+            `<option value="${t.id}">${this._esc(t.name)}</option>`
+        ).join('');
+        const dayOptions = Array.from({length: daysCount}, (_, i) =>
+            `<option value="${i}">${dayNames[i]}</option>`
+        ).join('');
+
+        Modal.open(
+            '👤 Αντικατάσταση Καθηγητή',
+            `
+            <p class="text-muted" style="margin-bottom:1rem;">
+                Επίλεξε τον καθηγητή που λείπει και τη μέρα. Θα δούμε
+                τα μαθήματα που επηρεάζονται και προτάσεις για κάθε ένα.
+            </p>
+            <div style="display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
+                <div class="form-group" style="flex:1; min-width:200px; margin:0;">
+                    <label class="form-label">Καθηγητής</label>
+                    <select class="form-select" id="sub-teacher">${teacherOptions}</select>
+                </div>
+                <div class="form-group" style="flex:1; min-width:150px; margin:0;">
+                    <label class="form-label">Μέρα</label>
+                    <select class="form-select" id="sub-day">${dayOptions}</select>
+                </div>
+            </div>
+            <div style="text-align:right;">
+                <button class="btn btn-primary" id="sub-find">🔍 Βρες προτάσεις</button>
+            </div>
+            <div id="sub-result" style="margin-top:1.5rem;"></div>
+            `,
+            null,
+            { hideFooter: true }
+        );
+
+        document.getElementById('sub-find').addEventListener('click', async () => {
+            const teacherId = parseInt(document.getElementById('sub-teacher').value);
+            const dayOfWeek = parseInt(document.getElementById('sub-day').value);
+            const resultEl = document.getElementById('sub-result');
+            resultEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+            try {
+                const data = await API.solver.substituteSuggestions(
+                    solutionId, teacherId, dayOfWeek);
+                this._renderSubstituteResult(data, resultEl, dayNames[dayOfWeek]);
+            } catch (err) {
+                resultEl.innerHTML = `<p class="text-muted">Σφάλμα: ${this._esc(err.message)}</p>`;
+            }
+        });
+    },
+
+    _renderSubstituteResult(data, mountEl, dayLabel) {
+        if (!data.affected_slots.length) {
+            mountEl.innerHTML = `
+                <p class="text-muted">
+                    Ο καθηγητής δεν έχει προγραμματισμένα μαθήματα την ${dayLabel}.
+                    Δεν χρειάζεται αντικατάσταση.
+                </p>
+            `;
+            return;
+        }
+
+        const cards = data.affected_slots.map(slot => {
+            const candidatesHtml = slot.candidates.length
+                ? `<ul style="margin:0.4em 0 0 1.4em; padding:0;">
+                       ${slot.candidates.slice(0, 5).map(c => `
+                           <li style="margin-bottom:0.3em;">
+                               <strong>${this._esc(c.name)}</strong>
+                               <span class="text-muted" style="font-size:0.85em;">
+                                 (score ${c.score})
+                               </span>
+                               <div style="font-size:0.85em; color:var(--text-muted);">
+                                 ${this._esc(c.reasons.join(', '))}
+                               </div>
+                           </li>
+                       `).join('')}
+                   </ul>`
+                : '<p class="text-muted" style="font-size:0.9em; margin:0.3em 0;">Κανείς διαθέσιμος αυτή την ώρα.</p>';
+
+            const rescheduleHtml = slot.reschedule_options.length
+                ? `<ul style="margin:0.4em 0 0 1.4em; padding:0; max-height:120px; overflow:auto;">
+                       ${slot.reschedule_options.slice(0, 8).map(opt => {
+                           const dayName = ['Δευ','Τρι','Τετ','Πεμ','Παρ','Σαβ','Κυρ'][opt.day_of_week];
+                           return `<li>${dayName} • ${this._esc(opt.period_name || '?')}</li>`;
+                       }).join('')}
+                   </ul>`
+                : '<p class="text-muted" style="font-size:0.9em; margin:0.3em 0;">Καμία ελεύθερη ώρα στην εβδομάδα.</p>';
+
+            return `
+                <div class="card" style="margin-bottom:1rem; padding:0.8rem 1rem;">
+                    <div style="font-weight:600; margin-bottom:0.5rem;">
+                        ${this._esc(slot.subject_name || '?')} —
+                        ${this._esc(slot.class_name || '?')} •
+                        ${this._esc(slot.period_name || '?')} •
+                        ${this._esc(slot.classroom_name || '?')}
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                        <div>
+                            <strong style="font-size:0.9em;">Αντικαταστάτες:</strong>
+                            ${candidatesHtml}
+                        </div>
+                        <div>
+                            <strong style="font-size:0.9em;">Εναλλακτικές ώρες ίδιας εβδομάδας:</strong>
+                            ${rescheduleHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        mountEl.innerHTML = `
+            <div style="margin-bottom:1rem; padding:0.6rem 0.8rem;
+                        background:var(--bg-secondary, #F3F4F6); border-radius:6px;">
+                <strong>Σύνολο μαθημάτων που επηρεάζονται:</strong>
+                ${data.stats.affected_count}
+                — ${data.stats.with_candidates} με διαθέσιμους αντικαταστάτες
+            </div>
+            ${cards}
+        `;
     },
 
     _renderCompareResult(result, mountEl) {

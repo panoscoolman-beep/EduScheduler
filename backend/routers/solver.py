@@ -14,6 +14,7 @@ from backend.models import (
     TeacherAvailability, StudentAvailability, StudentClassEnrollment
 )
 from backend.services import slot_history as slot_history_svc
+from backend.services.substitute_finder import find_substitutes
 from backend.schemas import (
     FeasibilityReportResponse,
     SolverRequest,
@@ -555,3 +556,31 @@ def get_history_summary(solution_id: int, db: Session = Depends(get_db)):
     if not solution:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
     return slot_history_svc.history_summary(db, solution_id)
+
+
+@router.get("/solutions/{solution_id}/substitute-suggestions")
+def substitute_suggestions(
+    solution_id: int,
+    teacher_id: int,
+    day_of_week: int,
+    db: Session = Depends(get_db),
+):
+    """Find substitute teachers + reschedule slots for an absent teacher.
+
+    Read-only — does not modify the solution. The user reviews the
+    suggestions and applies any change manually through the existing
+    drag-drop UI.
+    """
+    solution = (
+        db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    )
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    if day_of_week < 0 or day_of_week > 6:
+        raise HTTPException(
+            status_code=400, detail="day_of_week πρέπει να είναι 0-6"
+        )
+    try:
+        return find_substitutes(db, solution_id, teacher_id, day_of_week)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

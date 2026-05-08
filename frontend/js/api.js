@@ -121,6 +121,8 @@ const API = {
         undo: (solutionId) => API.post(`/solver/solutions/${solutionId}/undo`, {}),
         redo: (solutionId) => API.post(`/solver/solutions/${solutionId}/redo`, {}),
         historySummary: (solutionId) => API.get(`/solver/solutions/${solutionId}/history-summary`),
+        substituteSuggestions: (solutionId, teacherId, dayOfWeek) =>
+            API.get(`/solver/solutions/${solutionId}/substitute-suggestions?teacher_id=${teacherId}&day_of_week=${dayOfWeek}`),
     },
     settings: {
         get: () => API.get('/settings/'),
