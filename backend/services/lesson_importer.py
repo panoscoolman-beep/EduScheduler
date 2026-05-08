@@ -222,10 +222,29 @@ def commit(rows: list[PreviewRow], db: Session) -> dict:
         }
 
     try:
+        created_lessons: list[Lesson] = []
         for r in rows:
             lesson = Lesson(**r.to_lesson_kwargs())
             db.add(lesson)
+            created_lessons.append(lesson)
         db.commit()
+        for l in created_lessons:
+            db.refresh(l)
+
+        # Add each new lesson to the parking lot of every active
+        # solution. Done after the main commit so the lessons exist;
+        # any failure here does NOT roll back the lessons (they're
+        # legitimate either way) — it just means the user will need
+        # to refresh manually.
+        try:
+            from backend.services.parking_lot_sync import (
+                add_lesson_to_open_solutions,
+            )
+            for l in created_lessons:
+                add_lesson_to_open_solutions(db, l.id)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+
         return {
             "status": "ok",
             "message": f"Δημιουργήθηκαν {len(rows)} lesson cards",

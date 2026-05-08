@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
 from backend.schemas import LessonCreate, LessonResponse
+from backend.services.parking_lot_sync import add_lesson_to_open_solutions
 
 router = APIRouter()
 
@@ -111,6 +112,12 @@ def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
     lesson = Lesson(**data.model_dump())
     db.add(lesson)
     db.commit()
+    db.refresh(lesson)
+
+    # Drop the new lesson into the parking lot of every active
+    # (optimal/feasible) solution so the user can manually slot it
+    # without re-running the solver and scrambling the schedule.
+    add_lesson_to_open_solutions(db, lesson.id)
 
     # Reload with relationships
     lesson = (
