@@ -118,6 +118,9 @@ const API = {
         updateSlot: (solutionId, slotId, data) => API.put(`/solver/solutions/${solutionId}/slots/${slotId}`, data),
         compare: (ids) => API.get(`/solver/compare?ids=${ids.join(',')}`),
         feasibilityCheck: () => API.get('/solver/feasibility-check'),
+        undo: (solutionId) => API.post(`/solver/solutions/${solutionId}/undo`, {}),
+        redo: (solutionId) => API.post(`/solver/solutions/${solutionId}/redo`, {}),
+        historySummary: (solutionId) => API.get(`/solver/solutions/${solutionId}/history-summary`),
     },
     settings: {
         get: () => API.get('/settings/'),

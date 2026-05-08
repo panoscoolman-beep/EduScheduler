@@ -318,3 +318,49 @@ class TimetableSlot(Base):
             name="ck_slot_placement_consistent",
         ),
     )
+
+
+class TimetableSlotHistory(Base):
+    """Audit log for manual slot edits, used by undo / redo.
+
+    Each PUT to /solutions/{id}/slots/{slot_id} appends a row capturing
+    the slot's prev and new state. Undo flips the slot back to prev and
+    marks the row `undone=True`. Redo flips forward and clears `undone`.
+    """
+
+    __tablename__ = "timetable_slot_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    solution_id = Column(
+        Integer,
+        ForeignKey("timetable_solutions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slot_id = Column(
+        Integer,
+        ForeignKey("timetable_slots.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    performed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    operation = Column(String(20), nullable=False, default="move")
+
+    prev_day_of_week = Column(Integer, nullable=True)
+    prev_period_id = Column(Integer, nullable=True)
+    prev_classroom_id = Column(Integer, nullable=True)
+    prev_is_locked = Column(Boolean, nullable=False, default=False)
+    prev_is_unplaced = Column(Boolean, nullable=False, default=False)
+
+    new_day_of_week = Column(Integer, nullable=True)
+    new_period_id = Column(Integer, nullable=True)
+    new_classroom_id = Column(Integer, nullable=True)
+    new_is_locked = Column(Boolean, nullable=False, default=False)
+    new_is_unplaced = Column(Boolean, nullable=False, default=False)
+
+    undone = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "operation IN ('move', 'lock', 'unlock', 'place', 'unplace')",
+            name="ck_history_op",
+        ),
+    )

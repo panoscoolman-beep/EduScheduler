@@ -13,6 +13,7 @@ from backend.models import (
     TimetableSolution, TimetableSlot, Lesson,
     TeacherAvailability, StudentAvailability, StudentClassEnrollment
 )
+from backend.services import slot_history as slot_history_svc
 from backend.schemas import (
     FeasibilityReportResponse,
     SolverRequest,
@@ -451,6 +452,14 @@ def update_solution_slot(
             if student_unav:
                 raise HTTPException(status_code=400, detail="Ένας ή περισσότεροι μαθητές του τμήματος έχουν δηλώσει κώλυμα αυτή τη μέρα και ώρα.")
 
+    prev_state = {
+        "day_of_week": slot.day_of_week,
+        "period_id": slot.period_id,
+        "classroom_id": slot.classroom_id,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": bool(slot.is_unplaced),
+    }
+
     slot.day_of_week = data.day_of_week
     slot.period_id = data.period_id
 
@@ -472,5 +481,77 @@ def update_solution_slot(
         slot.is_unplaced = False
         slot.unplaced_reason = None
 
+    new_state = {
+        "day_of_week": slot.day_of_week,
+        "period_id": slot.period_id,
+        "classroom_id": slot.classroom_id,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": bool(slot.is_unplaced),
+    }
+    operation = "lock" if (
+        prev_state["is_locked"] != new_state["is_locked"]
+        and prev_state["day_of_week"] == new_state["day_of_week"]
+        and prev_state["period_id"] == new_state["period_id"]
+    ) else "move"
+    slot_history_svc.record_edit(db, slot, prev_state, new_state, operation)
     db.commit()
     return {"status": "ok", "message": "Το slot ενημερώθηκε"}
+
+
+@router.post("/solutions/{solution_id}/undo")
+def undo_last_edit(solution_id: int, db: Session = Depends(get_db)):
+    """Roll back the most recent manual edit to this solution."""
+    solution = (
+        db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    )
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+
+    entry = slot_history_svc.undo(db, solution_id)
+    if not entry:
+        raise HTTPException(
+            status_code=400, detail="Δεν υπάρχει αλλαγή προς αναίρεση"
+        )
+    db.commit()
+    summary = slot_history_svc.history_summary(db, solution_id)
+    return {
+        "status": "ok",
+        "message": "Η αλλαγή αναιρέθηκε",
+        "slot_id": entry.slot_id,
+        "history": summary,
+    }
+
+
+@router.post("/solutions/{solution_id}/redo")
+def redo_last_undo(solution_id: int, db: Session = Depends(get_db)):
+    """Re-apply the most recent undone edit."""
+    solution = (
+        db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    )
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+
+    entry = slot_history_svc.redo(db, solution_id)
+    if not entry:
+        raise HTTPException(
+            status_code=400, detail="Δεν υπάρχει αλλαγή προς επανάληψη"
+        )
+    db.commit()
+    summary = slot_history_svc.history_summary(db, solution_id)
+    return {
+        "status": "ok",
+        "message": "Η αλλαγή επαναλήφθηκε",
+        "slot_id": entry.slot_id,
+        "history": summary,
+    }
+
+
+@router.get("/solutions/{solution_id}/history-summary")
+def get_history_summary(solution_id: int, db: Session = Depends(get_db)):
+    """Return how many undo / redo steps are currently available."""
+    solution = (
+        db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    )
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    return slot_history_svc.history_summary(db, solution_id)

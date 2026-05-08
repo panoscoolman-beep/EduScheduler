@@ -42,6 +42,8 @@ const TimetableView = {
                     <div class="card-header print-hide">
                         <h2 class="card-title">📋 ${solution.name}</h2>
                         <div>
+                            <button class="btn btn-secondary" id="tt-undo" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" style="margin-right:0.25rem" disabled>↩ Αναίρεση</button>
+                            <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.5rem" disabled>↪ Επανάληψη</button>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.5rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση Προγράμματος" style="margin-right:0.5rem">🖨️ Εκτύπωση</button>
@@ -161,6 +163,59 @@ const TimetableView = {
                 App._currentSolutionId = parseInt(e.target.value);
                 await this.render(container);
             });
+
+            // Undo / Redo wiring
+            const undoBtn = document.getElementById('tt-undo');
+            const redoBtn = document.getElementById('tt-redo');
+
+            const refreshHistoryButtons = async () => {
+                try {
+                    const summary = await API.solver.historySummary(solutionId);
+                    undoBtn.disabled = summary.can_undo === 0;
+                    redoBtn.disabled = summary.can_redo === 0;
+                    undoBtn.title = summary.can_undo
+                        ? `Αναίρεση τελευταίας αλλαγής (${summary.can_undo} διαθέσιμες) · Ctrl+Z`
+                        : 'Καμία αλλαγή για αναίρεση';
+                    redoBtn.title = summary.can_redo
+                        ? `Επανάληψη (${summary.can_redo} διαθέσιμες) · Ctrl+Y`
+                        : 'Καμία επανάληψη';
+                } catch (err) {
+                    // Stale solution / network — ignore
+                }
+            };
+
+            const performUndoRedo = async (op) => {
+                try {
+                    const res = op === 'undo'
+                        ? await API.solver.undo(solutionId)
+                        : await API.solver.redo(solutionId);
+                    Toast.success(res.message);
+                    await this.render(container);
+                } catch (err) {
+                    Toast.error(err.message);
+                }
+            };
+
+            undoBtn.addEventListener('click', () => performUndoRedo('undo'));
+            redoBtn.addEventListener('click', () => performUndoRedo('redo'));
+            this._historyKeyHandler = (e) => {
+                if (!(e.ctrlKey || e.metaKey)) return;
+                if (e.key === 'z' || e.key === 'Z') {
+                    e.preventDefault();
+                    if (!undoBtn.disabled) performUndoRedo('undo');
+                } else if (e.key === 'y' || e.key === 'Y') {
+                    e.preventDefault();
+                    if (!redoBtn.disabled) performUndoRedo('redo');
+                }
+            };
+            // Replace any previous binding on re-render
+            if (this._activeKeyHandler) {
+                document.removeEventListener('keydown', this._activeKeyHandler);
+            }
+            this._activeKeyHandler = this._historyKeyHandler;
+            document.addEventListener('keydown', this._activeKeyHandler);
+
+            await refreshHistoryButtons();
 
         } catch (err) {
             container.innerHTML = `
