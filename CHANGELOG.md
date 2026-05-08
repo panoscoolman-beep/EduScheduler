@@ -5,6 +5,58 @@
 
 ## [Unreleased]
 
+### 2026-05-08 — Solver + workflow improvements (138 unit tests)
+
+Four atomic features added to the scheduler — three around the solver
+itself and one around the manual-edit workflow. All shipped with
+tests + live smoke checks.
+
+**E. Pre-solve feasibility check** (`77df39f`) — new `GET
+/api/solver/feasibility-check` runs O(N) arithmetic against the
+current DB state and returns errors / warnings without invoking
+CP-SAT. Catches over-constrained problems (overloaded teachers,
+missing labs, blocks too long for the school day) in milliseconds
+instead of a 30+ second solver timeout. UI: 🔍 Έλεγχος Εφικτότητας
+button on the Δημιουργία tab. **+13 tests.**
+
+**H. Solver warm start** (`d820a79`) — `POST /api/solver/generate`
+now accepts an optional `warm_start_from_solution_id`. The placed
+slots from that solution are fed to CP-SAT as `model.AddHint` —
+biases the search toward reusing the prior solution. Speeds up
+convergence when only a few changes have been made. Hints can never
+override hard constraints (verified by test). UI: dropdown of prior
+optimal/feasible solutions on the generate panel. **+7 tests.**
+
+**F. Manual edit undo / redo** (`aa62f84`) — new
+`timetable_slot_history` table records prev/new state on every PUT
+to a slot. Two new endpoints:
+  - `POST /solver/solutions/{id}/undo`
+  - `POST /solver/solutions/{id}/redo`
+  - `GET /solver/solutions/{id}/history-summary`
+
+Standard editor semantics: a fresh edit after undo discards the redo
+branch. UI: ↩ Αναίρεση / ↪ Επανάληψη buttons in the timetable
+header + Ctrl+Z / Ctrl+Y shortcuts. Pre-existing swap-validation in
+`update_solution_slot` (5 conflict checks) is preserved. **+9 tests.**
+
+**G. Substitute teacher mode** (`857d1f4`) — read-only suggestion
+endpoint. Given a teacher and a day, returns:
+  - all of their affected slots
+  - per slot, ranked candidate substitutes (other teachers free at
+    that hour, scored by same-subject / same-class teaching profile)
+  - per slot, reschedule options (free day/period combos in the
+    same week where the original teacher could host instead)
+
+`GET /solver/solutions/{id}/substitute-suggestions?teacher_id=X
+&day_of_week=Y`. UI: 👤 Αντικατάσταση button → modal with two
+columns per affected slot. **+10 tests.**
+
+Cache-buster v=11 → v=15 over the four commits. Total tests went
+from 99 → 138 (+39 net new). All commits verified live against the
+running stack.
+
+---
+
 ### 2026-05-08 — UX + UI improvements + 99 unit tests
 
 Major UX session που πρόσθεσε 7 user-facing βελτιώσεις και έχτισε
