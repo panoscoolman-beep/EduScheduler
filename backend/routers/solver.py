@@ -14,15 +14,28 @@ from backend.models import (
     TeacherAvailability, StudentAvailability, StudentClassEnrollment
 )
 from backend.schemas import (
+    FeasibilityReportResponse,
     SolverRequest,
     SolverStatusResponse,
     TimetableSolutionResponse,
     TimetableSlotResponse,
     TimetableSlotUpdate,
 )
+from backend.services.feasibility import check_feasibility
 from backend.solver.engine import TimetableSolver
 
 router = APIRouter()
+
+
+@router.get("/feasibility-check", response_model=FeasibilityReportResponse)
+def feasibility_check(db: Session = Depends(get_db)):
+    """Run a fast pre-solve feasibility analysis without invoking CP-SAT.
+
+    Helps the user catch over-constrained problems (overloaded teachers,
+    missing labs, blocks too long for the school day) in milliseconds
+    instead of waiting 30+ seconds for the solver to fail.
+    """
+    return check_feasibility(db).to_dict()
 
 
 @router.post("/generate", response_model=SolverStatusResponse)

@@ -37,9 +37,16 @@ const GenerateView = {
                     </p>
                 </div>
 
-                <button class="btn btn-success btn-lg" id="gen-start">
-                    🚀 Εκκίνηση Δημιουργίας
-                </button>
+                <div style="display:flex; gap:var(--space-sm); justify-content:center; flex-wrap:wrap;">
+                    <button class="btn btn-secondary btn-lg" id="gen-feasibility">
+                        🔍 Έλεγχος Εφικτότητας
+                    </button>
+                    <button class="btn btn-success btn-lg" id="gen-start">
+                        🚀 Εκκίνηση Δημιουργίας
+                    </button>
+                </div>
+
+                <div class="hidden" id="gen-feasibility-result" style="margin-top:var(--space-md); text-align:left; max-width:600px; margin-left:auto; margin-right:auto;"></div>
 
                 <div class="solver-status hidden" id="gen-status">
                     <div class="progress-bar-track">
@@ -62,7 +69,83 @@ const GenerateView = {
         `;
 
         document.getElementById('gen-start').addEventListener('click', () => this._startGeneration());
+        document.getElementById('gen-feasibility').addEventListener('click', () => this._runFeasibilityCheck());
         this._loadSolutions();
+    },
+
+    async _runFeasibilityCheck() {
+        const btn = document.getElementById('gen-feasibility');
+        const resultDiv = document.getElementById('gen-feasibility-result');
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Έλεγχος...';
+        resultDiv.classList.add('hidden');
+
+        try {
+            const report = await API.solver.feasibilityCheck();
+
+            const verdict = report.feasible
+                ? '<span style="color:var(--success,#10B981)">✅ Εφικτό</span>'
+                : '<span style="color:var(--danger,#EF4444)">❌ Μη Εφικτό</span>';
+
+            const stats = report.stats || {};
+            const loadPct = stats.load_factor != null
+                ? Math.round(stats.load_factor * 100)
+                : '—';
+
+            const errorsHtml = report.errors.length
+                ? `<div style="margin-top:var(--space-sm);">
+                       <b>Σφάλματα (${report.errors.length}):</b>
+                       <ul style="margin:0.4em 0 0 1.4em; color:var(--danger,#EF4444);">
+                           ${report.errors.map(e => `<li>${this._escape(e)}</li>`).join('')}
+                       </ul>
+                   </div>`
+                : '';
+
+            const warningsHtml = report.warnings.length
+                ? `<div style="margin-top:var(--space-sm);">
+                       <b>Προειδοποιήσεις (${report.warnings.length}):</b>
+                       <ul style="margin:0.4em 0 0 1.4em; color:var(--warning,#F59E0B);">
+                           ${report.warnings.map(w => `<li>${this._escape(w)}</li>`).join('')}
+                       </ul>
+                   </div>`
+                : '';
+
+            resultDiv.innerHTML = `
+                <div class="card" style="padding:var(--space-md);">
+                    <div style="font-size:1.1em; margin-bottom:var(--space-sm);">${verdict}</div>
+                    <div style="font-size:0.9em; color:var(--text-muted, #6B7280);">
+                        Φόρτος: <b>${stats.total_periods_needed ?? '—'} / ${stats.total_slots_available ?? '—'}</b> slots
+                        (${loadPct}%) • ${stats.total_lessons ?? 0} μαθήματα,
+                        ${stats.total_teachers ?? 0} καθηγητές, ${stats.total_classes ?? 0} τάξεις
+                    </div>
+                    ${errorsHtml}
+                    ${warningsHtml}
+                    ${report.feasible && !report.warnings.length
+                        ? '<p style="color:var(--success,#10B981); margin-top:var(--space-sm);">Όλα τα checks πέρασαν — μπορείς να τρέξεις τον solver.</p>'
+                        : ''}
+                </div>
+            `;
+            resultDiv.classList.remove('hidden');
+
+            if (report.feasible) {
+                Toast.success('Το πρόβλημα φαίνεται εφικτό');
+            } else {
+                Toast.error(`${report.errors.length} σφάλματα — ο solver θα αποτύχει`);
+            }
+        } catch (err) {
+            Toast.error(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔍 Έλεγχος Εφικτότητας';
+        }
+    },
+
+    _escape(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     },
 
     async _startGeneration() {

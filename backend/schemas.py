@@ -314,6 +314,14 @@ class SolverStatusResponse(BaseModel):
     unplaced_count: int = 0
 
 
+class FeasibilityReportResponse(BaseModel):
+    """Pre-solve feasibility check — fast arithmetic before running CP-SAT."""
+    feasible: bool
+    errors: list[str]
+    warnings: list[str]
+    stats: dict
+
+
 # ─── Settings ───────────────────────────────────────────
 
 class SchoolSettingsBase(BaseModel):
