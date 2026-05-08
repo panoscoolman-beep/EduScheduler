@@ -25,6 +25,7 @@ from backend.models import (
 from backend.services.parking_lot_sync import (
     add_lesson_to_open_solutions,
     add_lessons_to_open_solutions,
+    sync_lesson_slot_count,
     UNPLACED_REASON,
 )
 
@@ -184,6 +185,161 @@ def test_bulk_helper_processes_each_lesson(db):
     assert len(summaries) == 3
     # 1 + 2 + 3 = 6 slots
     assert db.query(TimetableSlot).count() == 6
+
+
+def test_sync_increases_slot_count_when_periods_per_week_grows(db):
+    """User edits a lesson from 2h/week to 4h/week → +2 unplaced
+    slots in each active solution."""
+    sol = _make_solution(db, "optimal")
+    lesson = _make_lesson(db, periods_per_week=2)
+    add_lesson_to_open_solutions(db, lesson.id)
+    assert (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.lesson_id == lesson.id)
+        .count()
+        == 2
+    )
+
+    # User bumps to 4 hours
+    lesson.periods_per_week = 4
+    db.commit()
+
+    result = sync_lesson_slot_count(db, lesson.id)
+    assert result["target_periods_per_week"] == 4
+    assert result["synced"][0]["added"] == 2
+    assert result["synced"][0]["removed"] == 0
+
+    slots = (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.lesson_id == lesson.id)
+        .all()
+    )
+    assert len(slots) == 4
+    assert sum(1 for s in slots if s.is_unplaced) == 4
+
+
+def test_sync_is_noop_when_count_matches(db):
+    sol = _make_solution(db, "optimal")
+    lesson = _make_lesson(db, periods_per_week=3)
+    add_lesson_to_open_solutions(db, lesson.id)
+
+    result = sync_lesson_slot_count(db, lesson.id)
+    assert result["synced"] == []
+    assert result["skipped"][0]["reason"] == "already_in_sync"
+    assert (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.lesson_id == lesson.id)
+        .count()
+        == 3
+    )
+
+
+def test_sync_decreases_by_removing_unplaced_only(db):
+    """User edits a lesson from 4h/week to 2h/week → 2 unplaced slots
+    are removed, but placed slots are preserved."""
+    sol = _make_solution(db, "optimal")
+    lesson = _make_lesson(db, periods_per_week=4)
+    add_lesson_to_open_solutions(db, lesson.id)
+
+    # User has dragged 2 of the 4 slots onto the grid (placed)
+    placed_ids = [
+        s.id for s in db.query(TimetableSlot)
+        .filter(TimetableSlot.lesson_id == lesson.id)
+        .limit(2)
+        .all()
+    ]
+    db.query(TimetableSlot).filter(TimetableSlot.id.in_(placed_ids)).update(
+        {
+            "day_of_week": 0,
+            "period_id": db.test_period.id,
+            "classroom_id": db.test_room.id,
+            "is_unplaced": False,
+            "unplaced_reason": None,
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+
+    # Now user reduces to 2h/week
+    lesson.periods_per_week = 2
+    db.commit()
+
+    result = sync_lesson_slot_count(db, lesson.id)
+    assert result["synced"][0]["removed"] == 2
+    assert result["synced"][0]["surplus_placed"] == 0
+
+    remaining = (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.lesson_id == lesson.id)
+        .all()
+    )
+    assert len(remaining) == 2
+    # Both remaining slots should be the placed ones
+    assert all(not s.is_unplaced for s in remaining)
+
+
+def test_sync_preserves_placed_slots_when_unplaced_pool_too_small(db):
+    """If user reduces ppw below the placed-slot count, we never
+    delete placed slots — the surplus is reported instead."""
+    sol = _make_solution(db, "optimal")
+    lesson = _make_lesson(db, periods_per_week=3)
+    add_lesson_to_open_solutions(db, lesson.id)
+
+    # User placed all 3 slots — bulk update to satisfy CHECK constraint
+    db.query(TimetableSlot).filter(TimetableSlot.lesson_id == lesson.id).update(
+        {
+            "day_of_week": 0,
+            "period_id": db.test_period.id,
+            "classroom_id": db.test_room.id,
+            "is_unplaced": False,
+            "unplaced_reason": None,
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+
+    # Reduce to 1 hour
+    lesson.periods_per_week = 1
+    db.commit()
+
+    result = sync_lesson_slot_count(db, lesson.id)
+    assert result["synced"][0]["removed"] == 0  # nothing in unplaced pool
+    assert result["synced"][0]["surplus_placed"] == 2
+
+    # All 3 placed slots survive — the user has to remove them manually
+    assert (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.lesson_id == lesson.id)
+        .count()
+        == 3
+    )
+
+
+def test_sync_adds_to_solutions_that_lacked_the_lesson(db):
+    """Lesson exists, sync called on a solution that has 0 slots for
+    it — adds full ppw worth of unplaced slots."""
+    sol_old = _make_solution(db, "optimal")
+    lesson = _make_lesson(db, periods_per_week=2)
+    add_lesson_to_open_solutions(db, lesson.id)
+
+    sol_new = _make_solution(db, "feasible")  # newer solution, missing the lesson
+
+    result = sync_lesson_slot_count(db, lesson.id)
+    new_synced = next(
+        (s for s in result["synced"] if s["solution_id"] == sol_new.id), None
+    )
+    assert new_synced is not None
+    assert new_synced["added"] == 2
+
+    new_slots = (
+        db.query(TimetableSlot)
+        .filter(
+            TimetableSlot.solution_id == sol_new.id,
+            TimetableSlot.lesson_id == lesson.id,
+        )
+        .count()
+    )
+    assert new_slots == 2
 
 
 def test_does_not_touch_existing_placed_slots_for_other_lessons(db):

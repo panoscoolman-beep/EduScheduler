@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
 from backend.schemas import LessonCreate, LessonResponse
-from backend.services.parking_lot_sync import add_lesson_to_open_solutions
+from backend.services.parking_lot_sync import (
+    add_lesson_to_open_solutions,
+    sync_lesson_slot_count,
+)
 
 router = APIRouter()
 
@@ -142,6 +145,12 @@ def update_lesson(lesson_id: int, data: LessonCreate, db: Session = Depends(get_
     for key, value in data.model_dump().items():
         setattr(lesson, key, value)
     db.commit()
+
+    # Reconcile each active solution's slot count with the (possibly
+    # changed) periods_per_week. Adds unplaced rows for new hours,
+    # trims excess unplaced rows for removed hours. Never deletes a
+    # placed slot — surplus there is left for the user to clean up.
+    sync_lesson_slot_count(db, lesson_id)
 
     lesson = (
         db.query(Lesson)
