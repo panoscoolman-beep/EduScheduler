@@ -172,6 +172,24 @@ const TimetableGrid = {
         if (target) target.classList.remove('drag-over');
     },
 
+    /**
+     * Drag-drop handler with optimistic UI update.
+     *
+     * Old behavior: every drop triggered App.navigateTo('timetable')
+     * which fully re-rendered the view — clobbering the user's
+     * filter/view-type selects and forcing them back to defaults
+     * ("ανά τάξη / Προβολή Όλων"). Mid-edit, that's deeply annoying.
+     *
+     * New behavior: move the card in the DOM immediately, fire the
+     * API call, and only roll back if the call fails. The user's
+     * filter selects, scroll position, and modal state stay intact.
+     *
+     * Two source cases:
+     *   (a) Card lives in a grid cell      → simple appendChild
+     *   (b) Card lives in the parking lot  → also appendChild, plus
+     *       strip the parking-card class and let the parent view know
+     *       the lot count changed (header label refresh).
+     */
     async handleDrop(event, solutionId) {
         event.preventDefault();
         const slotIdStr = event.dataTransfer.getData('text/plain');
@@ -182,23 +200,104 @@ const TimetableGrid = {
         while (target && !target.classList.contains('droppable-cell')) {
             target = target.parentElement;
         }
-        
+
         if (target) target.classList.remove('drag-over');
         if (!target) return;
 
         const newDay = parseInt(target.dataset.day);
         const newPeriod = parseInt(target.dataset.period);
 
+        const sourceCard = document.querySelector(
+            `.lesson-card[data-slot-id="${slotId}"]`
+        );
+        if (!sourceCard) {
+            Toast.error('Δεν βρέθηκε το card στο DOM');
+            return;
+        }
+
+        // Don't drop a card on the same cell it was already in
+        if (sourceCard.parentElement === target) return;
+
+        const originalParent = sourceCard.parentElement;
+        const originalNextSibling = sourceCard.nextSibling;
+        const wasParkingCard = sourceCard.classList.contains('parking-card');
+
+        let slotData;
+        try {
+            slotData = JSON.parse(sourceCard.dataset.json);
+        } catch (e) {
+            Toast.error('Σφάλμα ανάγνωσης δεδομένων card');
+            return;
+        }
+        const prev = {
+            day_of_week: slotData.day_of_week,
+            period_id: slotData.period_id,
+            is_unplaced: slotData.is_unplaced,
+        };
+
+        // 1) Optimistic move
+        target.appendChild(sourceCard);
+        slotData.day_of_week = newDay;
+        slotData.period_id = newPeriod;
+        if (wasParkingCard) {
+            slotData.is_unplaced = false;
+            sourceCard.classList.remove('parking-card');
+            // The parking-lot inline styling (border-left, padding, background)
+            // came from _renderParkingLot. Reset to grid-card defaults so it
+            // visually matches its new neighbours.
+            sourceCard.style.borderLeft = '';
+            sourceCard.style.padding = '';
+            sourceCard.style.borderRadius = '';
+        }
+        sourceCard.dataset.json = JSON.stringify(slotData).replace(/'/g, '&#39;');
+
+        // 2) API call
         try {
             await API.solver.updateSlot(solutionId, slotId, {
                 day_of_week: newDay,
-                period_id: newPeriod
+                period_id: newPeriod,
             });
             Toast.success('Η κάρτα μετακινήθηκε επιτυχώς!');
-            // Re-render the timetable by invoking the app router
-            App.navigateTo('timetable'); 
+            if (wasParkingCard) {
+                this._notifyParkingLotChanged();
+            }
         } catch (err) {
+            // 3) Rollback the optimistic move
+            if (originalNextSibling) {
+                originalParent.insertBefore(sourceCard, originalNextSibling);
+            } else {
+                originalParent.appendChild(sourceCard);
+            }
+            slotData.day_of_week = prev.day_of_week;
+            slotData.period_id = prev.period_id;
+            slotData.is_unplaced = prev.is_unplaced;
+            if (wasParkingCard) {
+                sourceCard.classList.add('parking-card');
+            }
+            sourceCard.dataset.json = JSON.stringify(slotData).replace(/'/g, '&#39;');
             Toast.error('Αποτυχία: ' + err.message);
+        }
+    },
+
+    /**
+     * Update the parking-lot header label after a card leaves it.
+     * Touches only the count text — leaves filter selects, scroll
+     * position, and other view state intact.
+     */
+    _notifyParkingLotChanged() {
+        const lot = document.querySelector('.parking-lot');
+        if (!lot) return;
+        const remaining = lot.querySelectorAll('.parking-card').length;
+        const title = lot.querySelector('.card-title');
+        if (remaining === 0) {
+            // Whole lot is empty — hide the panel
+            lot.style.display = 'none';
+            return;
+        }
+        if (title) {
+            title.textContent = `🅿️ Parking Lot — ${remaining} ${
+                remaining === 1 ? 'ώρα δεν τοποθετήθηκε' : 'ώρες δεν τοποθετήθηκαν'
+            }`;
         }
     },
 
