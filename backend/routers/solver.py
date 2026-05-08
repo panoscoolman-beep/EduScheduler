@@ -51,11 +51,46 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(solution)
 
+    # Optionally fetch warm-start hints from a prior solution
+    warm_start_assignments: list[dict] = []
+    if request.warm_start_from_solution_id:
+        source = (
+            db.query(TimetableSolution)
+            .filter(TimetableSolution.id == request.warm_start_from_solution_id)
+            .first()
+        )
+        if not source:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Δεν βρέθηκε λύση id={request.warm_start_from_solution_id} "
+                    "για warm start"
+                ),
+            )
+        prior_slots = (
+            db.query(TimetableSlot)
+            .filter(
+                TimetableSlot.solution_id == source.id,
+                TimetableSlot.is_unplaced == False,  # noqa: E712
+            )
+            .all()
+        )
+        warm_start_assignments = [
+            {
+                "lesson_id": s.lesson_id,
+                "day_of_week": s.day_of_week,
+                "period_id": s.period_id,
+                "classroom_id": s.classroom_id,
+            }
+            for s in prior_slots
+        ]
+
     # Run solver
     solver = TimetableSolver(
         db,
         max_time_seconds=request.max_time_seconds,
         mode=request.mode,
+        warm_start_assignments=warm_start_assignments,
     )
     result = solver.solve()
 

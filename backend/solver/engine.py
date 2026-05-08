@@ -52,7 +52,8 @@ class TimetableSolver:
 
     def __init__(self, db: Session, max_time_seconds: int = 120,
                  mode: str = "strict",
-                 locked_assignments: list[dict] | None = None):
+                 locked_assignments: list[dict] | None = None,
+                 warm_start_assignments: list[dict] | None = None):
         """
         Args:
             db: SQLAlchemy session
@@ -66,11 +67,19 @@ class TimetableSolver:
                 classroom_id. Used by the "lock & regenerate" flow:
                 user marks slots they like, solver redistributes the
                 rest.
+            warm_start_assignments: optional list of slot dicts to feed
+                the CP-SAT solver as HINTS (not hard constraints). When
+                only a small change was made since a prior run, hints
+                let the solver reuse most of the previous solution and
+                converge much faster. Same shape as locked_assignments.
+                Hints that no longer have a matching x-var are silently
+                ignored — they never make the model infeasible.
         """
         self.db = db
         self.max_time_seconds = max_time_seconds
         self.mode = mode if mode in ("strict", "permissive") else "strict"
         self.locked_assignments: list[dict] = locked_assignments or []
+        self.warm_start_assignments: list[dict] = warm_start_assignments or []
 
         # Data from DB (loaded in _load_data)
         self.teachers: list[Teacher] = []
@@ -110,6 +119,7 @@ class TimetableSolver:
             self._create_variables()
             self._apply_hard_constraints()
             self._apply_locked_assignments()
+            self._apply_warm_start_hints()
             self._apply_soft_constraints()
 
             # Objective: minimize total penalty
@@ -553,6 +563,39 @@ class TimetableSolver:
             applied += 1
         logger.info("Applied %d locked assignments", applied)
 
+    def _apply_warm_start_hints(self):
+        """Feed the CP-SAT solver hints from a previous solution.
+
+        Unlike `_apply_locked_assignments` these are NOT hard
+        constraints — `model.AddHint(var, 1)` just biases the search
+        toward setting var=1. If the previous assignment is now
+        inconsistent with hard constraints (e.g. a teacher's
+        availability changed), the hint is overridden by the model.
+
+        Hints whose x-var no longer exists (lesson deleted, classroom
+        changed, etc.) are silently skipped.
+        """
+        if not self.warm_start_assignments:
+            return
+
+        applied = 0
+        for entry in self.warm_start_assignments:
+            key = (
+                entry.get("lesson_id"),
+                entry.get("day_of_week"),
+                entry.get("period_id"),
+                entry.get("classroom_id"),
+            )
+            if any(v is None for v in key):
+                continue
+            x_var = self.x.get(key)
+            if x_var is None:
+                continue
+            self.model.AddHint(x_var, 1)
+            applied += 1
+        logger.info("Applied %d warm-start hints", applied)
+        self._warm_start_applied = applied
+
     def _apply_soft_constraints(self):
         """Apply soft constraints as penalty terms in the objective."""
         days = range(self.days_per_week)
@@ -960,6 +1003,9 @@ class TimetableSolver:
                     "total_lessons_placed": len(slots),
                     "total_lessons_unplaced": len(unplaced),
                     "mode": self.mode,
+                    "warm_start_hints_applied": getattr(
+                        self, "_warm_start_applied", 0
+                    ),
                 },
             )
 

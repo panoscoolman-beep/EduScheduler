@@ -303,6 +303,15 @@ class SolverRequest(BaseModel):
             "permissive: place what fits, drop the rest in the parking lot."
         ),
     )
+    warm_start_from_solution_id: int | None = Field(
+        None,
+        description=(
+            "If set, use that solution's slot assignments as CP-SAT hints "
+            "(not hard constraints). Speeds up convergence when only a "
+            "small change has been made since the prior run. Hints that "
+            "no longer have a matching x-var are silently skipped."
+        ),
+    )
 
 
 class SolverStatusResponse(BaseModel):

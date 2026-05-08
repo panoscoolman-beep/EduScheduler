@@ -24,7 +24,7 @@ const GenerateView = {
                     <input class="form-input" id="gen-time" type="number" min="10" max="600" value="120">
                 </div>
 
-                <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-lg);">
+                <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-md);">
                     <label class="form-label">Λειτουργία</label>
                     <select class="form-select" id="gen-mode">
                         <option value="strict" selected>Strict — όλα ή τίποτα</option>
@@ -34,6 +34,18 @@ const GenerateView = {
                         <b>Strict</b>: αν δεν χωράνε όλες οι ώρες → INFEASIBLE.<br>
                         <b>Permissive</b>: τοποθετεί ό,τι χωράει· τα υπόλοιπα πάνε στο
                         🅿️ Parking Lot (κάτω από το πρόγραμμα) και τα τοποθετείς χειροκίνητα με drag.
+                    </p>
+                </div>
+
+                <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-lg);">
+                    <label class="form-label">Warm start (προαιρετικό)</label>
+                    <select class="form-select" id="gen-warmstart">
+                        <option value="">— Καμία (πλήρης αναζήτηση) —</option>
+                    </select>
+                    <p class="text-muted" style="font-size: 0.85em; margin-top: 0.5rem; text-align: left;">
+                        Δίνει στον solver την προηγούμενη λύση σαν <b>πρόταση</b>
+                        (όχι περιορισμός). Βοηθάει όταν έχεις κάνει λίγες αλλαγές
+                        και θες γρηγορότερο αποτέλεσμα.
                     </p>
                 </div>
 
@@ -148,10 +160,32 @@ const GenerateView = {
             .replace(/>/g, '&gt;');
     },
 
+    _populateWarmStartOptions(solutions) {
+        const sel = document.getElementById('gen-warmstart');
+        if (!sel) return;
+        const previous = sel.value;
+        const usable = solutions.filter(s =>
+            s.status === 'optimal' || s.status === 'feasible'
+        );
+        sel.innerHTML = '<option value="">— Καμία (πλήρης αναζήτηση) —</option>'
+            + usable.map(s => {
+                const date = s.created_at
+                    ? new Date(s.created_at).toLocaleString('el-GR')
+                    : '—';
+                return `<option value="${s.id}">${this._escape(s.name)} (${date})</option>`;
+            }).join('');
+        // Preserve user's previous selection if still present
+        if (previous && usable.some(s => String(s.id) === previous)) {
+            sel.value = previous;
+        }
+    },
+
     async _startGeneration() {
         const name = document.getElementById('gen-name').value.trim() || 'Πρόγραμμα';
         const maxTime = parseInt(document.getElementById('gen-time').value) || 120;
         const mode = document.getElementById('gen-mode').value || 'strict';
+        const warmStartRaw = document.getElementById('gen-warmstart')?.value;
+        const warmStartId = warmStartRaw ? parseInt(warmStartRaw) : null;
 
         const startBtn = document.getElementById('gen-start');
         const statusDiv = document.getElementById('gen-status');
@@ -174,9 +208,9 @@ const GenerateView = {
         message.textContent = `Ο solver εργάζεται (${mode} mode)...`;
 
         try {
-            const result = await API.solver.generate({
-                name, max_time_seconds: maxTime, mode,
-            });
+            const payload = { name, max_time_seconds: maxTime, mode };
+            if (warmStartId) payload.warm_start_from_solution_id = warmStartId;
+            const result = await API.solver.generate(payload);
 
             clearInterval(progressInterval);
             progress.style.width = '100%';
@@ -229,6 +263,7 @@ const GenerateView = {
         const listEl = document.getElementById('solutions-list');
         try {
             const solutions = await API.solver.listSolutions();
+            this._populateWarmStartOptions(solutions);
             if (!solutions.length) {
                 listEl.innerHTML = '<p class="text-muted text-center">Δεν υπάρχουν λύσεις ακόμα</p>';
                 return;
