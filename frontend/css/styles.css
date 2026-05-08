@@ -764,6 +764,78 @@ a:hover { color: var(--accent-blue-hover); }
     border-color: #F59E0B;
 }
 
+/* ── Compact grid (Προβολή Όλων) ─────────────────────────────────────
+   Όταν δεν φιλτράρεται μία συγκεκριμένη τάξη/καθηγητής/αίθουσα, στο
+   ίδιο cell μπορεί να συνυπάρχουν πολλά cards. Συμπιέζουμε τα cards
+   και τα αφήνουμε να πέφτουν δίπλα-δίπλα ώστε να δίνουν γενική εικόνα
+   αντί να στοιβάζονται κάθετα και να σπάει η σελίδα. */
+
+.timetable-grid.compact-grid td {
+    height: auto;
+    min-height: 56px;
+    min-width: 110px;
+}
+
+.timetable-grid.compact-grid .droppable-cell {
+    padding: 2px;
+}
+
+.timetable-grid.compact-grid .droppable-cell > * {
+    /* Each cell becomes a flex-wrap row of mini-cards */
+}
+.timetable-grid.compact-grid td.droppable-cell {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 2px;
+}
+
+.timetable-grid.compact-grid .lesson-card {
+    flex: 0 1 auto;
+    min-width: 50px;
+    max-width: 100%;
+    padding: 2px 4px;
+    padding-right: 22px !important; /* room for the smaller lock btn */
+    margin: 0;
+    line-height: 1.1;
+    min-height: 0;
+    border-radius: 3px;
+}
+
+.timetable-grid.compact-grid .lesson-card .subject-name {
+    font-size: 0.6rem;
+    line-height: 1.15;
+}
+
+.timetable-grid.compact-grid .lesson-card .teacher-name,
+.timetable-grid.compact-grid .lesson-card .room-name {
+    font-size: 0.5rem;
+    line-height: 1.05;
+    /* In compact mode, prefer 2 short lines + ellipsis instead of full text */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.timetable-grid.compact-grid .lesson-card:hover {
+    transform: scale(1.4);
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    transform-origin: center;
+}
+
+.timetable-grid.compact-grid .lesson-lock-btn {
+    top: 1px;
+    right: 1px;
+    padding: 1px 3px;
+    font-size: 0.7em;
+    min-width: 18px;
+    min-height: 16px;
+    border-radius: 3px;
+    box-shadow: none;
+}
+
 /* ── Modal ──────────────────────────────────────────────── */
 .modal-overlay {
     position: fixed;

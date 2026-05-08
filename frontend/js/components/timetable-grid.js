@@ -114,13 +114,24 @@ const TimetableGrid = {
             return `<tr>${periodCell}${dayCells}</tr>`;
         }).join('');
 
+        // Compact mode = "Προβολή Όλων". Τότε κάθε cell μπορεί να έχει
+        // 5+ cards (όλες τις τάξεις/καθηγητές/αίθουσες ταυτόχρονα), και
+        // το full-size card layout στοιβάζει όλα κάθετα — τα κουτάκια
+        // μεγαλώνουν, η οθόνη γίνεται unreadable. Με την class
+        // `compact-grid` το CSS μικραίνει padding/font-size και αφήνει
+        // τα cards να πέφτουν δίπλα-δίπλα μέσω flex-wrap.
+        const isCompact = !filterValue || filterValue === 'all';
+        const tableClass = isCompact
+            ? 'timetable-grid compact-grid'
+            : 'timetable-grid';
+
         container.innerHTML = `
             <div class="timetable-grid-container">
                 <style>
                     .droppable-cell.drag-over { background: var(--surface-hover); border: 2px dashed var(--primary); }
                     .lesson-card.dragging { opacity: 0.4; transform: scale(0.95); }
                 </style>
-                <table class="timetable-grid" style="min-width: 800px;">
+                <table class="${tableClass}" style="min-width: 800px;">
                     <thead><tr><th>Ώρα</th>${dayHeaders}</tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
