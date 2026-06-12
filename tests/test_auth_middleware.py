@@ -121,19 +121,27 @@ def test_no_sec_fetch_site_means_server_to_server(client):
 
 
 # ---------------------------------------------------------------------------
-# Dev mode — no token configured
+# Missing token — fail-closed
 # ---------------------------------------------------------------------------
 
-def test_dev_mode_no_token_fails_open(client, monkeypatch):
-    """When EDSCHEDULER_API_TOKEN is unset, the middleware fails open
-    (with a log warning). Preserves dev workflow."""
+def test_no_token_fails_closed(client, monkeypatch):
+    """When EDSCHEDULER_API_TOKEN is unset, cross-service calls are
+    rejected (503) — a missing/corrupt .env must never expose the API."""
     monkeypatch.setenv("EDSCHEDULER_API_TOKEN", "")
     response = client.get("/api/dummy")
-    assert response.status_code == 200
+    assert response.status_code == 503
 
 
-def test_dev_mode_empty_token_fails_open(client, monkeypatch):
-    """Whitespace-only token also counts as 'unset'."""
+def test_empty_token_fails_closed(client, monkeypatch):
+    """Whitespace-only token also counts as 'unset' and fails closed."""
     monkeypatch.setenv("EDSCHEDULER_API_TOKEN", "   ")
     response = client.get("/api/dummy")
+    assert response.status_code == 503
+
+
+def test_no_token_still_serves_frontend(client, monkeypatch):
+    """Fail-closed locks only /api/* — the static frontend and public
+    endpoints stay reachable so the operator can see what's wrong."""
+    monkeypatch.setenv("EDSCHEDULER_API_TOKEN", "")
+    response = client.get("/api/healthz")
     assert response.status_code == 200

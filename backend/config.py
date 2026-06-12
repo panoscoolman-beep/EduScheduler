@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     app_env: str = "development"
     secret_key: str = "change_me_to_random_string"
 
+    # Bearer token required on cross-service /api/* calls (see backend/auth.py).
+    # The middleware reads it from os.environ; declared here so pydantic
+    # accepts the key in .env instead of failing with extra_forbidden.
+    edscheduler_api_token: str = ""
+
     allowed_origins: str = "http://localhost:8080,http://localhost:3000"
 
     @property

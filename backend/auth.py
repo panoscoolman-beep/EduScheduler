@@ -23,6 +23,7 @@ and add it to every outgoing request through
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 
@@ -51,12 +52,16 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
         expected = os.environ.get("EDSCHEDULER_API_TOKEN", "").strip()
         if not expected:
-            # Dev mode: no token configured, fail open with a warning log
-            _log.warning(
-                "EDSCHEDULER_API_TOKEN unset — API is unauthenticated. "
-                "Set the env var to enforce Bearer auth on cross-service calls."
+            # Fail-closed: an unset token must lock cross-service access,
+            # never silently expose student data.
+            _log.error(
+                "EDSCHEDULER_API_TOKEN unset — rejecting cross-service API "
+                "calls (fail-closed). Set the env var and restart."
             )
-            return await call_next(request)
+            return JSONResponse(
+                {"detail": "Server token not configured"},
+                status_code=503,
+            )
 
         provided = request.headers.get("authorization", "")
         if not provided.startswith("Bearer "):
@@ -64,7 +69,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 {"detail": "Missing Authorization: Bearer <token>"},
                 status_code=401,
             )
-        if provided.removeprefix("Bearer ").strip() != expected:
+        if not hmac.compare_digest(provided.removeprefix("Bearer ").strip(), expected):
             return JSONResponse(
                 {"detail": "Invalid bearer token"},
                 status_code=401,
