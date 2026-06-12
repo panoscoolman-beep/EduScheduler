@@ -46,9 +46,20 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         if path in _PUBLIC_API_PATHS:
             return await call_next(request)
 
-        # Same-origin browser request (the bundled SPA) — no auth needed
+        # Same-origin browser request (the bundled SPA) — no auth needed.
+        # Two signals, because browsers only send Sec-Fetch-* to "potentially
+        # trustworthy" origins (HTTPS or localhost): over plain HTTP on a
+        # Tailscale IP they omit it, so we also accept an Origin/Referer
+        # that matches the host we're being addressed as. Both are client
+        # headers — the real boundary is the host firewall (LAN blocked,
+        # Tailscale only) + the bearer token for cross-service calls.
         if request.headers.get("sec-fetch-site") in ("same-origin", "same-site"):
             return await call_next(request)
+        own_host = request.headers.get("host", "")
+        for hdr in ("origin", "referer"):
+            value = request.headers.get(hdr, "")
+            if value and own_host and value.split("://", 1)[-1].split("/", 1)[0] == own_host:
+                return await call_next(request)
 
         expected = os.environ.get("EDSCHEDULER_API_TOKEN", "").strip()
         if not expected:
