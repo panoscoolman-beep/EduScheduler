@@ -13,6 +13,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Run tests (gate — deploy only if green)
+        run: |
+          # CI-only tag: a red test run must never replace the prod image tag.
+          # pytest is already pinned in backend/requirements.txt.
+          docker build -t eduscheduler-backend-citest .
+          docker run --rm \
+            -v "$PWD":/work:ro -w /work -e PYTHONPATH=/work \
+            eduscheduler-backend-citest \
+            python -m pytest tests/ -q
+
       - name: Deploy to Server
         run: |
           APP_DIR="/home/coolman/EduScheduler"
@@ -40,8 +50,13 @@ jobs:
         run: |
           echo "Waiting for application startup..."
           sleep 15
-          if curl -sf http://localhost:8082/api/settings/ > /dev/null 2>&1; then
-            echo "✅ EduScheduler API is healthy!"
-          else
-            echo "⚠️ API not responding yet — may need more startup time"
-          fi
+          for attempt in 1 2 3; do
+            if curl -sf http://localhost:8082/api/settings/ > /dev/null 2>&1; then
+              echo "✅ EduScheduler API is healthy!"
+              exit 0
+            fi
+            echo "API not up yet (attempt ${attempt}/3) — retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ ERROR: API health check failed after 3 attempts"
+          exit 1
