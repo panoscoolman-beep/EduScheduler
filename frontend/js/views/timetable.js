@@ -43,9 +43,16 @@ const TimetableView = {
             // to the set of class_ids the student is enrolled in, so the
             // grid can filter slots whose lesson belongs to those classes.
             const studentByLabel = new Map();
+            const studentIdByLabel = new Map();
             for (const st of students) {
                 const label = `${st.last_name} ${st.first_name}`.trim();
                 studentByLabel.set(label, new Set(st.class_ids || []));
+                studentIdByLabel.set(label, st.id);
+            }
+            // teacher_name → teacher_id, for the per-teacher export buttons
+            const teacherIdByName = new Map();
+            for (const s of solution.slots) {
+                if (s.teacher_name && s.teacher_id) teacherIdByName.set(s.teacher_name, s.teacher_id);
             }
             const studentNames = Array.from(studentByLabel.keys()).sort((a, b) =>
                 a.localeCompare(b, 'el')
@@ -62,7 +69,8 @@ const TimetableView = {
                             <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.5rem">👤 Αντικατάσταση</button>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.5rem">📊 Σύγκριση</button>
-                            <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση Προγράμματος" style="margin-right:0.5rem">🖨️ Εκτύπωση</button>
+                            <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση: με επιλεγμένο καθηγητή/μαθητή ανοίγει καθαρή σελίδα εκτύπωσης" style="margin-right:0.25rem">🖨️ Εκτύπωση</button>
+                            <button class="btn btn-secondary" id="tt-ics" title="Εξαγωγή .ics για Google/Apple Calendar (διάλεξε πρώτα καθηγητή ή μαθητή στο φίλτρο)" style="margin-right:0.5rem">📆 ICS</button>
                             <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
                                 ${solution.status === 'optimal' ? 'Βέλτιστο' : solution.status}
                             </span>
@@ -105,9 +113,40 @@ const TimetableView = {
             TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,'class', firstFilter, solutionId);
             this._renderParkingLot('parking-lot-container', solution.slots, solutionId);
 
-            // Event: Print
+            // Resolve the current view/filter to export query params, or
+            // null when the selection isn't a single teacher/student.
+            const exportParams = () => {
+                const viewType = document.getElementById('tt-view-type').value;
+                const filterValue = document.getElementById('tt-filter').value;
+                if (filterValue === 'all') return null;
+                if (viewType === 'teacher' && teacherIdByName.has(filterValue)) {
+                    return `solution_id=${solutionId}&teacher_id=${teacherIdByName.get(filterValue)}`;
+                }
+                if (viewType === 'student' && studentIdByLabel.has(filterValue)) {
+                    return `solution_id=${solutionId}&student_id=${studentIdByLabel.get(filterValue)}`;
+                }
+                return null;
+            };
+
+            // Event: Print — dedicated print page for a single teacher's or
+            // student's programme, plain window.print() otherwise.
             document.getElementById('tt-print').addEventListener('click', () => {
-                window.print();
+                const params = exportParams();
+                if (params) {
+                    window.open(`/api/exports/print?${params}`, '_blank');
+                } else {
+                    window.print();
+                }
+            });
+
+            // Event: ICS export (needs a specific teacher or student)
+            document.getElementById('tt-ics').addEventListener('click', () => {
+                const params = exportParams();
+                if (!params) {
+                    Toast.info('Διάλεξε "Προβολή ανά Καθηγητή ή Μαθητή" και συγκεκριμένο όνομα στο φίλτρο πρώτα.');
+                    return;
+                }
+                window.open(`/api/exports/ics?${params}`, '_blank');
             });
 
             // Event: Compare με άλλη λύση

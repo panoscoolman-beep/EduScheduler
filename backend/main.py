@@ -25,6 +25,7 @@ from backend.routers import (
     solver,
     students,
     settings as settings_router,
+    exports,
 )
 
 
@@ -132,6 +133,7 @@ app.include_router(students.router, prefix="/api/students", tags=["Μαθητέ�
 app.include_router(constraints.router, prefix="/api/constraints", tags=["Περιορισμοί"])
 app.include_router(solver.router, prefix="/api/solver", tags=["Solver"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Ρυθμίσεις"])
+app.include_router(exports.router, prefix="/api/exports", tags=["Εξαγωγές"])
 
 # Serve frontend static files
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
