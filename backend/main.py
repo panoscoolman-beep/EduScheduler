@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.auth import BearerTokenMiddleware
@@ -98,9 +99,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Bearer auth — guards /api/* unless the request is a same-origin
-# browser call or there's no EDSCHEDULER_API_TOKEN configured (dev mode).
+# Bearer auth — guards /api/* except same-origin browser calls and the
+# public paths in auth._PUBLIC_API_PATHS (fail-closed if token unset).
 app.add_middleware(BearerTokenMiddleware)
+
+
+@app.get("/api/healthz", tags=["Health"])
+def healthz():
+    """Public liveness + DB check — used by the CI health check and the
+    docker healthcheck. Listed in auth._PUBLIC_API_PATHS, so it never
+    requires a token."""
+    from sqlalchemy import text as sa_text
+
+    from backend.database import SessionLocal
+
+    try:
+        with SessionLocal() as session:
+            session.execute(sa_text("SELECT 1"))
+    except Exception:
+        return JSONResponse({"status": "degraded", "db": "unreachable"}, status_code=503)
+    return {"status": "ok"}
+
 
 # API Routes
 app.include_router(teachers.router, prefix="/api/teachers", tags=["Καθηγητές"])
