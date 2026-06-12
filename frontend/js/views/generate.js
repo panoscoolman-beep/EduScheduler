@@ -210,7 +210,11 @@ const GenerateView = {
         try {
             const payload = { name, max_time_seconds: maxTime, mode };
             if (warmStartId) payload.warm_start_from_solution_id = warmStartId;
-            const result = await API.solver.generate(payload);
+            // Kick off the background run, then poll /solver/status until
+            // it completes — the request returns within milliseconds now,
+            // so a deploy or browser refresh no longer kills the run.
+            const started = await API.solver.generate(payload);
+            const result = await this._pollUntilDone(started.solution_id, maxTime, message);
 
             clearInterval(progressInterval);
             progress.style.width = '100%';
@@ -278,6 +282,35 @@ const GenerateView = {
         startBtn.disabled = false;
         startBtn.textContent = '🚀 Εκκίνηση Δημιουργίας';
         this._loadSolutions();
+    },
+
+    async _pollUntilDone(solutionId, maxTimeSeconds, messageEl) {
+        // Poll every 3s, up to the solver budget + 60s grace.
+        const deadline = Date.now() + (maxTimeSeconds + 60) * 1000;
+        let elapsed = 0;
+        while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 3000));
+            elapsed += 3;
+            let status;
+            try {
+                status = await API.solver.status(solutionId);
+            } catch (err) {
+                // Transient network hiccup (e.g. deploy) — keep polling,
+                // the run continues server-side.
+                messageEl.textContent = `Ο solver τρέχει (${elapsed}s)... (επανασύνδεση)`;
+                continue;
+            }
+            if (status.status !== 'generating') {
+                return status;
+            }
+            messageEl.textContent = `Ο solver τρέχει (${elapsed}s / έως ${maxTimeSeconds}s)...`;
+        }
+        return {
+            status: 'error',
+            message: 'Η δημιουργία αργεί ασυνήθιστα — δες τη λίστα λύσεων σε λίγο.',
+            placed_count: 0,
+            unplaced_count: 0,
+        };
     },
 
     async _loadSolutions() {

@@ -5,10 +5,10 @@ Solver API — Generate timetables and check status.
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from backend.database import get_db
+from backend.database import SessionLocal, get_db
 from backend.models import (
     TimetableSolution, TimetableSlot, Lesson, Classroom,
     TeacherAvailability, StudentAvailability, StudentClassEnrollment
@@ -114,20 +114,92 @@ def feasibility_check(db: Session = Depends(get_db)):
     return check_feasibility(db).to_dict()
 
 
-@router.post("/generate", response_model=SolverStatusResponse)
-def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
-    """Run the solver to generate a new timetable."""
-    # Create solution record
-    solution = TimetableSolution(
-        name=request.name,
-        status="generating",
-        created_at=datetime.utcnow(),
-    )
-    db.add(solution)
-    db.commit()
-    db.refresh(solution)
+def _persist_solver_result(db: Session, solution: TimetableSolution, result) -> None:
+    """Write a solver result onto its solution row + slots."""
+    solution.status = result.status
+    solution.score = result.score
+    solution.metadata_json = json.dumps(result.stats, default=str)
 
-    # Optionally fetch warm-start hints from a prior solution
+    if result.status in ("optimal", "feasible"):
+        for slot_data in result.slots:
+            db.add(TimetableSlot(
+                solution_id=solution.id,
+                lesson_id=slot_data["lesson_id"],
+                day_of_week=slot_data["day_of_week"],
+                period_id=slot_data["period_id"],
+                classroom_id=slot_data["classroom_id"],
+                is_unplaced=False,
+            ))
+        # Unplaced rows feed the parking lot (permissive mode only)
+        for entry in result.unplaced:
+            db.add(TimetableSlot(
+                solution_id=solution.id,
+                lesson_id=entry["lesson_id"],
+                day_of_week=None,
+                period_id=None,
+                classroom_id=None,
+                is_unplaced=True,
+                unplaced_reason=entry.get("reason"),
+            ))
+    db.commit()
+
+
+def _run_generation_job(
+    solution_id: int,
+    max_time_seconds: int,
+    mode: str,
+    warm_start_assignments: list[dict],
+) -> None:
+    """Background worker: runs CP-SAT with its OWN session (the request
+    session is closed by the time this executes) and persists the result.
+    Any crash marks the solution 'error' so the UI never sees a phantom
+    'generating' row."""
+    db = SessionLocal()
+    try:
+        solution = (
+            db.query(TimetableSolution)
+            .filter(TimetableSolution.id == solution_id)
+            .first()
+        )
+        if not solution:
+            return
+        solver = TimetableSolver(
+            db,
+            max_time_seconds=max_time_seconds,
+            mode=mode,
+            warm_start_assignments=warm_start_assignments,
+        )
+        result = solver.solve()
+        _persist_solver_result(db, solution, result)
+    except Exception as exc:  # noqa: BLE001 — background job must not die silently
+        db.rollback()
+        solution = (
+            db.query(TimetableSolution)
+            .filter(TimetableSolution.id == solution_id)
+            .first()
+        )
+        if solution:
+            solution.status = "error"
+            solution.metadata_json = json.dumps({"message": f"Solver crashed: {exc}"})
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/generate", response_model=SolverStatusResponse)
+def generate_timetable(
+    request: SolverRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Kick off timetable generation in the background.
+
+    Returns immediately with status='generating'; the UI polls
+    GET /solver/status/{solution_id} until it flips. This keeps 10-minute
+    solver runs out of HTTP request handlers (no held worker, no timeout).
+    """
+    # Validate the warm-start source BEFORE creating the solution row —
+    # the old order leaked an orphan 'generating' record on 404.
     warm_start_assignments: list[dict] = []
     if request.warm_start_from_solution_id:
         source = (
@@ -161,56 +233,78 @@ def generate_timetable(request: SolverRequest, db: Session = Depends(get_db)):
             for s in prior_slots
         ]
 
-    # Run solver
-    solver = TimetableSolver(
-        db,
-        max_time_seconds=request.max_time_seconds,
-        mode=request.mode,
-        warm_start_assignments=warm_start_assignments,
+    solution = TimetableSolution(
+        name=request.name,
+        status="generating",
+        created_at=datetime.utcnow(),
     )
-    result = solver.solve()
-
-    # Update solution record
-    solution.status = result.status
-    solution.score = result.score
-    solution.metadata_json = json.dumps(result.stats, default=str)
-
-    if result.status in ("optimal", "feasible"):
-        # Save placed slots
-        for slot_data in result.slots:
-            slot = TimetableSlot(
-                solution_id=solution.id,
-                lesson_id=slot_data["lesson_id"],
-                day_of_week=slot_data["day_of_week"],
-                period_id=slot_data["period_id"],
-                classroom_id=slot_data["classroom_id"],
-                is_unplaced=False,
-            )
-            db.add(slot)
-
-        # Save unplaced rows for the parking lot (permissive mode only)
-        for entry in result.unplaced:
-            slot = TimetableSlot(
-                solution_id=solution.id,
-                lesson_id=entry["lesson_id"],
-                day_of_week=None,
-                period_id=None,
-                classroom_id=None,
-                is_unplaced=True,
-                unplaced_reason=entry.get("reason"),
-            )
-            db.add(slot)
-
+    db.add(solution)
     db.commit()
     db.refresh(solution)
 
+    background_tasks.add_task(
+        _run_generation_job,
+        solution.id,
+        request.max_time_seconds,
+        request.mode,
+        warm_start_assignments,
+    )
+
     return SolverStatusResponse(
         solution_id=solution.id,
-        status=result.status,
-        message=result.message,
-        score=result.score,
-        placed_count=len(result.slots),
-        unplaced_count=len(result.unplaced),
+        status="generating",
+        message="Η δημιουργία ξεκίνησε — ο solver τρέχει στο παρασκήνιο.",
+        score=None,
+        placed_count=0,
+        unplaced_count=0,
+    )
+
+
+@router.get("/status/{solution_id}", response_model=SolverStatusResponse)
+def solver_status(solution_id: int, db: Session = Depends(get_db)):
+    """Polling endpoint for a generation kicked off by POST /generate."""
+    solution = (
+        db.query(TimetableSolution)
+        .filter(TimetableSolution.id == solution_id)
+        .first()
+    )
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+
+    placed = (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.solution_id == solution_id,
+                TimetableSlot.is_unplaced == False)  # noqa: E712
+        .count()
+    )
+    unplaced = (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.solution_id == solution_id,
+                TimetableSlot.is_unplaced == True)  # noqa: E712
+        .count()
+    )
+
+    if solution.status == "generating":
+        message = "Ο solver τρέχει..."
+    elif solution.status in ("optimal", "feasible"):
+        message = f"Ολοκληρώθηκε ({solution.status}) — {placed} μαθήματα τοποθετήθηκαν."
+        if unplaced:
+            message += f" {unplaced} στο parking lot."
+    else:
+        meta = {}
+        try:
+            meta = json.loads(solution.metadata_json or "{}")
+        except ValueError:
+            pass
+        message = meta.get("message", f"Κατάσταση: {solution.status}")
+
+    return SolverStatusResponse(
+        solution_id=solution.id,
+        status=solution.status,
+        message=message,
+        score=solution.score,
+        placed_count=placed,
+        unplaced_count=unplaced,
     )
 
 
