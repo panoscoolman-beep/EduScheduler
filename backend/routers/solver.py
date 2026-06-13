@@ -126,14 +126,49 @@ def feasibility_check(db: Session = Depends(get_db)):
     return check_feasibility(db).to_dict()
 
 
-def _persist_solver_result(db: Session, solution: TimetableSolution, result) -> None:
-    """Write a solver result onto its solution row + slots."""
+def _persist_solver_result(
+    db: Session,
+    solution: TimetableSolution,
+    result,
+    locked_assignments: list[dict] | None = None,
+    extra_stats: dict | None = None,
+) -> None:
+    """Write a solver result onto its solution row + slots.
+
+    When `locked_assignments` is given (regenerate flow), placed slots that
+    match a locked assignment keep is_locked=True so the user's pins survive
+    into the new solution."""
     solution.status = result.status
     solution.score = result.score
-    solution.metadata_json = json.dumps(result.stats, default=str)
+    stats = dict(result.stats)
+    if extra_stats:
+        stats.update(extra_stats)
+
+    # When the solve is infeasible, attach the per-entity feasibility
+    # reasons (overloaded teacher, missing lab, …) so the UI can explain
+    # *why* instead of a generic "infeasible" — closing the loop the user
+    # otherwise only gets from a manual "Έλεγχος Εφικτότητας".
+    if result.status == "infeasible":
+        try:
+            report = check_feasibility(db).to_dict()
+            stats["feasibility_errors"] = report.get("errors", [])
+            stats["feasibility_warnings"] = report.get("warnings", [])
+        except Exception:  # noqa: BLE001 — diagnostics must never break persistence
+            pass
+
+    solution.metadata_json = json.dumps(stats, default=str)
+
+    locked_keys = {
+        (la["lesson_id"], la["day_of_week"], la["period_id"], la["classroom_id"])
+        for la in (locked_assignments or [])
+    }
 
     if result.status in ("optimal", "feasible"):
         for slot_data in result.slots:
+            key = (
+                slot_data["lesson_id"], slot_data["day_of_week"],
+                slot_data["period_id"], slot_data["classroom_id"],
+            )
             db.add(TimetableSlot(
                 solution_id=solution.id,
                 lesson_id=slot_data["lesson_id"],
@@ -141,6 +176,7 @@ def _persist_solver_result(db: Session, solution: TimetableSolution, result) -> 
                 period_id=slot_data["period_id"],
                 classroom_id=slot_data["classroom_id"],
                 is_unplaced=False,
+                is_locked=key in locked_keys,
             ))
         # Unplaced rows feed the parking lot (permissive mode only)
         for entry in result.unplaced:
@@ -156,14 +192,33 @@ def _persist_solver_result(db: Session, solution: TimetableSolution, result) -> 
     db.commit()
 
 
+def _guard_no_active_solve(db: Session) -> None:
+    """Reject a new solve if one is already running. Each CP-SAT run uses
+    4 workers and up to 1g; two concurrent solves on a 1g-limited container
+    risk an OOM kill. One active solve at a time is plenty for this app."""
+    active = (
+        db.query(TimetableSolution)
+        .filter(TimetableSolution.status == "generating")
+        .first()
+    )
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail="Τρέχει ήδη μια δημιουργία προγράμματος. Περίμενε να ολοκληρωθεί.",
+        )
+
+
 def _run_generation_job(
     solution_id: int,
     max_time_seconds: int,
     mode: str,
-    warm_start_assignments: list[dict],
+    warm_start_assignments: list[dict] | None = None,
+    locked_assignments: list[dict] | None = None,
+    extra_stats: dict | None = None,
 ) -> None:
     """Background worker: runs CP-SAT with its OWN session (the request
     session is closed by the time this executes) and persists the result.
+    Handles both /generate (warm-start) and /regenerate (locked) flows.
     Any crash marks the solution 'error' so the UI never sees a phantom
     'generating' row."""
     db = SessionLocal()
@@ -179,10 +234,11 @@ def _run_generation_job(
             db,
             max_time_seconds=max_time_seconds,
             mode=mode,
-            warm_start_assignments=warm_start_assignments,
+            warm_start_assignments=warm_start_assignments or [],
+            locked_assignments=locked_assignments or [],
         )
         result = solver.solve()
-        _persist_solver_result(db, solution, result)
+        _persist_solver_result(db, solution, result, locked_assignments, extra_stats)
     except Exception as exc:  # noqa: BLE001 — background job must not die silently
         db.rollback()
         solution = (
@@ -210,6 +266,8 @@ def generate_timetable(
     GET /solver/status/{solution_id} until it flips. This keeps 10-minute
     solver runs out of HTTP request handlers (no held worker, no timeout).
     """
+    _guard_no_active_solve(db)
+
     # Validate the warm-start source BEFORE creating the solution row —
     # the old order leaked an orphan 'generating' record on 404.
     warm_start_assignments: list[dict] = []
@@ -309,6 +367,10 @@ def solver_status(solution_id: int, db: Session = Depends(get_db)):
         except ValueError:
             pass
         message = meta.get("message", f"Κατάσταση: {solution.status}")
+        # Surface concrete infeasibility reasons when we have them.
+        reasons = meta.get("feasibility_errors") or []
+        if solution.status == "infeasible" and reasons:
+            message = "Αδύνατο πρόγραμμα. Αιτίες:\n• " + "\n• ".join(reasons[:6])
 
     return SolverStatusResponse(
         solution_id=solution.id,
@@ -324,6 +386,7 @@ def solver_status(solution_id: int, db: Session = Depends(get_db)):
 def regenerate_with_locks(
     source_solution_id: int,
     request: SolverRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Run the solver again, keeping every is_locked=TRUE slot from a
@@ -333,6 +396,8 @@ def regenerate_with_locks(
     The result is a NEW solution (we don't mutate the source) so
     history is preserved and the user can compare the two.
     """
+    _guard_no_active_solve(db)
+
     source = db.query(TimetableSolution).filter(
         TimetableSolution.id == source_solution_id
     ).first()
@@ -368,7 +433,10 @@ def regenerate_with_locks(
         for s in locked_slots
     ]
 
-    # Create the new solution record
+    # Create the new solution record and run the solver in the background
+    # (same pattern as /generate) so Lock & Regenerate no longer holds an
+    # HTTP worker for the full solve and survives a mid-run deploy. The UI
+    # polls GET /solver/status/{id}.
     solution = TimetableSolution(
         name=request.name or f"{source.name} (regenerated)",
         status="generating",
@@ -378,68 +446,24 @@ def regenerate_with_locks(
     db.commit()
     db.refresh(solution)
 
-    solver = TimetableSolver(
-        db,
-        max_time_seconds=request.max_time_seconds,
-        mode=request.mode,
-        locked_assignments=locked_assignments,
+    background_tasks.add_task(
+        _run_generation_job,
+        solution.id,
+        request.max_time_seconds,
+        request.mode,
+        None,  # no warm-start
+        locked_assignments,
+        {"locked_from_solution": source_solution_id,
+         "locked_count": len(locked_assignments)},
     )
-    result = solver.solve()
-
-    solution.status = result.status
-    solution.score = result.score
-    stats = dict(result.stats)
-    stats["locked_from_solution"] = source_solution_id
-    stats["locked_count"] = len(locked_assignments)
-    solution.metadata_json = json.dumps(stats, default=str)
-
-    if result.status in ("optimal", "feasible"):
-        # Determine which placed slots correspond to the original locks
-        # so we can preserve their is_locked flag in the new solution.
-        locked_keys = {
-            (la["lesson_id"], la["day_of_week"], la["period_id"], la["classroom_id"])
-            for la in locked_assignments
-        }
-        for slot_data in result.slots:
-            key = (
-                slot_data["lesson_id"],
-                slot_data["day_of_week"],
-                slot_data["period_id"],
-                slot_data["classroom_id"],
-            )
-            slot = TimetableSlot(
-                solution_id=solution.id,
-                lesson_id=slot_data["lesson_id"],
-                day_of_week=slot_data["day_of_week"],
-                period_id=slot_data["period_id"],
-                classroom_id=slot_data["classroom_id"],
-                is_unplaced=False,
-                is_locked=key in locked_keys,
-            )
-            db.add(slot)
-
-        for entry in result.unplaced:
-            slot = TimetableSlot(
-                solution_id=solution.id,
-                lesson_id=entry["lesson_id"],
-                day_of_week=None,
-                period_id=None,
-                classroom_id=None,
-                is_unplaced=True,
-                unplaced_reason=entry.get("reason"),
-            )
-            db.add(slot)
-
-    db.commit()
-    db.refresh(solution)
 
     return SolverStatusResponse(
         solution_id=solution.id,
-        status=result.status,
-        message=result.message,
-        score=result.score,
-        placed_count=len(result.slots),
-        unplaced_count=len(result.unplaced),
+        status="generating",
+        message="Η αναδημιουργία ξεκίνησε — ο solver τρέχει στο παρασκήνιο.",
+        score=None,
+        placed_count=0,
+        unplaced_count=0,
     )
 
 

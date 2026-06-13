@@ -160,44 +160,48 @@ const TimetableView = {
             });
 
             // Event: Lock & Regenerate
-            document.getElementById('tt-regen').addEventListener('click', async () => {
+            document.getElementById('tt-regen').addEventListener('click', () => {
                 const lockedCount = solution.slots.filter(s => s.is_locked && !s.is_unplaced).length;
                 if (lockedCount === 0) {
                     Toast.error('Δεν έχει κλειδωθεί κανένα μάθημα. Πάτησε το 🔒 σε όσα θες να διατηρήσεις πρώτα.');
                     return;
                 }
-
-                const newName = prompt(
-                    `Νέα έκδοση προγράμματος βασισμένη σε ${lockedCount} κλειδωμένα μαθήματα.\n` +
-                    'Δώσε όνομα για τη νέα λύση:',
-                    `${solution.name} v2`
-                );
-                if (!newName) return;
-
-                const mode = confirm(
-                    'Θες strict mode; (OK = strict, Cancel = permissive — βάζει ό,τι μπορεί + parking lot)'
-                ) ? 'strict' : 'permissive';
-
-                Toast.success('🧠 Solver εργάζεται…');
-                try {
-                    const result = await API.solver.regenerateWithLocks(solutionId, {
-                        name: newName,
-                        max_time_seconds: 120,
-                        mode,
-                    });
-                    if (result.status === 'optimal' || result.status === 'feasible') {
-                        Toast.success(
-                            `✅ ${result.message} ` +
-                            `(${result.placed_count} placed, ${result.unplaced_count} στο parking)`
-                        );
-                        App._currentSolutionId = result.solution_id;
-                        await this.render(container);
-                    } else {
-                        Toast.error(result.message);
+                // Proper modal instead of prompt()/confirm() — the old
+                // confirm's "OK = strict / Cancel = permissive" mapping was
+                // easy to get backwards.
+                const body = `
+                    <p>Νέα έκδοση βασισμένη σε <b>${lockedCount}</b> κλειδωμένα μαθήματα.</p>
+                    <div class="form-group">
+                        <label class="form-label">Όνομα νέας λύσης</label>
+                        <input class="form-input" id="regen-name" value="${this._esc(solution.name)} v2">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Τρόπος</label>
+                        <label style="display:block"><input type="radio" name="regen-mode" value="strict" checked> Αυστηρός — όλα τα μαθήματα πρέπει να μπουν</label>
+                        <label style="display:block"><input type="radio" name="regen-mode" value="permissive"> Επιτρεπτικός — βάζει ό,τι μπορεί + parking lot</label>
+                    </div>`;
+                Modal.open('🔒 Lock & Regenerate', body, async () => {
+                    const newName = document.getElementById('regen-name').value.trim();
+                    if (!newName) { Toast.error('Δώσε όνομα.'); return; }
+                    const mode = document.querySelector('input[name="regen-mode"]:checked').value;
+                    Modal.close();
+                    Toast.success('🧠 Solver εργάζεται στο παρασκήνιο…');
+                    try {
+                        const started = await API.solver.regenerateWithLocks(solutionId, {
+                            name: newName, max_time_seconds: 120, mode,
+                        });
+                        const result = await this._pollSolve(started.solution_id, 120);
+                        if (result.status === 'optimal' || result.status === 'feasible') {
+                            Toast.success(`✅ ${result.message}`);
+                            App._currentSolutionId = result.solution_id;
+                            await this.render(container);
+                        } else {
+                            Toast.error(result.message);
+                        }
+                    } catch (err) {
+                        Toast.error(`Regenerate απέτυχε: ${err.message}`);
                     }
-                } catch (err) {
-                    Toast.error(`Regenerate απέτυχε: ${err.message}`);
-                }
+                }, { saveText: '🚀 Εκτέλεση', saveClass: 'btn-warning' });
             });
 
             // Slots passed to the grid. For "student" view we pre-filter
@@ -380,6 +384,24 @@ const TimetableView = {
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
+    },
+
+    /**
+     * Poll /solver/status until the run leaves 'generating'. Used by
+     * Lock & Regenerate now that it runs in the background like /generate.
+     */
+    async _pollSolve(solutionId, maxTimeSeconds) {
+        const deadline = Date.now() + (maxTimeSeconds + 60) * 1000;
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+                const status = await API.solver.status(solutionId);
+                if (status.status !== 'generating') return status;
+            } catch (e) {
+                // transient hiccup — keep polling, the run continues server-side
+            }
+        }
+        return { status: 'error', message: 'Η αναδημιουργία αργεί — δες τη λίστα λύσεων σε λίγο.' };
     },
 
     /**
