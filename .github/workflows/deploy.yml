@@ -23,6 +23,13 @@ jobs:
             eduscheduler-backend-citest \
             python -m pytest tests/ -q
 
+      - name: Run frontend JS tests (Node built-in runner)
+        run: |
+          # The frontend is vanilla JS (no build step); its pure data helpers
+          # are unit-tested with Node's built-in runner — no npm deps. The
+          # self-hosted runner already has Node 22.
+          node --test frontend/js/tests/*.test.js
+
       - name: Deploy to Server
         run: |
           APP_DIR="/home/coolman/EduScheduler"

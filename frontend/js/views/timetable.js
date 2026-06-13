@@ -35,28 +35,20 @@ const TimetableView = {
             ]);
 
             // Extract unique values for filters
-            const classNames = [...new Set(solution.slots.map(s => s.class_name).filter(Boolean))];
-            const teacherNames = [...new Set(solution.slots.map(s => s.teacher_name).filter(Boolean))];
-            const roomNames = [...new Set(solution.slots.map(s => s.classroom_name).filter(Boolean))];
+            const classNames = TimetableHelpers.uniqueValues(solution.slots, 'class_name');
+            const teacherNames = TimetableHelpers.uniqueValues(solution.slots, 'teacher_name');
+            const roomNames = TimetableHelpers.uniqueValues(solution.slots, 'classroom_name');
 
             // Student dropdown shows "Last First" labels. Each label maps
             // to the set of class_ids the student is enrolled in, so the
             // grid can filter slots whose lesson belongs to those classes.
-            const studentByLabel = new Map();
-            const studentIdByLabel = new Map();
-            for (const st of students) {
-                const label = `${st.last_name} ${st.first_name}`.trim();
-                studentByLabel.set(label, new Set(st.class_ids || []));
-                studentIdByLabel.set(label, st.id);
-            }
+            const {
+                classIdsByLabel: studentByLabel,
+                idByLabel: studentIdByLabel,
+                sortedNames: studentNames,
+            } = TimetableHelpers.buildStudentLabelMaps(students);
             // teacher_name → teacher_id, for the per-teacher export buttons
-            const teacherIdByName = new Map();
-            for (const s of solution.slots) {
-                if (s.teacher_name && s.teacher_id) teacherIdByName.set(s.teacher_name, s.teacher_id);
-            }
-            const studentNames = Array.from(studentByLabel.keys()).sort((a, b) =>
-                a.localeCompare(b, 'el')
-            );
+            const teacherIdByName = TimetableHelpers.teacherIdByName(solution.slots);
 
             container.innerHTML = `
                 <div class="card mb-lg">
@@ -115,18 +107,11 @@ const TimetableView = {
 
             // Resolve the current view/filter to export query params, or
             // null when the selection isn't a single teacher/student.
-            const exportParams = () => {
-                const viewType = document.getElementById('tt-view-type').value;
-                const filterValue = document.getElementById('tt-filter').value;
-                if (filterValue === 'all') return null;
-                if (viewType === 'teacher' && teacherIdByName.has(filterValue)) {
-                    return `solution_id=${solutionId}&teacher_id=${teacherIdByName.get(filterValue)}`;
-                }
-                if (viewType === 'student' && studentIdByLabel.has(filterValue)) {
-                    return `solution_id=${solutionId}&student_id=${studentIdByLabel.get(filterValue)}`;
-                }
-                return null;
-            };
+            const exportParams = () => TimetableHelpers.resolveExportParams(
+                document.getElementById('tt-view-type').value,
+                document.getElementById('tt-filter').value,
+                solutionId, teacherIdByName, studentIdByLabel,
+            );
 
             // Event: Print — dedicated print page for a single teacher's or
             // student's programme, plain window.print() otherwise.
@@ -161,7 +146,7 @@ const TimetableView = {
 
             // Event: Lock & Regenerate
             document.getElementById('tt-regen').addEventListener('click', () => {
-                const lockedCount = solution.slots.filter(s => s.is_locked && !s.is_unplaced).length;
+                const lockedCount = TimetableHelpers.countLockedSlots(solution.slots);
                 if (lockedCount === 0) {
                     Toast.error('Δεν έχει κλειδωθεί κανένα μάθημα. Πάτησε το 🔒 σε όσα θες να διατηρήσεις πρώτα.');
                     return;
