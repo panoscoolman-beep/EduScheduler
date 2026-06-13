@@ -65,6 +65,143 @@ const TimetableHelpers = {
     countLockedSlots(slots) {
         return (slots || []).filter(s => s.is_locked && !s.is_unplaced).length;
     },
+
+    /** Minimal HTML-escape for values interpolated into template strings. */
+    esc(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    },
+
+    /**
+     * Build the compare-modal results HTML (side-by-side metrics table with
+     * the winner per row starred/highlighted), or an empty-state line when
+     * the API returned no metrics. Pure: data in, HTML string out.
+     */
+    buildCompareResultHtml(result) {
+        if (!result.metrics?.length) {
+            return '<p class="text-muted">Δεν επιστράφηκαν metrics.</p>';
+        }
+
+        const metricLabels = {
+            score:               'Σκορ (penalty)',
+            placed_count:        '✅ Τοποθετήθηκαν',
+            unplaced_count:      '🅿️ Στο parking',
+            teacher_gap_total:   'Παράθυρα καθηγητών (σύνολο)',
+            workload_stddev:     'Ανισορροπία ωρών (σ)',
+            avg_days_per_class:  'Μέσος όρος ημερών/τμήμα',
+            max_days_per_class:  'Max ημέρες σε τμήμα',
+            late_periods_used:   'Αργές ώρες (μετά τη μέση)',
+        };
+
+        const metricKeys = Object.keys(metricLabels);
+        const winners = result.winners || {};
+
+        const headerCells = result.metrics.map(m =>
+            `<th>${TimetableHelpers.esc(m.name)}</th>`
+        ).join('');
+
+        const rows = metricKeys.map(key => {
+            const cells = result.metrics.map(m => {
+                const value = m[key];
+                const isWinner = winners[key] === m.solution_id;
+                const display = value === null || value === undefined
+                    ? '—'
+                    : (typeof value === 'number' ? value : String(value));
+                return `<td style="${isWinner ? 'background:#D1FAE5; font-weight:600;' : ''}">
+                    ${display}${isWinner ? ' ⭐' : ''}
+                </td>`;
+            }).join('');
+            return `<tr><td><strong>${metricLabels[key]}</strong></td>${cells}</tr>`;
+        }).join('');
+
+        return `
+            <p class="text-muted" style="font-size:0.85em; margin-bottom:0.5rem;">
+                ⭐ = καλύτερη τιμή για κάθε metric (lower is better, εκτός από Τοποθετήθηκαν).
+            </p>
+            <table class="data-table" style="font-size:0.9em;">
+                <thead>
+                    <tr><th>Metric</th>${headerCells}</tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    },
+
+    /**
+     * Build the substitute-modal results HTML: a card per affected slot with
+     * candidate substitutes + reschedule options, or an empty-state line when
+     * the teacher has no lessons that day. Pure: data in, HTML string out.
+     */
+    buildSubstituteResultHtml(data, dayLabel) {
+        if (!data.affected_slots.length) {
+            return `
+                <p class="text-muted">
+                    Ο καθηγητής δεν έχει προγραμματισμένα μαθήματα την ${dayLabel}.
+                    Δεν χρειάζεται αντικατάσταση.
+                </p>
+            `;
+        }
+
+        const cards = data.affected_slots.map(slot => {
+            const candidatesHtml = slot.candidates.length
+                ? `<ul style="margin:0.4em 0 0 1.4em; padding:0;">
+                       ${slot.candidates.slice(0, 5).map(c => `
+                           <li style="margin-bottom:0.3em;">
+                               <strong>${TimetableHelpers.esc(c.name)}</strong>
+                               <span class="text-muted" style="font-size:0.85em;">
+                                 (score ${c.score})
+                               </span>
+                               <div style="font-size:0.85em; color:var(--text-muted);">
+                                 ${TimetableHelpers.esc(c.reasons.join(', '))}
+                               </div>
+                           </li>
+                       `).join('')}
+                   </ul>`
+                : '<p class="text-muted" style="font-size:0.9em; margin:0.3em 0;">Κανείς διαθέσιμος αυτή την ώρα.</p>';
+
+            const rescheduleHtml = slot.reschedule_options.length
+                ? `<ul style="margin:0.4em 0 0 1.4em; padding:0; max-height:120px; overflow:auto;">
+                       ${slot.reschedule_options.slice(0, 8).map(opt => {
+                           const dayName = ['Δευ','Τρι','Τετ','Πεμ','Παρ','Σαβ','Κυρ'][opt.day_of_week];
+                           return `<li>${dayName} • ${TimetableHelpers.esc(opt.period_name || '?')}</li>`;
+                       }).join('')}
+                   </ul>`
+                : '<p class="text-muted" style="font-size:0.9em; margin:0.3em 0;">Καμία ελεύθερη ώρα στην εβδομάδα.</p>';
+
+            return `
+                <div class="card" style="margin-bottom:1rem; padding:0.8rem 1rem;">
+                    <div style="font-weight:600; margin-bottom:0.5rem;">
+                        ${TimetableHelpers.esc(slot.subject_name || '?')} —
+                        ${TimetableHelpers.esc(slot.class_name || '?')} •
+                        ${TimetableHelpers.esc(slot.period_name || '?')} •
+                        ${TimetableHelpers.esc(slot.classroom_name || '?')}
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                        <div>
+                            <strong style="font-size:0.9em;">Αντικαταστάτες:</strong>
+                            ${candidatesHtml}
+                        </div>
+                        <div>
+                            <strong style="font-size:0.9em;">Εναλλακτικές ώρες ίδιας εβδομάδας:</strong>
+                            ${rescheduleHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div style="margin-bottom:1rem; padding:0.6rem 0.8rem;
+                        background:var(--bg-secondary, #F3F4F6); border-radius:6px;">
+                <strong>Σύνολο μαθημάτων που επηρεάζονται:</strong>
+                ${data.stats.affected_count}
+                — ${data.stats.with_candidates} με διαθέσιμους αντικαταστάτες
+            </div>
+            ${cards}
+        `;
+    },
 };
 
 if (typeof module !== 'undefined' && module.exports) {

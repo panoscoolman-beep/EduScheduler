@@ -365,10 +365,7 @@ const TimetableView = {
     },
 
     _esc(s) {
-        return String(s ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+        return TimetableHelpers.esc(s);
     },
 
     /**
@@ -509,123 +506,10 @@ const TimetableView = {
     },
 
     _renderSubstituteResult(data, mountEl, dayLabel) {
-        if (!data.affected_slots.length) {
-            mountEl.innerHTML = `
-                <p class="text-muted">
-                    Ο καθηγητής δεν έχει προγραμματισμένα μαθήματα την ${dayLabel}.
-                    Δεν χρειάζεται αντικατάσταση.
-                </p>
-            `;
-            return;
-        }
-
-        const cards = data.affected_slots.map(slot => {
-            const candidatesHtml = slot.candidates.length
-                ? `<ul style="margin:0.4em 0 0 1.4em; padding:0;">
-                       ${slot.candidates.slice(0, 5).map(c => `
-                           <li style="margin-bottom:0.3em;">
-                               <strong>${this._esc(c.name)}</strong>
-                               <span class="text-muted" style="font-size:0.85em;">
-                                 (score ${c.score})
-                               </span>
-                               <div style="font-size:0.85em; color:var(--text-muted);">
-                                 ${this._esc(c.reasons.join(', '))}
-                               </div>
-                           </li>
-                       `).join('')}
-                   </ul>`
-                : '<p class="text-muted" style="font-size:0.9em; margin:0.3em 0;">Κανείς διαθέσιμος αυτή την ώρα.</p>';
-
-            const rescheduleHtml = slot.reschedule_options.length
-                ? `<ul style="margin:0.4em 0 0 1.4em; padding:0; max-height:120px; overflow:auto;">
-                       ${slot.reschedule_options.slice(0, 8).map(opt => {
-                           const dayName = ['Δευ','Τρι','Τετ','Πεμ','Παρ','Σαβ','Κυρ'][opt.day_of_week];
-                           return `<li>${dayName} • ${this._esc(opt.period_name || '?')}</li>`;
-                       }).join('')}
-                   </ul>`
-                : '<p class="text-muted" style="font-size:0.9em; margin:0.3em 0;">Καμία ελεύθερη ώρα στην εβδομάδα.</p>';
-
-            return `
-                <div class="card" style="margin-bottom:1rem; padding:0.8rem 1rem;">
-                    <div style="font-weight:600; margin-bottom:0.5rem;">
-                        ${this._esc(slot.subject_name || '?')} —
-                        ${this._esc(slot.class_name || '?')} •
-                        ${this._esc(slot.period_name || '?')} •
-                        ${this._esc(slot.classroom_name || '?')}
-                    </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
-                        <div>
-                            <strong style="font-size:0.9em;">Αντικαταστάτες:</strong>
-                            ${candidatesHtml}
-                        </div>
-                        <div>
-                            <strong style="font-size:0.9em;">Εναλλακτικές ώρες ίδιας εβδομάδας:</strong>
-                            ${rescheduleHtml}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        mountEl.innerHTML = `
-            <div style="margin-bottom:1rem; padding:0.6rem 0.8rem;
-                        background:var(--bg-secondary, #F3F4F6); border-radius:6px;">
-                <strong>Σύνολο μαθημάτων που επηρεάζονται:</strong>
-                ${data.stats.affected_count}
-                — ${data.stats.with_candidates} με διαθέσιμους αντικαταστάτες
-            </div>
-            ${cards}
-        `;
+        mountEl.innerHTML = TimetableHelpers.buildSubstituteResultHtml(data, dayLabel);
     },
 
     _renderCompareResult(result, mountEl) {
-        if (!result.metrics?.length) {
-            mountEl.innerHTML = '<p class="text-muted">Δεν επιστράφηκαν metrics.</p>';
-            return;
-        }
-
-        const metricLabels = {
-            score:               'Σκορ (penalty)',
-            placed_count:        '✅ Τοποθετήθηκαν',
-            unplaced_count:      '🅿️ Στο parking',
-            teacher_gap_total:   'Παράθυρα καθηγητών (σύνολο)',
-            workload_stddev:     'Ανισορροπία ωρών (σ)',
-            avg_days_per_class:  'Μέσος όρος ημερών/τμήμα',
-            max_days_per_class:  'Max ημέρες σε τμήμα',
-            late_periods_used:   'Αργές ώρες (μετά τη μέση)',
-        };
-
-        const metricKeys = Object.keys(metricLabels);
-        const winners = result.winners || {};
-
-        const headerCells = result.metrics.map(m =>
-            `<th>${this._esc(m.name)}</th>`
-        ).join('');
-
-        const rows = metricKeys.map(key => {
-            const cells = result.metrics.map(m => {
-                const value = m[key];
-                const isWinner = winners[key] === m.solution_id;
-                const display = value === null || value === undefined
-                    ? '—'
-                    : (typeof value === 'number' ? value : String(value));
-                return `<td style="${isWinner ? 'background:#D1FAE5; font-weight:600;' : ''}">
-                    ${display}${isWinner ? ' ⭐' : ''}
-                </td>`;
-            }).join('');
-            return `<tr><td><strong>${metricLabels[key]}</strong></td>${cells}</tr>`;
-        }).join('');
-
-        mountEl.innerHTML = `
-            <p class="text-muted" style="font-size:0.85em; margin-bottom:0.5rem;">
-                ⭐ = καλύτερη τιμή για κάθε metric (lower is better, εκτός από Τοποθετήθηκαν).
-            </p>
-            <table class="data-table" style="font-size:0.9em;">
-                <thead>
-                    <tr><th>Metric</th>${headerCells}</tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
-        `;
+        mountEl.innerHTML = TimetableHelpers.buildCompareResultHtml(result);
     },
 };

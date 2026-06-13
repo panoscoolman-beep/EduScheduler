@@ -74,3 +74,65 @@ test('countLockedSlots: locked and not in the parking lot', () => {
     assert.equal(H.countLockedSlots(slots), 1);
     assert.equal(H.countLockedSlots([]), 0);
 });
+
+test('esc: escapes &, <, > and coerces null/number', () => {
+    assert.equal(H.esc('a<b>&c'), 'a&lt;b&gt;&amp;c');
+    assert.equal(H.esc(null), '');
+    assert.equal(H.esc(undefined), '');
+    assert.equal(H.esc(5), '5');
+});
+
+test('buildCompareResultHtml: empty metrics -> empty-state line', () => {
+    assert.match(H.buildCompareResultHtml({ metrics: [] }), /Δεν επιστράφηκαν metrics/);
+    assert.match(H.buildCompareResultHtml({}), /Δεν επιστράφηκαν metrics/);
+});
+
+test('buildCompareResultHtml: metrics table with starred + highlighted winner', () => {
+    const result = {
+        metrics: [
+            { name: 'Sol A', solution_id: 1, score: 100, placed_count: 50, unplaced_count: 0 },
+            { name: 'Sol B', solution_id: 2, score: 120, placed_count: 48, unplaced_count: 2 },
+        ],
+        winners: { score: 1, placed_count: 1 },
+    };
+    const html = H.buildCompareResultHtml(result);
+    assert.match(html, /Σκορ \(penalty\)/);   // metric label rendered
+    assert.match(html, /Sol A/);               // header cell
+    assert.match(html, /⭐/);                   // winner starred
+    assert.match(html, /D1FAE5/);              // winner cell highlighted
+});
+
+test('buildSubstituteResultHtml: empty affected slots names the day', () => {
+    const html = H.buildSubstituteResultHtml({ affected_slots: [] }, 'Τρίτη');
+    assert.match(html, /δεν έχει προγραμματισμένα/);
+    assert.match(html, /Τρίτη/);
+});
+
+test('buildSubstituteResultHtml: affected slot with candidates + stats', () => {
+    const data = {
+        affected_slots: [{
+            subject_name: 'Άλγεβρα', class_name: 'Β2', period_name: '1η', classroom_name: 'Α1',
+            candidates: [{ name: 'Νίκος', score: 9, reasons: ['διαθέσιμος', 'ίδιο μάθημα'] }],
+            reschedule_options: [{ day_of_week: 1, period_name: '3η' }],
+        }],
+        stats: { affected_count: 1, with_candidates: 1 },
+    };
+    const html = H.buildSubstituteResultHtml(data, 'Δευτέρα');
+    assert.match(html, /Άλγεβρα/);
+    assert.match(html, /Νίκος/);
+    assert.match(html, /score 9/);
+    assert.match(html, /Σύνολο μαθημάτων/);
+});
+
+test('buildSubstituteResultHtml: slot with no candidates shows fallback', () => {
+    const data = {
+        affected_slots: [{
+            subject_name: 'X', class_name: 'Y', period_name: 'Z', classroom_name: 'W',
+            candidates: [], reschedule_options: [],
+        }],
+        stats: { affected_count: 1, with_candidates: 0 },
+    };
+    const html = H.buildSubstituteResultHtml(data, 'Δευτέρα');
+    assert.match(html, /Κανείς διαθέσιμος/);
+    assert.match(html, /Καμία ελεύθερη ώρα/);
+});
