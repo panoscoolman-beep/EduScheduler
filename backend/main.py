@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 def _recover_stuck_runs() -> None:
     import json
     import logging
-    from datetime import datetime
+    from datetime import datetime, timezone
     from sqlalchemy.orm import Session as _Session
     from backend.models import TimetableSolution
 
@@ -73,7 +73,7 @@ def _recover_stuck_runs() -> None:
                     existing = json.loads(sol.metadata_json)
                 except (TypeError, ValueError):
                     existing = {}
-            existing["recovered_at"] = datetime.utcnow().isoformat()
+            existing["recovered_at"] = datetime.now(timezone.utc).isoformat()
             existing["recovery_reason"] = (
                 "Ο solver διακόπηκε από restart του container. Δοκίμασε ξανά."
             )
@@ -87,11 +87,17 @@ def _recover_stuck_runs() -> None:
         session.close()
 
 
+# Hide interactive docs in production — they live under "/" (not "/api/*")
+# so they bypass the bearer middleware and would expose the full API schema.
+_is_prod = settings.app_env == "production"
 app = FastAPI(
     title="EduScheduler API",
     description="Αυτόματο Ωρολόγιο Πρόγραμμα για Σχολεία & Φροντιστήρια",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
 
 app.add_middleware(

@@ -2,12 +2,21 @@
 SQLAlchemy ORM Models — All database entities for EduScheduler.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, Float, Text,
     ForeignKey, DateTime, UniqueConstraint, CheckConstraint, Table
 )
+
+
+def utcnow_naive() -> datetime:
+    """Naive UTC timestamp (same wall-clock as the old datetime.utcnow(),
+    but without the deprecation). Columns are TIMESTAMP WITHOUT TIME ZONE,
+    so we keep storing naive UTC; serialization marks it as UTC explicitly
+    (see backend/utils time helper) so the frontend renders local time
+    correctly instead of treating naive-UTC as local."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy.orm import relationship
 
 from backend.database import Base
@@ -181,7 +190,7 @@ class StudentClassEnrollment(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
-    enrolled_at = Column(DateTime, default=datetime.utcnow)
+    enrolled_at = Column(DateTime, default=utcnow_naive)
 
     # Relationships
     student = relationship("Student", back_populates="enrollments")
@@ -268,7 +277,7 @@ class TimetableSolution(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow_naive)
     status = Column(String(20), default="draft")  # draft / generating / optimal / feasible / infeasible
     score = Column(Float)
     metadata_json = Column(Text)  # JSON with solver stats
@@ -347,7 +356,7 @@ class TimetableSlotHistory(Base):
         ForeignKey("timetable_slots.id", ondelete="CASCADE"),
         nullable=False,
     )
-    performed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    performed_at = Column(DateTime, default=utcnow_naive, nullable=False)
     operation = Column(String(20), nullable=False, default="move")
 
     prev_day_of_week = Column(Integer, nullable=True)

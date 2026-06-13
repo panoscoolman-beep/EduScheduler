@@ -3,15 +3,27 @@ Solver API — Generate timetables and check status.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import SessionLocal, get_db
+
+
+def _iso_utc(dt: datetime | None) -> str | None:
+    """Serialize a stored naive-UTC datetime as an explicit-UTC ISO string
+    (…+00:00) so the frontend's new Date() reads it as UTC and renders the
+    correct local time, instead of mistaking naive-UTC for local."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 from backend.models import (
     TimetableSolution, TimetableSlot, Lesson, Classroom,
-    TeacherAvailability, StudentAvailability, StudentClassEnrollment
+    TeacherAvailability, StudentAvailability, StudentClassEnrollment,
+    utcnow_naive,
 )
 from backend.services import slot_history as slot_history_svc
 from backend.services.substitute_finder import find_substitutes
@@ -236,7 +248,7 @@ def generate_timetable(
     solution = TimetableSolution(
         name=request.name,
         status="generating",
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
     )
     db.add(solution)
     db.commit()
@@ -360,7 +372,7 @@ def regenerate_with_locks(
     solution = TimetableSolution(
         name=request.name or f"{source.name} (regenerated)",
         status="generating",
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
     )
     db.add(solution)
     db.commit()
@@ -443,7 +455,7 @@ def list_solutions(db: Session = Depends(get_db)):
         TimetableSolutionResponse(
             id=s.id,
             name=s.name,
-            created_at=s.created_at.isoformat() if s.created_at else None,
+            created_at=_iso_utc(s.created_at),
             status=s.status,
             score=s.score,
         )
@@ -500,7 +512,7 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
     return TimetableSolutionResponse(
         id=solution.id,
         name=solution.name,
-        created_at=solution.created_at.isoformat() if solution.created_at else None,
+        created_at=_iso_utc(solution.created_at),
         status=solution.status,
         score=solution.score,
         slots=enriched_slots,
