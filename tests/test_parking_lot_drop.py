@@ -274,3 +274,111 @@ def test_grid_to_grid_drop_keeps_existing_classroom(client):
     assert placed.classroom_id == client.lab.id
     assert placed.day_of_week == 1
     assert placed.period_id == p2.id
+
+
+# ---------------------------------------------------------------------------
+# H7 — shared-student conflict on manual move
+# ---------------------------------------------------------------------------
+
+def test_manual_move_rejects_shared_student_overlap(client):
+    """Two different classes that share a student must not be placeable at
+    the same (day, period) via drag-drop — even with different teacher and
+    room (which would otherwise pass every other check). This is the
+    manual-editor enforcement of solver hard-constraint H7."""
+    from backend.models import Student, StudentClassEnrollment
+
+    s = client.session
+
+    # Second teacher / class / room so teacher & room checks don't fire.
+    teacher2 = Teacher(name="T2", short_name="T2", color="#111")
+    cls2 = SchoolClass(name="B1", short_name="B1")
+    room2 = Classroom(name="R2", short_name="R2", room_type="regular")
+    shared = Student(first_name="Κοινός", last_name="Μαθητής")
+    s.add_all([teacher2, cls2, room2, shared])
+    s.commit()
+    for o in (teacher2, cls2, room2, shared):
+        s.refresh(o)
+
+    # The shared student belongs to BOTH classes.
+    s.add_all([
+        StudentClassEnrollment(student_id=shared.id, class_id=client.cls.id),
+        StudentClassEnrollment(student_id=shared.id, class_id=cls2.id),
+    ])
+
+    lesson_a = Lesson(subject_id=client.subj.id, teacher_id=client.teacher.id,
+                      class_id=client.cls.id, classroom_id=client.regular.id,
+                      periods_per_week=1, duration=1)
+    lesson_b = Lesson(subject_id=client.subj.id, teacher_id=teacher2.id,
+                      class_id=cls2.id, classroom_id=room2.id,
+                      periods_per_week=1, duration=1)
+    s.add_all([lesson_a, lesson_b])
+    s.commit()
+    s.refresh(lesson_a)
+    s.refresh(lesson_b)
+
+    # Class B already placed at (day 0, period 1).
+    placed_b = TimetableSlot(solution_id=client.sol.id, lesson_id=lesson_b.id,
+                             day_of_week=0, period_id=client.period.id,
+                             classroom_id=room2.id, is_unplaced=False)
+    # Class A sits elsewhere; we try to drag it onto B's slot.
+    slot_a = TimetableSlot(solution_id=client.sol.id, lesson_id=lesson_a.id,
+                           day_of_week=2, period_id=client.period.id,
+                           classroom_id=client.regular.id, is_unplaced=False)
+    s.add_all([placed_b, slot_a])
+    s.commit()
+    s.refresh(slot_a)
+
+    res = client.put(
+        f"/api/solver/solutions/{client.sol.id}/slots/{slot_a.id}",
+        json={"day_of_week": 0, "period_id": client.period.id},
+    )
+    assert res.status_code == 400
+    assert "Κοινός μαθητής" in res.json()["detail"]
+
+
+def test_manual_move_allows_unrelated_classes_same_slot(client):
+    """Two classes with NO shared student CAN run at the same time — the
+    H7 check must not over-block legitimate parallel classes."""
+    from backend.models import StudentClassEnrollment, Student
+
+    s = client.session
+    teacher2 = Teacher(name="T3", short_name="T3", color="#222")
+    cls2 = SchoolClass(name="C1", short_name="C1")
+    room2 = Classroom(name="R3", short_name="R3", room_type="regular")
+    st_a = Student(first_name="Α", last_name="Α")
+    st_b = Student(first_name="Β", last_name="Β")
+    s.add_all([teacher2, cls2, room2, st_a, st_b])
+    s.commit()
+    for o in (teacher2, cls2, room2, st_a, st_b):
+        s.refresh(o)
+    s.add_all([
+        StudentClassEnrollment(student_id=st_a.id, class_id=client.cls.id),
+        StudentClassEnrollment(student_id=st_b.id, class_id=cls2.id),
+    ])
+
+    lesson_a = Lesson(subject_id=client.subj.id, teacher_id=client.teacher.id,
+                      class_id=client.cls.id, classroom_id=client.regular.id,
+                      periods_per_week=1, duration=1)
+    lesson_b = Lesson(subject_id=client.subj.id, teacher_id=teacher2.id,
+                      class_id=cls2.id, classroom_id=room2.id,
+                      periods_per_week=1, duration=1)
+    s.add_all([lesson_a, lesson_b])
+    s.commit()
+    s.refresh(lesson_a)
+    s.refresh(lesson_b)
+
+    placed_b = TimetableSlot(solution_id=client.sol.id, lesson_id=lesson_b.id,
+                             day_of_week=0, period_id=client.period.id,
+                             classroom_id=room2.id, is_unplaced=False)
+    slot_a = TimetableSlot(solution_id=client.sol.id, lesson_id=lesson_a.id,
+                           day_of_week=2, period_id=client.period.id,
+                           classroom_id=client.regular.id, is_unplaced=False)
+    s.add_all([placed_b, slot_a])
+    s.commit()
+    s.refresh(slot_a)
+
+    res = client.put(
+        f"/api/solver/solutions/{client.sol.id}/slots/{slot_a.id}",
+        json={"day_of_week": 0, "period_id": client.period.id},
+    )
+    assert res.status_code == 200, res.text

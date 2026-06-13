@@ -634,6 +634,7 @@ def update_solution_slot(
             raise HTTPException(status_code=400, detail="Ο καθηγητής έχει δηλώσει κώλυμα (Μη Διαθέσιμος) αυτή τη μέρα και ώρα.")
 
     # 5. Student Availability constraints
+    enrolled_student_ids: list[int] = []
     if slot.lesson.class_id:
         # Get all students in this class
         enrolled_student_ids = [
@@ -654,6 +655,35 @@ def update_solution_slot(
             )
             if student_unav:
                 raise HTTPException(status_code=400, detail="Ένας ή περισσότεροι μαθητές του τμήματος έχουν δηλώσει κώλυμα αυτή τη μέρα και ώρα.")
+
+    # 6. Shared-student conflict (H7) — the solver enforces this when
+    # generating, but a manual drag-drop bypasses the solver, so two
+    # *different* classes that share a student could be dropped onto the
+    # same (day, period) without any other check catching it (different
+    # teacher AND different room). Reject if any other lesson at this slot
+    # has a student in common with the moved lesson's class.
+    if enrolled_student_ids:
+        other_class_ids = {
+            cid for (cid,) in conflict_query
+            .with_entities(Lesson.class_id)
+            .filter(Lesson.class_id.isnot(None), Lesson.class_id != slot.lesson.class_id)
+            .all()
+        }
+        if other_class_ids:
+            clash = (
+                db.query(StudentClassEnrollment.student_id)
+                .filter(
+                    StudentClassEnrollment.class_id.in_(other_class_ids),
+                    StudentClassEnrollment.student_id.in_(enrolled_student_ids),
+                )
+                .first()
+            )
+            if clash:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Κοινός μαθητής με άλλο μάθημα αυτή τη μέρα/ώρα "
+                           "(θα έπρεπε να είναι σε δύο τμήματα ταυτόχρονα).",
+                )
 
     prev_state = {
         "day_of_week": slot.day_of_week,
