@@ -31,17 +31,19 @@ from backend.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create database tables on startup, then recover any solver run
-    that was in flight when the previous container died.
+    """Recover any solver run that was in flight when the previous
+    container died.
 
-    Why: a `docker compose up -d --build` mid-solve kills the worker
-    while the TimetableSolution row sits at status='generating'. The
-    user sees a "Failed to fetch" toast and the orphan record stays
-    forever in their solutions list. This hook flips every stuck
-    'generating' row to 'error' on boot so the UI shows a clear
-    explanation instead of a phantom job.
+    Schema is owned entirely by Alembic now — `entrypoint.sh` runs
+    `alembic upgrade head` before uvicorn starts, so `create_all` was
+    removed (it silently masked missing migrations for slot_history and
+    is_locked; see migration d7e8f9a0b1c2).
+
+    Why the recovery hook: a `docker compose up -d --build` mid-solve
+    kills the worker while the TimetableSolution row sits at
+    status='generating'. This flips every stuck 'generating' row to
+    'error' on boot so the UI shows a clear explanation, not a phantom job.
     """
-    Base.metadata.create_all(bind=engine)
     _recover_stuck_runs()
     yield
 

@@ -130,7 +130,11 @@ class TimetableSolver:
             solver = cp_model.CpSolver()
             solver.parameters.max_time_in_seconds = self.max_time_seconds
             solver.parameters.num_workers = 4
-            solver.parameters.log_search_progress = True
+            # Full CP-SAT search logging floods docker logs (MBs per solve) and
+            # buries real diagnostics — enable only outside production.
+            from backend.config import settings as _settings
+
+            solver.parameters.log_search_progress = (_settings.app_env != "production")
 
             status = solver.Solve(self.model)
 

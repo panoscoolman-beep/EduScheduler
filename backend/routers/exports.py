@@ -194,7 +194,15 @@ def export_print(
     solution, slots, label = _load_filtered_slots(db, solution_id, teacher_id, student_id)
     periods = sorted(_periods_by_id(db).values(), key=lambda p: p.sort_order)
     teaching_periods = [p for p in periods if not p.is_break]
-    days = list(range(5))  # Δευτέρα–Παρασκευή
+
+    # Honor the school's configured week length (5 or 6 days) — a hardcoded
+    # range(5) silently dropped every Saturday lesson for 6-day schools.
+    from backend.models import SchoolSettings
+
+    settings = db.query(SchoolSettings).first()
+    days_per_week = settings.days_per_week if settings else 5
+    days_per_week = max(1, min(days_per_week, len(_GREEK_DAYS)))
+    days = list(range(days_per_week))
 
     grid: dict[tuple[int, int], list[str]] = {}
     for slot in slots:
@@ -215,7 +223,7 @@ def export_print(
             cell += f"<br><small>🏫 {escape(room)}</small>"
         grid.setdefault((slot.day_of_week, slot.period_id), []).append(cell)
 
-    header_cells = "".join(f"<th>{d}</th>" for d in _GREEK_DAYS[:5])
+    header_cells = "".join(f"<th>{_GREEK_DAYS[d]}</th>" for d in days)
     rows_html = []
     for p in teaching_periods:
         cells = "".join(
