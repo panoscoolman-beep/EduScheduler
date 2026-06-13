@@ -26,6 +26,7 @@ from backend.models import (
     utcnow_naive,
 )
 from backend.services import slot_history as slot_history_svc
+from backend.services.slot_placement import resolve_and_validate_target_room
 from backend.services.substitute_finder import find_substitutes
 from backend.schemas import (
     FeasibilityReportResponse,
@@ -41,78 +42,8 @@ from backend.solver.engine import TimetableSolver
 router = APIRouter()
 
 
-def _pick_default_classroom(
-    db: Session,
-    lesson: Lesson,
-    exclude_room_ids: set[int] | None = None,
-) -> int | None:
-    """Choose a sensible classroom for a manual placement when the
-    drag-drop UI didn't supply one.
-
-    Order of preference:
-      1. The lesson's own classroom_id, if set
-      2. First room whose type matches the subject's special_room_type
-         (lab / gym / computer_lab) when the subject requires one
-      3. First "regular" room
-      4. First room of any type
-
-    Rooms in `exclude_room_ids` are skipped (used when retrying after a
-    classroom conflict).
-    """
-    excluded = exclude_room_ids or set()
-
-    # 1) Lesson-pinned room
-    if lesson.classroom_id and lesson.classroom_id not in excluded:
-        return lesson.classroom_id
-
-    rooms = db.query(Classroom).all()
-
-    # 2) Special-room match (lab/gym/etc.)
-    if lesson.subject and lesson.subject.requires_special_room:
-        special = lesson.subject.special_room_type
-        for r in rooms:
-            if r.id in excluded:
-                continue
-            if r.room_type == special:
-                return r.id
-        return None  # subject demands special room — no fallback
-
-    # 3) Regular room
-    for r in rooms:
-        if r.id in excluded:
-            continue
-        if (r.room_type or "regular") == "regular":
-            return r.id
-
-    # 4) Any room
-    for r in rooms:
-        if r.id not in excluded:
-            return r.id
-
-    return None
-
-
-def _busy_room_ids(
-    db: Session,
-    solution_id: int,
-    day_of_week: int,
-    period_id: int,
-    exclude_slot_id: int,
-) -> set[int]:
-    """Set of classroom_ids already occupied at this exact (day, period)
-    in this solution, excluding the slot being moved."""
-    rows = (
-        db.query(TimetableSlot.classroom_id)
-        .filter(
-            TimetableSlot.solution_id == solution_id,
-            TimetableSlot.day_of_week == day_of_week,
-            TimetableSlot.period_id == period_id,
-            TimetableSlot.id != exclude_slot_id,
-            TimetableSlot.classroom_id.isnot(None),
-        )
-        .all()
-    )
-    return {r[0] for r in rows}
+# Classroom resolution + manual-move conflict checks now live in
+# backend/services/slot_placement.py (extracted for readability).
 
 
 @router.get("/feasibility-check", response_model=FeasibilityReportResponse)
@@ -592,134 +523,7 @@ def update_solution_slot(
     if not slot:
         raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
 
-    # Resolve a target classroom up front. Parking-lot slots have
-    # classroom_id=NULL; if the caller didn't provide one in the body
-    # (the drag-drop UI doesn't ask the user), fall back to the
-    # lesson's preferred classroom_id, then to the first room of the
-    # lesson's required type, then to any room. This avoids the dead
-    # end where a parking-lot drop always 400s.
-    if data.classroom_id is not None:
-        target_room = data.classroom_id
-    elif slot.classroom_id is not None:
-        target_room = slot.classroom_id
-    else:
-        target_room = _pick_default_classroom(db, slot.lesson)
-
-    if target_room is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Δεν υπάρχει διαθέσιμη αίθουσα για αυτό το μάθημα.",
-        )
-
-    # Conflict Validations
-    conflict_query = (
-        db.query(TimetableSlot)
-        .join(Lesson)
-        .filter(
-            TimetableSlot.solution_id == solution_id,
-            TimetableSlot.day_of_week == data.day_of_week,
-            TimetableSlot.period_id == data.period_id,
-            TimetableSlot.id != slot_id
-        )
-    )
-
-    # 1. Teacher Conflict
-    if slot.lesson.teacher_id:
-        teacher_conflict = conflict_query.filter(Lesson.teacher_id == slot.lesson.teacher_id).first()
-        if teacher_conflict:
-            raise HTTPException(status_code=400, detail="Ο καθηγητής διδάσκει ήδη σε άλλη τάξη αυτή τη μέρα/ώρα.")
-
-    # 2. Class Conflict
-    if slot.lesson.class_id:
-        class_conflict = conflict_query.filter(Lesson.class_id == slot.lesson.class_id).first()
-        if class_conflict:
-            raise HTTPException(status_code=400, detail="Η συγκεκριμένη τάξη κάνει ήδη άλλο μάθημα αυτή τη μέρα/ώρα.")
-
-    # 3. Classroom Conflict — try to fall back to another room if the
-    # auto-picked one is busy
-    room_conflict = (
-        conflict_query.filter(TimetableSlot.classroom_id == target_room).first()
-    )
-    if room_conflict and data.classroom_id is None and slot.classroom_id is None:
-        # Auto-picked room is taken — try every other compatible room
-        target_room = _pick_default_classroom(
-            db, slot.lesson,
-            exclude_room_ids=_busy_room_ids(db, solution_id, data.day_of_week, data.period_id, slot_id),
-        )
-        if target_room is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Όλες οι αίθουσες είναι κατειλημμένες αυτή τη μέρα/ώρα.",
-            )
-    elif room_conflict:
-        raise HTTPException(status_code=400, detail="Η αίθουσα είναι κατειλημμένη αυτή τη μέρα/ώρα.")
-
-    # 4. Teacher Availability constraints
-    if slot.lesson.teacher_id:
-        teacher_unav = (
-            db.query(TeacherAvailability)
-            .filter(
-                TeacherAvailability.teacher_id == slot.lesson.teacher_id,
-                TeacherAvailability.day_of_week == data.day_of_week,
-                TeacherAvailability.period_id == data.period_id,
-                TeacherAvailability.status == "unavailable"
-            )
-            .first()
-        )
-        if teacher_unav:
-            raise HTTPException(status_code=400, detail="Ο καθηγητής έχει δηλώσει κώλυμα (Μη Διαθέσιμος) αυτή τη μέρα και ώρα.")
-
-    # 5. Student Availability constraints
-    enrolled_student_ids: list[int] = []
-    if slot.lesson.class_id:
-        # Get all students in this class
-        enrolled_student_ids = [
-            e.student_id for e in db.query(StudentClassEnrollment.student_id)
-            .filter(StudentClassEnrollment.class_id == slot.lesson.class_id)
-            .all()
-        ]
-        if enrolled_student_ids:
-            student_unav = (
-                db.query(StudentAvailability)
-                .filter(
-                    StudentAvailability.student_id.in_(enrolled_student_ids),
-                    StudentAvailability.day_of_week == data.day_of_week,
-                    StudentAvailability.period_id == data.period_id,
-                    StudentAvailability.status == "unavailable"
-                )
-                .first()
-            )
-            if student_unav:
-                raise HTTPException(status_code=400, detail="Ένας ή περισσότεροι μαθητές του τμήματος έχουν δηλώσει κώλυμα αυτή τη μέρα και ώρα.")
-
-    # 6. Shared-student conflict (H7) — the solver enforces this when
-    # generating, but a manual drag-drop bypasses the solver, so two
-    # *different* classes that share a student could be dropped onto the
-    # same (day, period) without any other check catching it (different
-    # teacher AND different room). Reject if any other lesson at this slot
-    # has a student in common with the moved lesson's class.
-    if enrolled_student_ids:
-        other_class_ids = {
-            cid for (cid,) in conflict_query
-            .with_entities(Lesson.class_id)
-            .filter(Lesson.class_id.isnot(None), Lesson.class_id != slot.lesson.class_id)
-            .all()
-        }
-        if other_class_ids:
-            clash = (
-                db.query(StudentClassEnrollment.student_id)
-                .filter(
-                    StudentClassEnrollment.class_id.in_(other_class_ids),
-                    StudentClassEnrollment.student_id.in_(enrolled_student_ids),
-                )
-                .first()
-            )
-            if clash:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Κοινός μαθητής με άλλο μάθημα αυτή τη μέρα/ώρα "
-                           "(θα έπρεπε να είναι σε δύο τμήματα ταυτόχρονα).",
-                )
+    target_room = resolve_and_validate_target_room(db, slot, data)
 
     prev_state = {
         "day_of_week": slot.day_of_week,
