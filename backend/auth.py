@@ -33,7 +33,7 @@ from starlette.responses import JSONResponse
 
 _log = logging.getLogger(__name__)
 
-_PUBLIC_API_PATHS = ("/api/healthz", "/api/_meta")
+_PUBLIC_API_PATHS = ("/api/healthz",)
 
 
 class BearerTokenMiddleware(BaseHTTPMiddleware):

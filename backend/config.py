@@ -35,3 +35,19 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Fail fast in production if the shipped insecure defaults are still in use
+# — better a clear boot error than silently running with a known password.
+if settings.app_env == "production":
+    _insecure = []
+    if settings.postgres_password == "change_me_in_production":
+        _insecure.append("POSTGRES_PASSWORD")
+    if settings.secret_key == "change_me_to_random_string":
+        _insecure.append("SECRET_KEY")
+    if not settings.edscheduler_api_token:
+        _insecure.append("EDSCHEDULER_API_TOKEN")
+    if _insecure:
+        raise RuntimeError(
+            "Insecure default(s) in production: " + ", ".join(_insecure)
+            + ". Set them in .env before starting."
+        )

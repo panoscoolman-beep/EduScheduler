@@ -134,6 +134,26 @@ def export_ics(
         "PRODID:-//EduScheduler//Timetable//EL",
         f"X-WR-CALNAME:Πρόγραμμα {_ics_escape(label)}",
         "X-WR-TIMEZONE:Europe/Athens",
+        # A VTIMEZONE block so strict parsers (some Outlook versions) accept
+        # the TZID=Europe/Athens references below instead of falling back to
+        # UTC and shifting every event by the Athens offset.
+        "BEGIN:VTIMEZONE",
+        "TZID:Europe/Athens",
+        "BEGIN:STANDARD",
+        "DTSTART:19701025T040000",
+        "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
+        "TZOFFSETFROM:+0300",
+        "TZOFFSETTO:+0200",
+        "TZNAME:EET",
+        "END:STANDARD",
+        "BEGIN:DAYLIGHT",
+        "DTSTART:19700329T030000",
+        "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+        "TZOFFSETFROM:+0200",
+        "TZOFFSETTO:+0300",
+        "TZNAME:EEST",
+        "END:DAYLIGHT",
+        "END:VTIMEZONE",
     ]
 
     for slot in slots:
