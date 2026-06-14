@@ -1,0 +1,12 @@
+{
+  "name": "eduscheduler-frontend-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node test harness for the EduScheduler vanilla-JS frontend",
+  "scripts": {
+    "test": "node --test frontend/js/tests/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

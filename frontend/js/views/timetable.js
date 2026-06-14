@@ -135,13 +135,13 @@ const TimetableView = {
             });
 
             // Event: Compare με άλλη λύση
-            document.getElementById('tt-compare').addEventListener('click', async () => {
-                this._openCompareModal(solutions, solutionId);
+            document.getElementById('tt-compare').addEventListener('click', () => {
+                CompareModal.open(solutions, solutionId);
             });
 
             // Event: Substitute teacher mode
             document.getElementById('tt-substitute').addEventListener('click', () => {
-                this._openSubstituteModal(solutionId, periods, daysCount);
+                SubstituteModal.open(solutionId, periods, daysCount);
             });
 
             // Event: Lock & Regenerate
@@ -386,130 +386,4 @@ const TimetableView = {
         return { status: 'error', message: 'Η αναδημιουργία αργεί — δες τη λίστα λύσεων σε λίγο.' };
     },
 
-    /**
-     * Open a modal that lets the user pick a second (or third) solution
-     * to compare against the current one. Shows a side-by-side metrics
-     * grid with the winner per row highlighted.
-     */
-    _openCompareModal(solutions, currentId) {
-        const others = solutions.filter(s => s.id !== currentId);
-        if (others.length === 0) {
-            Toast.error('Χρειάζονται ≥2 solutions για σύγκριση. Δημιούργησε άλλο πρώτα.');
-            return;
-        }
-
-        const optionsHtml = others.map(s =>
-            `<label style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0;">
-                <input type="checkbox" class="cmp-pick" value="${s.id}">
-                <span><strong>${s.name}</strong>
-                <span class="text-muted" style="font-size:0.85em">— ${s.status}, score=${s.score?.toFixed(0) || '—'}</span></span>
-            </label>`
-        ).join('');
-
-        Modal.open(
-            '📊 Σύγκριση Λύσεων',
-            `
-            <p class="text-muted" style="margin-bottom:1rem;">
-                Η τρέχουσα λύση συμπεριλαμβάνεται αυτόματα. Επίλεξε
-                ≥1 ακόμα για side-by-side metrics.
-            </p>
-            <div style="margin-bottom:1rem;">${optionsHtml}</div>
-            <div style="text-align:right;">
-                <button class="btn btn-primary" id="cmp-run">📊 Σύγκρινε</button>
-            </div>
-            <div id="cmp-result" style="margin-top:1.5rem;"></div>
-            `,
-            null,
-            { hideFooter: true }
-        );
-
-        document.getElementById('cmp-run').addEventListener('click', async () => {
-            const picked = Array.from(document.querySelectorAll('.cmp-pick:checked'))
-                .map(cb => parseInt(cb.value));
-            if (picked.length === 0) {
-                Toast.error('Επίλεξε τουλάχιστον μία λύση να συγκρίνεις');
-                return;
-            }
-            const ids = [currentId, ...picked];
-            try {
-                const result = await API.solver.compare(ids);
-                this._renderCompareResult(result, document.getElementById('cmp-result'));
-            } catch (err) {
-                Toast.error(err.message);
-            }
-        });
-    },
-
-    /**
-     * Find substitute teachers / reschedule slots for a teacher who's
-     * absent on a given day. Shows the affected slots with two columns
-     * each: candidate substitutes and reschedule options. Read-only —
-     * the user applies the choice through the existing drag-drop UI.
-     */
-    async _openSubstituteModal(solutionId, periods, daysCount) {
-        let teachers;
-        try {
-            teachers = await API.teachers.list();
-        } catch (err) {
-            Toast.error(`Αποτυχία φόρτωσης καθηγητών: ${err.message}`);
-            return;
-        }
-
-        const dayNames = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη',
-                          'Παρασκευή', 'Σάββατο', 'Κυριακή'];
-        const teacherOptions = teachers.map(t =>
-            `<option value="${t.id}">${this._esc(t.name)}</option>`
-        ).join('');
-        const dayOptions = Array.from({length: daysCount}, (_, i) =>
-            `<option value="${i}">${dayNames[i]}</option>`
-        ).join('');
-
-        Modal.open(
-            '👤 Αντικατάσταση Καθηγητή',
-            `
-            <p class="text-muted" style="margin-bottom:1rem;">
-                Επίλεξε τον καθηγητή που λείπει και τη μέρα. Θα δούμε
-                τα μαθήματα που επηρεάζονται και προτάσεις για κάθε ένα.
-            </p>
-            <div style="display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
-                <div class="form-group" style="flex:1; min-width:200px; margin:0;">
-                    <label class="form-label">Καθηγητής</label>
-                    <select class="form-select" id="sub-teacher">${teacherOptions}</select>
-                </div>
-                <div class="form-group" style="flex:1; min-width:150px; margin:0;">
-                    <label class="form-label">Μέρα</label>
-                    <select class="form-select" id="sub-day">${dayOptions}</select>
-                </div>
-            </div>
-            <div style="text-align:right;">
-                <button class="btn btn-primary" id="sub-find">🔍 Βρες προτάσεις</button>
-            </div>
-            <div id="sub-result" style="margin-top:1.5rem;"></div>
-            `,
-            null,
-            { hideFooter: true }
-        );
-
-        document.getElementById('sub-find').addEventListener('click', async () => {
-            const teacherId = parseInt(document.getElementById('sub-teacher').value);
-            const dayOfWeek = parseInt(document.getElementById('sub-day').value);
-            const resultEl = document.getElementById('sub-result');
-            resultEl.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
-            try {
-                const data = await API.solver.substituteSuggestions(
-                    solutionId, teacherId, dayOfWeek);
-                this._renderSubstituteResult(data, resultEl, dayNames[dayOfWeek]);
-            } catch (err) {
-                resultEl.innerHTML = `<p class="text-muted">Σφάλμα: ${this._esc(err.message)}</p>`;
-            }
-        });
-    },
-
-    _renderSubstituteResult(data, mountEl, dayLabel) {
-        mountEl.innerHTML = TimetableHelpers.buildSubstituteResultHtml(data, dayLabel);
-    },
-
-    _renderCompareResult(result, mountEl) {
-        mountEl.innerHTML = TimetableHelpers.buildCompareResultHtml(result);
-    },
 };

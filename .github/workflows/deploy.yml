@@ -23,11 +23,13 @@ jobs:
             eduscheduler-backend-citest \
             python -m pytest tests/ -q
 
-      - name: Run frontend JS tests (Node built-in runner)
+      - name: Run frontend JS tests (Node built-in runner + jsdom)
         run: |
-          # The frontend is vanilla JS (no build step); its pure data helpers
-          # are unit-tested with Node's built-in runner — no npm deps. The
-          # self-hosted runner already has Node 22.
+          # The frontend is vanilla JS (no build step). Pure helpers are tested
+          # with Node's built-in runner; the modal/DOM tests need jsdom (the only
+          # devDependency), so install it from the committed lockfile first. The
+          # self-hosted runner has Node 22 + npm.
+          npm ci
           node --test frontend/js/tests/*.test.js
 
       - name: Deploy to Server
