@@ -202,6 +202,66 @@ const TimetableHelpers = {
             ${cards}
         `;
     },
+
+    /** Convert a #RRGGBB hex colour to an rgba() string at the given alpha. */
+    hexToRgba(hex, alpha = 1) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    },
+
+    /**
+     * Build the parking-lot panel HTML (draggable cards for the slots the
+     * solver couldn't place). Pure: a NON-empty list of unplaced slots in,
+     * HTML string out. The caller handles the empty case + the DOM mount.
+     */
+    buildParkingLotHtml(unplaced) {
+        const cards = unplaced.map(slot => {
+            const bgColor = slot.subject_color || '#9CA3AF';
+            const bgLight = TimetableHelpers.hexToRgba(bgColor, 0.15);
+            const reasonText = slot.unplaced_reason
+                ? ` <span class="text-muted" style="font-size:0.8em">— ${slot.unplaced_reason}</span>`
+                : '';
+            return `
+                <div class="lesson-card parking-card"
+                     data-slot-id="${slot.id}"
+                     draggable="true"
+                     ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
+                     ondragend="TimetableGrid.handleDragEnd(event)"
+                     onclick="TimetableGrid.showDetails(this)"
+                     data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
+                     style="background:${bgLight}; cursor: grab; padding: 10px 14px;
+                            border-left: 4px solid ${bgColor}; margin-bottom: 6px;
+                            border-radius: 6px;"
+                     title="Σύρε στο πρόγραμμα για να τοποθετηθεί">
+                    <div style="font-weight: 600; color: ${bgColor};">
+                        ${slot.subject_name || slot.subject_short || '?'}
+                    </div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">
+                        ${slot.class_name || slot.class_short || ''}
+                        ${slot.teacher_name ? ' • ' + slot.teacher_name : ''}
+                    </div>
+                    ${reasonText ? `<div style="font-size:0.8em; color:var(--text-muted); margin-top:4px;">${slot.unplaced_reason || ''}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="card mt-lg parking-lot" style="border-left: 4px solid var(--warning, #F59E0B);">
+                <div class="card-header">
+                    <h2 class="card-title">🅿️ Parking Lot — ${unplaced.length}
+                        ${unplaced.length === 1 ? 'ώρα δεν τοποθετήθηκε' : 'ώρες δεν τοποθετήθηκαν'}
+                    </h2>
+                </div>
+                <p class="text-muted" style="margin-bottom: 1rem;">
+                    Σύρε ένα μάθημα στο πρόγραμμα για να το τοποθετήσεις χειροκίνητα.
+                    Οι περιορισμοί επικυρώνονται κατά το drop — αν συγκρούεται με κάτι, θα δεις σφάλμα.
+                </p>
+                ${cards}
+            </div>
+        `;
+    },
 };
 
 if (typeof module !== 'undefined' && module.exports) {
