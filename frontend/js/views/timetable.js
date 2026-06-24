@@ -233,14 +233,19 @@ const TimetableView = {
                 const vt = e.target.value;
                 App._ttViewType = vt;  // persist across full re-renders
 
+                const parkingLot = document.getElementById('parking-lot-container');
                 if (vt.startsWith('overview')) {
                     // Overview shows every day at once → no entity filter needed.
+                    // Hide the parking lot too: dropping an unplaced (entity-less)
+                    // card into an overview row would land it in the wrong row.
                     if (filterGroup) filterGroup.style.display = 'none';
+                    if (parkingLot) parkingLot.style.display = 'none';
                     renderGrid(vt, null);
                     return;
                 }
 
                 if (filterGroup) filterGroup.style.display = '';
+                if (parkingLot) parkingLot.style.display = '';
                 if (filterLabel) filterLabel.textContent = 'Φίλτρο';
                 let options = [];
                 if (vt === 'class') options = classNames;

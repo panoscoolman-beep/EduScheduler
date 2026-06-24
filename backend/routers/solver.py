@@ -422,7 +422,9 @@ def update_solution_slot(
     ) else "move"
     slot_history_svc.record_edit(db, slot, prev_state, new_state, operation)
     db.commit()
-    return {"status": "ok", "message": "Το slot ενημερώθηκε"}
+    # Return the new state so the frontend can keep its in-memory copy in sync
+    # (esp. classroom_id, which the server may have auto-reassigned on conflict).
+    return {"status": "ok", "message": "Το slot ενημερώθηκε", "slot": {"id": slot.id, **new_state}}
 
 
 @router.post("/solutions/{solution_id}/undo")

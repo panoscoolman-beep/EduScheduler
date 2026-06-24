@@ -7,6 +7,7 @@ const TimetableGrid = {
     render(containerId, slots, periods, daysCount = 5, viewType = 'class', filterValue = null, solutionId = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
+        this._slots = slots;  // keep a reference so edits stay in sync on re-render
 
         const teachingPeriods = periods.filter(p => !p.is_break);
         const days = this.DAY_NAMES.slice(0, daysCount);
@@ -153,18 +154,21 @@ const TimetableGrid = {
      *   cols  = ALL days × teaching periods (Δευτέρα 1..N, Τρίτη 1..N, …)
      *   cell  = what that teacher/class has that day+hour
      *
-     * The first column (entity names) is FROZEN: it stays put during
-     * horizontal scroll (position:sticky left). The day/hour headers stay
-     * put during vertical scroll (position:sticky top). Read-only — cards
-     * are clickable for details, not draggable.
+     * The first column (entity names) is FROZEN (sticky left); the day/hour
+     * headers are sticky top. EDITABLE: cards are draggable and lockable just
+     * like the weekly grid (reusing handleDrop / toggleLock). Drag only changes
+     * day/hour and is constrained to the SAME row — you can't change the
+     * teacher/class by dragging (data-entity guard in handleDrop enforces it).
      */
     renderOverview(containerId, slots, periods, daysCount = 5, axis = 'teacher', solutionId = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
+        this._slots = slots;  // keep a reference so edits stay in sync on re-render
 
         const SEP = '\x1f'; // unit separator — safe composite-key delimiter
         const esc = (s) => String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escAttr = (s) => esc(s).replace(/"/g, '&quot;');
         // JSON embedded in a single-quoted attribute: escape & and < (which the
         // HTML parser would otherwise decode on read-back) plus the quote.
         const attrJson = (o) => JSON.stringify(o)
@@ -173,16 +177,27 @@ const TimetableGrid = {
         const days = this.DAY_NAMES.slice(0, daysCount);
         const placed = slots.filter(s => !s.is_unplaced);
 
-        const rowKeyOf = (s) => axis === 'teacher'
+        // Key rows on the UNIQUE id (teacher_id/class_id) — the display name is
+        // NOT unique (homonyms would merge into one row + defeat the drag guard).
+        // Keep a key→label map for rendering the (possibly duplicate) names.
+        const labelOf = (s) => axis === 'teacher'
             ? (s.teacher_name || s.teacher_short || '—')
             : (s.class_name || s.class_short || '—');
+        const rowKeyOf = (s) => {
+            const id = axis === 'teacher' ? s.teacher_id : s.class_id;
+            return id != null ? 'k' + id : 'n' + labelOf(s);
+        };
+        const labelByKey = {};
+        for (const s of placed) {
+            const k = rowKeyOf(s);
+            if (!(k in labelByKey)) labelByKey[k] = labelOf(s);
+        }
+        // Row keys from ALL placed slots so every teacher/class shows up
+        // even on days/hours where it has nothing, sorted by display name.
+        const rowKeys = [...new Set(placed.map(rowKeyOf))]
+            .sort((a, b) => labelByKey[a].localeCompare(labelByKey[b], 'el'));
 
-        // Row entities from ALL placed slots so every teacher/class shows up
-        // even on days/hours where it has nothing.
-        const rowLabels = [...new Set(placed.map(rowKeyOf))]
-            .sort((a, b) => a.localeCompare(b, 'el'));
-
-        // lookup[rowLabel SEP day SEP periodId] -> slots
+        // lookup[rowKey SEP day SEP periodId] -> slots
         const lookup = {};
         for (const s of placed) {
             const key = rowKeyOf(s) + SEP + s.day_of_week + SEP + s.period_id;
@@ -204,7 +219,9 @@ const TimetableGrid = {
             ).join('')
         ).join('');
 
-        const rows = rowLabels.map(rk => {
+        const rows = rowKeys.map(rk => {
+            const entity = escAttr(rk);
+            const label = labelByKey[rk] || '';
             const cells = days.map((_, dayIdx) =>
                 teachingPeriods.map((p, pi) => {
                     const here = lookup[rk + SEP + dayIdx + SEP + p.id] || [];
@@ -215,22 +232,40 @@ const TimetableGrid = {
                         const line2 = axis === 'teacher'
                             ? (slot.class_short || slot.class_name || '')
                             : (slot.teacher_short || slot.teacher_name || '');
-                        return `<div class="ov-card"
+                        const locked = !!slot.is_locked;
+                        const lockIcon = locked ? '🔒' : '🔓';
+                        return `<div class="ov-card lesson-card${locked ? ' locked' : ''}"
+                                     data-slot-id="${slot.id}"
+                                     data-entity="${entity}"
+                                     draggable="${locked ? 'false' : 'true'}"
+                                     ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
+                                     ondragend="TimetableGrid.handleDragEnd(event)"
                                      onclick="TimetableGrid.showDetails(this)"
                                      data-json='${attrJson(slot)}'
-                                     style="background:${bgLight};"
-                                     title="Κλικ για Πληροφορίες">
+                                     style="background:${bgLight};${locked ? ` box-shadow: inset 0 0 0 2px ${bg};` : ''}"
+                                     title="Σύρε για μετακίνηση · κλικ για πληροφορίες">
+                                    <button class="lesson-lock-btn"
+                                            data-slot-id="${slot.id}"
+                                            onmousedown="event.stopPropagation();"
+                                            ondragstart="event.stopPropagation(); event.preventDefault();"
+                                            onclick="event.stopPropagation(); TimetableGrid.toggleLock(${slot.id}, ${solutionId})"
+                                            title="${locked ? 'Κλικ για ξεκλείδωμα' : 'Κλικ για κλείδωμα — διατηρείται στο επόμενο regenerate'}">${lockIcon}</button>
                                     <span class="l1" style="color:${bg}">${esc(line1)}</span>
                                     <span class="l2">${esc(line2)}</span>
                                 </div>`;
                     }).join('');
-                    return `<td class="ov-cell${pi === 0 ? ' ov-day-start' : ''}">${cards}</td>`;
+                    return `<td class="ov-cell droppable-cell${pi === 0 ? ' ov-day-start' : ''}"
+                                data-day="${dayIdx}" data-period="${p.id}" data-entity="${entity}"
+                                ondragover="TimetableGrid.handleDragOver(event)"
+                                ondragenter="TimetableGrid.handleDragEnter(event)"
+                                ondragleave="TimetableGrid.handleDragLeave(event)"
+                                ondrop="TimetableGrid.handleDrop(event, ${solutionId})">${cards}</td>`;
                 }).join('')
             ).join('');
-            return `<tr><th class="ov-firstcol" scope="row" title="${esc(rk)}">${esc(rk)}</th>${cells}</tr>`;
+            return `<tr><th class="ov-firstcol" scope="row" title="${escAttr(label)}">${esc(label)}</th>${cells}</tr>`;
         }).join('');
 
-        const emptyNote = rowLabels.length
+        const emptyNote = rowKeys.length
             ? ''
             : `<p class="empty-state-text" style="padding:1rem">Δεν υπάρχουν τοποθετημένα μαθήματα.</p>`;
 
@@ -244,20 +279,26 @@ const TimetableGrid = {
                     .ov-table thead tr.ov-days th { top: 0; }
                     .ov-table thead tr.ov-hours th { top: var(--ov-h1, 24px); }
                     .ov-table .ov-day { font-weight: 700; }
-                    .ov-table .ov-hour { font-weight: 600; color: var(--text-secondary, #94A3B8); min-width: 56px; }
+                    .ov-table .ov-hour { font-weight: 600; color: var(--text-secondary, #94A3B8); min-width: 60px; }
                     .ov-table .ov-day-start { border-left: 2px solid var(--border-strong, rgba(148,163,184,0.35)); }
                     .ov-table th.ov-firstcol, .ov-table td.ov-firstcol { position: sticky; left: 0; z-index: 1; background: var(--surface-1, #1E293B); color: var(--text-primary, #F1F5F9); font-weight: 600; text-align: left; border-right: 2px solid var(--border-strong, rgba(148,163,184,0.35)); max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
                     .ov-table thead .ov-corner { position: sticky; left: 0; top: 0; z-index: 5; background: var(--surface-2, #334155); color: var(--text-primary, #F1F5F9); text-align: left; border-right: 2px solid var(--border-strong, rgba(148,163,184,0.35)); max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
-                    .ov-table td.ov-cell { min-width: 56px; }
-                    .ov-card { border-radius: 3px; padding: 1px 4px; margin-bottom: 2px; line-height: 1.18; cursor: pointer; text-align: left; }
+                    .ov-table td.ov-cell { min-width: 60px; }
+                    .ov-table td.droppable-cell.drag-over { outline: 2px dashed var(--accent-blue, #3B82F6); outline-offset: -2px; background: var(--bg-card-hover, rgba(30,41,59,0.9)); }
+                    .ov-card { position: relative; border-radius: 3px; padding: 1px 16px 1px 4px; margin-bottom: 2px; line-height: 1.18; cursor: grab; text-align: left; }
+                    .ov-card.locked { cursor: default; }
                     .ov-card .l1 { font-weight: 700; display: block; }
                     .ov-card .l2 { display: block; opacity: .85; color: var(--text-secondary, #94A3B8); }
+                    .ov-card .lesson-lock-btn { position: absolute; top: 0; right: 0; font-size: 9px; line-height: 1; padding: 1px 2px; background: transparent; border: none; cursor: pointer; opacity: .55; }
+                    .ov-card .lesson-lock-btn:hover { opacity: 1; }
+                    .ov-card.dragging { opacity: .4; }
                     @media print {
                         .ov-wrap { overflow: visible !important; max-height: none !important; border: none; }
                         .ov-table { width: 100% !important; color: #000; }
                         .ov-table thead th, .ov-table th.ov-firstcol, .ov-table td.ov-firstcol, .ov-table .ov-corner { position: static !important; color: #000 !important; background: #fff !important; }
                         .ov-table th, .ov-table td { border-color: #999 !important; }
                         .ov-card .l2 { color: #333 !important; }
+                        .ov-card .lesson-lock-btn { display: none !important; }
                         .ov-table tr { page-break-inside: avoid; }
                     }
                 </style>
@@ -374,6 +415,19 @@ const TimetableGrid = {
             return;
         }
 
+        // Overview ("Συνολική") guard: the row IS the teacher/class, so a card
+        // may only move WITHIN its own row — never change teacher/class. The
+        // target overview cell carries data-entity; reject if the source's
+        // differs OR is MISSING (e.g. a parking-lot card with no entity).
+        // Weekly-grid cells have no data-entity (tEntity null) → no-op there.
+        const tEntity = target.dataset.entity;
+        const sEntity = sourceCard.dataset.entity;
+        if (tEntity != null && tEntity !== sEntity) {
+            target.classList.remove('drag-over');
+            Toast.error('Συνολική προβολή: σύρε μέσα στην ίδια γραμμή (ίδιος καθηγητής/τμήμα).');
+            return;
+        }
+
         // Don't drop a card on the same cell it was already in
         if (sourceCard.parentElement === target) return;
 
@@ -396,6 +450,9 @@ const TimetableGrid = {
 
         // 1) Optimistic move
         target.appendChild(sourceCard);
+        // Stamp the destination row identity so any later drag is re-validated
+        // (no-op on the weekly grid where cells have no data-entity).
+        if (target.dataset.entity != null) sourceCard.dataset.entity = target.dataset.entity;
         slotData.day_of_week = newDay;
         slotData.period_id = newPeriod;
         if (wasParkingCard) {
@@ -408,13 +465,21 @@ const TimetableGrid = {
             sourceCard.style.padding = '';
             sourceCard.style.borderRadius = '';
         }
-        sourceCard.dataset.json = JSON.stringify(slotData).replace(/'/g, '&#39;');
+        sourceCard.dataset.json = JSON.stringify(slotData);
 
         // 2) API call
         try {
-            await API.solver.updateSlot(solutionId, slotId, {
+            const res = await API.solver.updateSlot(solutionId, slotId, {
                 day_of_week: newDay,
                 period_id: newPeriod,
+            });
+            // Keep the in-memory slots array in sync so switching view/filter
+            // (which re-renders from it WITHOUT re-fetching) doesn't revert it.
+            this._syncSlot(slotId, {
+                day_of_week: newDay,
+                period_id: newPeriod,
+                is_unplaced: false,
+                classroom_id: (res && res.slot) ? res.slot.classroom_id : undefined,
             });
             Toast.success('Η κάρτα μετακινήθηκε επιτυχώς!');
             if (wasParkingCard) {
@@ -433,7 +498,7 @@ const TimetableGrid = {
             if (wasParkingCard) {
                 sourceCard.classList.add('parking-card');
             }
-            sourceCard.dataset.json = JSON.stringify(slotData).replace(/'/g, '&#39;');
+            sourceCard.dataset.json = JSON.stringify(slotData);
             Toast.error('Αποτυχία: ' + err.message);
         }
     },
@@ -466,6 +531,21 @@ const TimetableGrid = {
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
         return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    },
+
+    /**
+     * Patch the slot record in the in-memory array that the view re-renders
+     * from, so a drag/lock survives a view/filter switch (which re-renders
+     * without re-fetching). `this._slots` references the same slot objects the
+     * TimetableView holds, so mutating them keeps everything consistent.
+     */
+    _syncSlot(slotId, patch) {
+        if (!Array.isArray(this._slots)) return;
+        const rec = this._slots.find(s => s.id === slotId);
+        if (!rec) return;
+        for (const k in patch) {
+            if (patch[k] !== undefined) rec[k] = patch[k];
+        }
     },
 
     /**
@@ -514,7 +594,7 @@ const TimetableGrid = {
         card.classList.toggle('locked', newLockedValue);
         card.draggable = !newLockedValue;
         slot.is_locked = newLockedValue;
-        card.dataset.json = JSON.stringify(slot).replace(/'/g, '&#39;');
+        card.dataset.json = JSON.stringify(slot);
 
         // 2) Fire-and-await API
         try {
@@ -524,6 +604,8 @@ const TimetableGrid = {
                 classroom_id: slot.classroom_id,
                 is_locked: newLockedValue,
             });
+            // Sync the in-memory slots array so a view/filter change keeps the lock.
+            this._syncSlot(slotId, { is_locked: newLockedValue });
             Toast.success(newLockedValue ? '🔒 Κλειδώθηκε' : '🔓 Ξεκλειδώθηκε');
         } catch (err) {
             // 3) Rollback the optimistic flip
@@ -531,7 +613,7 @@ const TimetableGrid = {
             card.classList.toggle('locked', !newLockedValue);
             card.draggable = newLockedValue;
             slot.is_locked = !newLockedValue;
-            card.dataset.json = JSON.stringify(slot).replace(/'/g, '&#39;');
+            card.dataset.json = JSON.stringify(slot);
             Toast.error(`Lock toggle απέτυχε: ${err.message}`);
         } finally {
             btn.disabled = false;
