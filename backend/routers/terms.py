@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Term, Lesson, TimetableSolution
-from backend.schemas import TermCreate, TermUpdate, TermResponse, TermCloneRequest
+from backend.schemas import TermCreate, TermUpdate, TermResponse, TermCloneRequest, TermShiftRequest
 from backend.services.term_context import get_active_term_id
-from backend.services import term_cloner
+from backend.services import term_cloner, term_time_shift
 
 router = APIRouter()
 
@@ -88,6 +88,20 @@ def clone_term(term_id: int, data: TermCloneRequest, db: Session = Depends(get_d
     db.commit()
     db.refresh(new_term)
     return new_term
+
+
+@router.post("/{term_id}/shift-times")
+def shift_times(term_id: int, data: TermShiftRequest, db: Session = Depends(get_db)):
+    """Uniformly shift this scenario's hours (availability + its programs'
+    slots) by `offset` teaching periods — e.g. morning → afternoon."""
+    term = db.query(Term).filter(Term.id == term_id).first()
+    if not term:
+        raise HTTPException(status_code=404, detail="Το σενάριο δεν βρέθηκε")
+    if data.offset == 0:
+        raise HTTPException(status_code=400, detail="Η μετατόπιση δεν μπορεί να είναι 0.")
+    res = term_time_shift.shift_term_times(db, term_id, data.offset, data.shift_solutions)
+    db.commit()
+    return {"status": "ok", **res}
 
 
 @router.delete("/{term_id}", status_code=204)

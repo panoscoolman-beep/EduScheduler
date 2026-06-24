@@ -101,6 +101,7 @@ const API = {
         update: (id, data) => API.put(`/terms/${id}`, data),
         activate: (id) => API.post(`/terms/${id}/activate`, {}),
         clone: (id, data) => API.post(`/terms/${id}/clone`, data),
+        shiftTimes: (id, data) => API.post(`/terms/${id}/shift-times`, data),
         delete: (id, force = false) => API.delete(`/terms/${id}${force ? '?force=true' : ''}`),
     },
     lessonsBulkImport: {

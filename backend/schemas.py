@@ -42,6 +42,13 @@ class TermCloneRequest(BaseModel):
     activate: bool = True
 
 
+class TermShiftRequest(BaseModel):
+    """Uniformly shift a term's hours by `offset` teaching periods
+    (positive = later in the day, e.g. morning → afternoon)."""
+    offset: int = Field(..., ge=-20, le=20)
+    shift_solutions: bool = True
+
+
 # ─── Period ─────────────────────────────────────────────
 
 class PeriodBase(BaseModel):

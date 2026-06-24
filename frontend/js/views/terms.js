@@ -53,6 +53,7 @@ const TermsView = {
                             <td style="text-align:right; white-space:nowrap">
                                 ${t.is_active ? '' : `<button class="btn btn-sm btn-secondary" data-act="activate" data-id="${t.id}">Ενεργοποίηση</button>`}
                                 <button class="btn btn-sm btn-secondary" data-act="clone" data-id="${t.id}" data-name="${this._esc(t.name)}">Αντιγραφή</button>
+                                <button class="btn btn-sm btn-secondary" data-act="shift" data-id="${t.id}" data-name="${this._esc(t.name)}">Μετατόπιση ωρών</button>
                                 <button class="btn btn-sm btn-danger" data-act="delete" data-id="${t.id}" data-name="${this._esc(t.name)}">Διαγραφή</button>
                             </td>
                         </tr>`).join('')}
@@ -74,9 +75,36 @@ const TermsView = {
             } catch (err) { Toast.error(err.message); }
         } else if (ds.act === 'clone') {
             this._openClone(id, ds.name, container);
+        } else if (ds.act === 'shift') {
+            this._openShift(id, ds.name, container);
         } else if (ds.act === 'delete') {
             this._confirmDelete(id, ds.name, false, container);
         }
+    },
+
+    _openShift(id, name, container) {
+        Modal.open('🕐 Μετατόπιση ωρών',
+            `<p>Μετατόπιση ΟΛΩΝ των ωρών του σεναρίου <strong>${this._esc(name)}</strong> (διαθεσιμότητες + προγράμματα) κατά σταθερό αριθμό διδακτικών ωρών.</p>
+             <div class="form-group">
+                <label class="form-label">Μετατόπιση κατά (ώρες)</label>
+                <input class="form-input" id="shift-offset" type="number" value="6" step="1">
+                <small class="text-muted">Θετικό = αργότερα μέσα στη μέρα (π.χ. <strong>+6</strong>: πρωινές 1η–6η → απογευματινές 7η–12η). Αρνητικό = νωρίτερα.</small>
+             </div>
+             <label style="display:block"><input type="checkbox" id="shift-sols" checked> Μετατόπιση και των υπαρχόντων προγραμμάτων (ό,τι βγαίνει εκτός εύρους πάει στο parking lot)</label>`,
+            async () => {
+                const offset = parseInt(document.getElementById('shift-offset').value, 10);
+                if (!offset) { Toast.error('Δώσε μη-μηδενική μετατόπιση.'); return; }
+                try {
+                    const r = await API.terms.shiftTimes(id, {
+                        offset,
+                        shift_solutions: document.getElementById('shift-sols').checked,
+                    });
+                    Toast.success(`Μετατοπίστηκαν: ${r.availability_moved} διαθεσιμότητες, ${r.slots_moved} ώρες προγράμματος` +
+                        (r.availability_dropped || r.slots_unplaced ? ` (εκτός εύρους: ${r.availability_dropped}+${r.slots_unplaced})` : ''));
+                    Modal.close();
+                    await this.render(container);
+                } catch (err) { Toast.error(err.message); }
+            }, { saveText: '🕐 Μετατόπιση' });
     },
 
     _openCreate(container) {
