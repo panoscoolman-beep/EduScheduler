@@ -77,6 +77,8 @@ const TimetableView = {
                                 <option value="teacher">Καθηγητή</option>
                                 <option value="room">Αίθουσα</option>
                                 <option value="student">Μαθητή</option>
+                                <option value="overview_teacher">Συνολική: Καθηγητές × Ώρες</option>
+                                <option value="overview_class">Συνολική: Τμήματα × Ώρες</option>
                             </select>
                         </div>
                         <div class="form-group" style="margin:0; min-width: 200px;">
@@ -205,10 +207,42 @@ const TimetableView = {
                 return solution.slots.filter(s => allowedClassIds.has(s.class_id));
             };
 
+            // Dispatch to the right renderer. For the two "overview" view
+            // types the filter dropdown holds a DAY index instead of an
+            // entity name, and we render the transposed (entity × hours) grid.
+            const renderGrid = (viewType, filterValue) => {
+                if (viewType && viewType.startsWith('overview')) {
+                    const axis = viewType === 'overview_class' ? 'class' : 'teacher';
+                    const dayIndex = parseInt(filterValue, 10);
+                    TimetableGrid.renderOverview(
+                        'timetable-grid-view', solution.slots, periods,
+                        Number.isNaN(dayIndex) ? 0 : dayIndex, axis, solutionId,
+                    );
+                } else {
+                    TimetableGrid.render(
+                        'timetable-grid-view', slotsForView(viewType, filterValue),
+                        periods, daysCount, viewType, filterValue, solutionId,
+                    );
+                }
+            };
+
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
                 const filterSelect = document.getElementById('tt-filter');
+                const filterLabel = filterSelect.closest('.form-group')?.querySelector('.form-label');
                 const vt = e.target.value;
+
+                if (vt.startsWith('overview')) {
+                    // Overview: the filter dropdown becomes a DAY picker.
+                    if (filterLabel) filterLabel.textContent = 'Ημέρα';
+                    const dayNames = TimetableGrid.DAY_NAMES.slice(0, daysCount);
+                    filterSelect.innerHTML = dayNames
+                        .map((d, i) => `<option value="${i}">${d}</option>`).join('');
+                    renderGrid(vt, '0');
+                    return;
+                }
+
+                if (filterLabel) filterLabel.textContent = 'Φίλτρο';
                 let options = [];
                 if (vt === 'class') options = classNames;
                 else if (vt === 'teacher') options = teacherNames;
@@ -217,13 +251,13 @@ const TimetableView = {
 
                 filterSelect.innerHTML = `<option value="all">-- Προβολή Όλων --</option>` +
                                          options.map(n => `<option value="${this._esc(n)}">${this._esc(n)}</option>`).join('');
-                TimetableGrid.render('timetable-grid-view', slotsForView(vt, 'all'), periods, daysCount, vt, 'all', solutionId);
+                renderGrid(vt, 'all');
             });
 
             // Event: Filter change
             document.getElementById('tt-filter').addEventListener('change', (e) => {
                 const viewType = document.getElementById('tt-view-type').value;
-                TimetableGrid.render('timetable-grid-view', slotsForView(viewType, e.target.value), periods, daysCount, viewType, e.target.value, solutionId);
+                renderGrid(viewType, e.target.value);
             });
 
             // Event: Solution change

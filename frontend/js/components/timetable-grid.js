@@ -147,6 +147,100 @@ const TimetableGrid = {
         `;
     },
 
+    /**
+     * Overview / "Συνολική προβολή" — a transposed snapshot for ONE day:
+     *   rows  = teachers (axis='teacher') OR classes (axis='class')
+     *   cols  = teaching periods (ώρες, π.χ. 9-10)
+     *   cell  = what that teacher/class has that hour
+     *
+     * Read-only (cards are clickable for details, not draggable) — it's a
+     * bird's-eye view, not the editing grid. Day is chosen by the caller.
+     */
+    renderOverview(containerId, slots, periods, dayIndex = 0, axis = 'teacher', solutionId = null) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const esc = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const teachingPeriods = periods.filter(p => !p.is_break);
+        const placed = slots.filter(s => !s.is_unplaced);
+
+        const rowKeyOf = (s) => axis === 'teacher'
+            ? (s.teacher_name || s.teacher_short || '—')
+            : (s.class_name || s.class_short || '—');
+
+        // Row entities come from ALL placed slots (whole week) so every
+        // teacher/class shows up even if it has no lesson on this day.
+        const rowLabels = [...new Set(placed.map(rowKeyOf))]
+            .sort((a, b) => a.localeCompare(b, 'el'));
+
+        // lookup[rowLabel   periodId] -> slots on the chosen day
+        const lookup = {};
+        for (const s of placed) {
+            if (s.day_of_week !== dayIndex) continue;
+            const key = rowKeyOf(s) + ' ' + s.period_id;
+            if (!lookup[key]) lookup[key] = [];
+            lookup[key].push(s);
+        }
+
+        const axisLabel = axis === 'teacher' ? 'Καθηγητής' : 'Τμήμα';
+        const dayName = this.DAY_NAMES[dayIndex] || '';
+
+        const periodHeaders = teachingPeriods.map(p => `
+            <th>${esc(p.short_name)}
+                <span class="period-time">${esc(p.start_time)}-${esc(p.end_time)}</span>
+            </th>`).join('');
+
+        const rows = rowLabels.map(rk => {
+            const cells = teachingPeriods.map(p => {
+                const here = lookup[rk + ' ' + p.id] || [];
+                const cards = here.map(slot => {
+                    const bg = slot.subject_color || '#3B82F6';
+                    const bgLight = this._hexToRgba(bg, 0.15);
+                    const textColor = this._hexToRgba(bg, 0.9);
+                    const line1 = slot.subject_short || slot.subject_name || '';
+                    const line2 = axis === 'teacher'
+                        ? (slot.class_short || slot.class_name || '')
+                        : (slot.teacher_short || slot.teacher_name || '');
+                    const line3 = slot.classroom_name || '';
+                    return `
+                        <div class="lesson-card"
+                             onclick="TimetableGrid.showDetails(this)"
+                             data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
+                             style="background:${bgLight}; color:${textColor}; cursor:pointer; margin-bottom:4px;"
+                             title="Κλικ για Πληροφορίες">
+                            <span class="subject-name" style="color:${bg}">${esc(line1)}</span>
+                            <span class="teacher-name">${esc(line2)}</span>
+                            <span class="room-name">${esc(line3)}</span>
+                        </div>`;
+                }).join('');
+                return `<td class="overview-cell">${cards}</td>`;
+            }).join('');
+            return `<tr><td class="period-cell overview-row-head">${esc(rk)}</td>${cells}</tr>`;
+        }).join('');
+
+        const emptyNote = rowLabels.length
+            ? ''
+            : `<p class="empty-state-text" style="padding:1rem">Δεν υπάρχουν τοποθετημένα μαθήματα.</p>`;
+
+        container.innerHTML = `
+            <div class="timetable-grid-container">
+                <style>
+                    .overview-cell { vertical-align: top; padding: 4px; min-width: 92px; }
+                    .overview-row-head { white-space: nowrap; font-weight: 600; text-align: left; }
+                </style>
+                <table class="timetable-grid compact-grid" style="min-width: 800px;">
+                    <thead><tr>
+                        <th>${axisLabel} \\ Ώρα <span class="period-time">${esc(dayName)}</span></th>
+                        ${periodHeaders}
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                ${emptyNote}
+            </div>
+        `;
+    },
+
     showDetails(el) {
         const slot = JSON.parse(el.dataset.json);
         const days = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
