@@ -98,7 +98,7 @@ class TeacherAvailability(Base):
     __tablename__ = "teacher_availability"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True, server_default="1")
     teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
     day_of_week = Column(Integer, nullable=False)  # 0=Monday, 4=Friday
     period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
@@ -186,7 +186,7 @@ class StudentAvailability(Base):
     __tablename__ = "student_availability"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True, server_default="1")
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     day_of_week = Column(Integer, nullable=False)  # 0=Monday, 4=Friday
     period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
@@ -248,7 +248,7 @@ class Lesson(Base):
     __tablename__ = "lessons"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True, server_default="1")
     subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
     teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
@@ -298,7 +298,7 @@ class TimetableSolution(Base):
     __tablename__ = "timetable_solutions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True, server_default="1")
     name = Column(String(200), nullable=False)
     created_at = Column(DateTime, default=utcnow_naive)
     status = Column(String(20), default="draft")  # draft / generating / optimal / feasible / infeasible

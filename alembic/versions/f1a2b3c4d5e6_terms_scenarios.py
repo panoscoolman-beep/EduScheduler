@@ -74,6 +74,9 @@ def upgrade() -> None:
             """
         )
         op.execute(f"CREATE INDEX IF NOT EXISTS ix_{table}_term_id ON {table} (term_id)")
+        # Default to the first/default term as a safety net (the app normally
+        # sets term_id explicitly to the active scenario).
+        op.execute(f"ALTER TABLE {table} ALTER COLUMN term_id SET DEFAULT 1")
         op.execute(f"ALTER TABLE {table} ALTER COLUMN term_id SET NOT NULL")
 
     # 4) widen availability unique constraints to include term_id
