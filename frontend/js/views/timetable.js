@@ -207,16 +207,15 @@ const TimetableView = {
                 return solution.slots.filter(s => allowedClassIds.has(s.class_id));
             };
 
-            // Dispatch to the right renderer. For the two "overview" view
-            // types the filter dropdown holds a DAY index instead of an
-            // entity name, and we render the transposed (entity × hours) grid.
+            // Dispatch to the right renderer. The two "overview" view types
+            // show ALL days at once (entity × day×hour), so they ignore the
+            // entity filter; the regular views use it.
             const renderGrid = (viewType, filterValue) => {
                 if (viewType && viewType.startsWith('overview')) {
                     const axis = viewType === 'overview_class' ? 'class' : 'teacher';
-                    const dayIndex = parseInt(filterValue, 10);
                     TimetableGrid.renderOverview(
                         'timetable-grid-view', solution.slots, periods,
-                        Number.isNaN(dayIndex) ? 0 : dayIndex, axis, solutionId,
+                        daysCount, axis, solutionId,
                     );
                 } else {
                     TimetableGrid.render(
@@ -229,19 +228,19 @@ const TimetableView = {
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
                 const filterSelect = document.getElementById('tt-filter');
-                const filterLabel = filterSelect.closest('.form-group')?.querySelector('.form-label');
+                const filterGroup = filterSelect.closest('.form-group');
+                const filterLabel = filterGroup?.querySelector('.form-label');
                 const vt = e.target.value;
+                App._ttViewType = vt;  // persist across full re-renders
 
                 if (vt.startsWith('overview')) {
-                    // Overview: the filter dropdown becomes a DAY picker.
-                    if (filterLabel) filterLabel.textContent = 'Ημέρα';
-                    const dayNames = TimetableGrid.DAY_NAMES.slice(0, daysCount);
-                    filterSelect.innerHTML = dayNames
-                        .map((d, i) => `<option value="${i}">${d}</option>`).join('');
-                    renderGrid(vt, '0');
+                    // Overview shows every day at once → no entity filter needed.
+                    if (filterGroup) filterGroup.style.display = 'none';
+                    renderGrid(vt, null);
                     return;
                 }
 
+                if (filterGroup) filterGroup.style.display = '';
                 if (filterLabel) filterLabel.textContent = 'Φίλτρο';
                 let options = [];
                 if (vt === 'class') options = classNames;
@@ -259,6 +258,17 @@ const TimetableView = {
                 const viewType = document.getElementById('tt-view-type').value;
                 renderGrid(viewType, e.target.value);
             });
+
+            // Restore the persisted view type across full re-renders (solution
+            // change, undo/redo, regenerate) so the user isn't silently bounced
+            // out of e.g. the συνολική overview back to the weekly class grid.
+            if (App._ttViewType && App._ttViewType !== 'class') {
+                const vtSelect = document.getElementById('tt-view-type');
+                if ([...vtSelect.options].some(o => o.value === App._ttViewType)) {
+                    vtSelect.value = App._ttViewType;
+                    vtSelect.dispatchEvent(new Event('change'));
+                }
+            }
 
             // Event: Solution change
             document.getElementById('tt-solution').addEventListener('change', async (e) => {

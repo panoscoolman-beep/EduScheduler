@@ -148,75 +148,86 @@ const TimetableGrid = {
     },
 
     /**
-     * Overview / "Συνολική προβολή" — a transposed snapshot for ONE day:
+     * Overview / "Συνολική προβολή" — a whole-week bird's-eye snapshot:
      *   rows  = teachers (axis='teacher') OR classes (axis='class')
-     *   cols  = teaching periods (ώρες, π.χ. 9-10)
-     *   cell  = what that teacher/class has that hour
+     *   cols  = ALL days × teaching periods (Δευτέρα 1..N, Τρίτη 1..N, …)
+     *   cell  = what that teacher/class has that day+hour
      *
-     * Read-only (cards are clickable for details, not draggable) — it's a
-     * bird's-eye view, not the editing grid. Day is chosen by the caller.
+     * The first column (entity names) is FROZEN: it stays put during
+     * horizontal scroll (position:sticky left). The day/hour headers stay
+     * put during vertical scroll (position:sticky top). Read-only — cards
+     * are clickable for details, not draggable.
      */
-    renderOverview(containerId, slots, periods, dayIndex = 0, axis = 'teacher', solutionId = null) {
+    renderOverview(containerId, slots, periods, daysCount = 5, axis = 'teacher', solutionId = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
+        const SEP = '\x1f'; // unit separator — safe composite-key delimiter
         const esc = (s) => String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // JSON embedded in a single-quoted attribute: escape & and < (which the
+        // HTML parser would otherwise decode on read-back) plus the quote.
+        const attrJson = (o) => JSON.stringify(o)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
         const teachingPeriods = periods.filter(p => !p.is_break);
+        const days = this.DAY_NAMES.slice(0, daysCount);
         const placed = slots.filter(s => !s.is_unplaced);
 
         const rowKeyOf = (s) => axis === 'teacher'
             ? (s.teacher_name || s.teacher_short || '—')
             : (s.class_name || s.class_short || '—');
 
-        // Row entities come from ALL placed slots (whole week) so every
-        // teacher/class shows up even if it has no lesson on this day.
+        // Row entities from ALL placed slots so every teacher/class shows up
+        // even on days/hours where it has nothing.
         const rowLabels = [...new Set(placed.map(rowKeyOf))]
             .sort((a, b) => a.localeCompare(b, 'el'));
 
-        // lookup[rowLabel   periodId] -> slots on the chosen day
+        // lookup[rowLabel SEP day SEP periodId] -> slots
         const lookup = {};
         for (const s of placed) {
-            if (s.day_of_week !== dayIndex) continue;
-            const key = rowKeyOf(s) + ' ' + s.period_id;
+            const key = rowKeyOf(s) + SEP + s.day_of_week + SEP + s.period_id;
             if (!lookup[key]) lookup[key] = [];
             lookup[key].push(s);
         }
 
         const axisLabel = axis === 'teacher' ? 'Καθηγητής' : 'Τμήμα';
-        const dayName = this.DAY_NAMES[dayIndex] || '';
+        const nHours = teachingPeriods.length;
 
-        const periodHeaders = teachingPeriods.map(p => `
-            <th>${esc(p.short_name)}
-                <span class="period-time">${esc(p.start_time)}-${esc(p.end_time)}</span>
-            </th>`).join('');
+        // Header row 1: a frozen corner + one day label spanning its hours.
+        const dayHeader = days.map(d =>
+            `<th class="ov-day" scope="colgroup" colspan="${nHours}">${esc(d)}</th>`).join('');
+
+        // Header row 2: the hour labels, repeated per day.
+        const hourHeader = days.map(() =>
+            teachingPeriods.map((p, pi) =>
+                `<th class="ov-hour${pi === 0 ? ' ov-day-start' : ''}" scope="col" title="${esc(p.start_time)}-${esc(p.end_time)}">${esc(p.short_name)}</th>`
+            ).join('')
+        ).join('');
 
         const rows = rowLabels.map(rk => {
-            const cells = teachingPeriods.map(p => {
-                const here = lookup[rk + ' ' + p.id] || [];
-                const cards = here.map(slot => {
-                    const bg = slot.subject_color || '#3B82F6';
-                    const bgLight = this._hexToRgba(bg, 0.15);
-                    const textColor = this._hexToRgba(bg, 0.9);
-                    const line1 = slot.subject_short || slot.subject_name || '';
-                    const line2 = axis === 'teacher'
-                        ? (slot.class_short || slot.class_name || '')
-                        : (slot.teacher_short || slot.teacher_name || '');
-                    const line3 = slot.classroom_name || '';
-                    return `
-                        <div class="lesson-card"
-                             onclick="TimetableGrid.showDetails(this)"
-                             data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
-                             style="background:${bgLight}; color:${textColor}; cursor:pointer; margin-bottom:4px;"
-                             title="Κλικ για Πληροφορίες">
-                            <span class="subject-name" style="color:${bg}">${esc(line1)}</span>
-                            <span class="teacher-name">${esc(line2)}</span>
-                            <span class="room-name">${esc(line3)}</span>
-                        </div>`;
-                }).join('');
-                return `<td class="overview-cell">${cards}</td>`;
-            }).join('');
-            return `<tr><td class="period-cell overview-row-head">${esc(rk)}</td>${cells}</tr>`;
+            const cells = days.map((_, dayIdx) =>
+                teachingPeriods.map((p, pi) => {
+                    const here = lookup[rk + SEP + dayIdx + SEP + p.id] || [];
+                    const cards = here.map(slot => {
+                        const bg = slot.subject_color || '#3B82F6';
+                        const bgLight = this._hexToRgba(bg, 0.18);
+                        const line1 = slot.subject_short || slot.subject_name || '';
+                        const line2 = axis === 'teacher'
+                            ? (slot.class_short || slot.class_name || '')
+                            : (slot.teacher_short || slot.teacher_name || '');
+                        return `<div class="ov-card"
+                                     onclick="TimetableGrid.showDetails(this)"
+                                     data-json='${attrJson(slot)}'
+                                     style="background:${bgLight};"
+                                     title="Κλικ για Πληροφορίες">
+                                    <span class="l1" style="color:${bg}">${esc(line1)}</span>
+                                    <span class="l2">${esc(line2)}</span>
+                                </div>`;
+                    }).join('');
+                    return `<td class="ov-cell${pi === 0 ? ' ov-day-start' : ''}">${cards}</td>`;
+                }).join('')
+            ).join('');
+            return `<tr><th class="ov-firstcol" scope="row" title="${esc(rk)}">${esc(rk)}</th>${cells}</tr>`;
         }).join('');
 
         const emptyNote = rowLabels.length
@@ -224,25 +235,60 @@ const TimetableGrid = {
             : `<p class="empty-state-text" style="padding:1rem">Δεν υπάρχουν τοποθετημένα μαθήματα.</p>`;
 
         container.innerHTML = `
-            <div class="timetable-grid-container">
+            <div class="ov-wrap">
                 <style>
-                    .overview-cell { vertical-align: top; padding: 4px; min-width: 92px; }
-                    .overview-row-head { white-space: nowrap; font-weight: 600; text-align: left; }
+                    .ov-wrap { overflow: auto; max-height: 78vh; border: 1px solid var(--border-default, rgba(148,163,184,0.2)); border-radius: var(--radius-md, 10px); }
+                    .ov-table { border-collapse: separate; border-spacing: 0; width: max-content; font-size: 0.72rem; color: var(--text-primary, #F1F5F9); }
+                    .ov-table th, .ov-table td { border-right: 1px solid var(--border-default, rgba(148,163,184,0.2)); border-bottom: 1px solid var(--border-default, rgba(148,163,184,0.2)); padding: 2px 5px; text-align: center; vertical-align: top; white-space: nowrap; }
+                    .ov-table thead th { position: sticky; z-index: 2; background: var(--surface-2, #334155); color: var(--text-primary, #F1F5F9); }
+                    .ov-table thead tr.ov-days th { top: 0; }
+                    .ov-table thead tr.ov-hours th { top: var(--ov-h1, 24px); }
+                    .ov-table .ov-day { font-weight: 700; }
+                    .ov-table .ov-hour { font-weight: 600; color: var(--text-secondary, #94A3B8); min-width: 56px; }
+                    .ov-table .ov-day-start { border-left: 2px solid var(--border-strong, rgba(148,163,184,0.35)); }
+                    .ov-table th.ov-firstcol, .ov-table td.ov-firstcol { position: sticky; left: 0; z-index: 1; background: var(--surface-1, #1E293B); color: var(--text-primary, #F1F5F9); font-weight: 600; text-align: left; border-right: 2px solid var(--border-strong, rgba(148,163,184,0.35)); max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+                    .ov-table thead .ov-corner { position: sticky; left: 0; top: 0; z-index: 5; background: var(--surface-2, #334155); color: var(--text-primary, #F1F5F9); text-align: left; border-right: 2px solid var(--border-strong, rgba(148,163,184,0.35)); max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+                    .ov-table td.ov-cell { min-width: 56px; }
+                    .ov-card { border-radius: 3px; padding: 1px 4px; margin-bottom: 2px; line-height: 1.18; cursor: pointer; text-align: left; }
+                    .ov-card .l1 { font-weight: 700; display: block; }
+                    .ov-card .l2 { display: block; opacity: .85; color: var(--text-secondary, #94A3B8); }
+                    @media print {
+                        .ov-wrap { overflow: visible !important; max-height: none !important; border: none; }
+                        .ov-table { width: 100% !important; color: #000; }
+                        .ov-table thead th, .ov-table th.ov-firstcol, .ov-table td.ov-firstcol, .ov-table .ov-corner { position: static !important; color: #000 !important; background: #fff !important; }
+                        .ov-table th, .ov-table td { border-color: #999 !important; }
+                        .ov-card .l2 { color: #333 !important; }
+                        .ov-table tr { page-break-inside: avoid; }
+                    }
                 </style>
-                <table class="timetable-grid compact-grid" style="min-width: 800px;">
-                    <thead><tr>
-                        <th>${axisLabel} \\ Ώρα <span class="period-time">${esc(dayName)}</span></th>
-                        ${periodHeaders}
-                    </tr></thead>
+                <table class="ov-table">
+                    <thead>
+                        <tr class="ov-days"><th class="ov-corner" rowspan="2">${esc(axisLabel)}</th>${dayHeader}</tr>
+                        <tr class="ov-hours">${hourHeader}</tr>
+                    </thead>
                     <tbody>${rows}</tbody>
                 </table>
                 ${emptyNote}
             </div>
         `;
+
+        // Pin the 2nd header row exactly below the 1st (drift-proof vs the
+        // fragile hardcoded offset): measure the rendered day-row height.
+        const wrap = container.querySelector('.ov-wrap');
+        const daysRow = container.querySelector('thead tr.ov-days');
+        if (wrap && daysRow && daysRow.offsetHeight) {
+            wrap.style.setProperty('--ov-h1', daysRow.offsetHeight + 'px');
+        }
     },
 
     showDetails(el) {
-        const slot = JSON.parse(el.dataset.json);
+        let slot;
+        try {
+            slot = JSON.parse(el.dataset.json);
+        } catch (err) {
+            Toast.error('Δεν διαβάστηκαν τα στοιχεία του μαθήματος');
+            return;
+        }
         const days = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
         const content = `
             <div style="font-size:1.1rem; padding-bottom: 1rem;">
