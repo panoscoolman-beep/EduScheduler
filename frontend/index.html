@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=32">
+    <link rel="stylesheet" href="css/styles.css?v=33">
 </head>
 <body>
     <div class="app-layout" id="app">
@@ -27,6 +27,12 @@
                         <a href="#" class="nav-item active" data-view="dashboard" id="nav-dashboard">
                             <span class="nav-icon">📊</span>
                             <span class="nav-label">Πίνακας Ελέγχου</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="nav-item" data-view="terms" id="nav-terms">
+                            <span class="nav-icon">🗂️</span>
+                            <span class="nav-label">Σενάρια</span>
                         </a>
                     </li>
                     <li>
@@ -114,6 +120,10 @@
                 <button class="menu-toggle" id="menu-toggle" aria-label="Εναλλαγή μενού">☰</button>
                 <h1 class="page-title" id="page-title">Πίνακας Ελέγχου</h1>
                 <div class="top-bar-actions">
+                    <label class="topbar-term" style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color:var(--text-secondary)">
+                        <span>🗂️ Σενάριο:</span>
+                        <select id="term-selector" class="form-select" style="min-width:170px; padding:4px 8px" title="Ενεργό σενάριο — άλλαξε για να δουλέψεις σε άλλο ωράριο"></select>
+                    </label>
                     <span class="school-name" id="school-name">EduScheduler</span>
                 </div>
             </header>
@@ -146,28 +156,29 @@
     <!-- Toast Notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="js/api.js?v=32"></script>
-    <script src="js/components/toast.js?v=32"></script>
-    <script src="js/components/modal.js?v=32"></script>
-    <script src="js/components/availability-modal.js?v=32"></script>
-    <script src="js/components/data-table.js?v=32"></script>
-    <script src="js/components/timetable-grid.js?v=32"></script>
-    <script src="js/views/dashboard.js?v=32"></script>
-    <script src="js/views/teachers.js?v=32"></script>
-    <script src="js/views/subjects.js?v=32"></script>
-    <script src="js/views/students.js?v=32"></script>
-    <script src="js/views/classes.js?v=32"></script>
-    <script src="js/views/classrooms.js?v=32"></script>
-    <script src="js/views/periods.js?v=32"></script>
-    <script src="js/views/lessons.js?v=32"></script>
-    <script src="js/views/constraints.js?v=32"></script>
-    <script src="js/views/generate.js?v=32"></script>
-    <script src="js/views/timetable_helpers.js?v=32"></script>
-    <script src="js/components/compare_modal.js?v=32"></script>
-    <script src="js/components/substitute_modal.js?v=32"></script>
-    <script src="js/services/timetable_interactions.js?v=32"></script>
-    <script src="js/views/timetable.js?v=32"></script>
-    <script src="js/views/settings.js?v=32"></script>
-    <script src="js/app.js?v=32"></script>
+    <script src="js/api.js?v=33"></script>
+    <script src="js/components/toast.js?v=33"></script>
+    <script src="js/components/modal.js?v=33"></script>
+    <script src="js/components/availability-modal.js?v=33"></script>
+    <script src="js/components/data-table.js?v=33"></script>
+    <script src="js/components/timetable-grid.js?v=33"></script>
+    <script src="js/views/dashboard.js?v=33"></script>
+    <script src="js/views/terms.js?v=33"></script>
+    <script src="js/views/teachers.js?v=33"></script>
+    <script src="js/views/subjects.js?v=33"></script>
+    <script src="js/views/students.js?v=33"></script>
+    <script src="js/views/classes.js?v=33"></script>
+    <script src="js/views/classrooms.js?v=33"></script>
+    <script src="js/views/periods.js?v=33"></script>
+    <script src="js/views/lessons.js?v=33"></script>
+    <script src="js/views/constraints.js?v=33"></script>
+    <script src="js/views/generate.js?v=33"></script>
+    <script src="js/views/timetable_helpers.js?v=33"></script>
+    <script src="js/components/compare_modal.js?v=33"></script>
+    <script src="js/components/substitute_modal.js?v=33"></script>
+    <script src="js/services/timetable_interactions.js?v=33"></script>
+    <script src="js/views/timetable.js?v=33"></script>
+    <script src="js/views/settings.js?v=33"></script>
+    <script src="js/app.js?v=33"></script>
 </body>
 </html>

@@ -94,6 +94,15 @@ const API = {
         delete: (id, force = false) => API.delete(`/periods/${id}${force ? '?force=true' : ''}`),
         seedDefaults: () => API.post('/periods/seed-defaults', {}),
     },
+    terms: {
+        list: () => API.get('/terms/'),
+        active: () => API.get('/terms/active'),
+        create: (data) => API.post('/terms/', data),
+        update: (id, data) => API.put(`/terms/${id}`, data),
+        activate: (id) => API.post(`/terms/${id}/activate`, {}),
+        clone: (id, data) => API.post(`/terms/${id}/clone`, data),
+        delete: (id, force = false) => API.delete(`/terms/${id}${force ? '?force=true' : ''}`),
+    },
     lessonsBulkImport: {
         preview: (csv) => API.post('/lessons/bulk-import/preview', { csv }),
         commit: (csv) => API.post('/lessons/bulk-import/commit', { csv }),
