@@ -159,10 +159,37 @@ class DataTable {
                     Modal.close();
                     await this.loadData();
                 } catch (err) {
-                    Toast.error(err.message);
+                    // Backend may refuse a destructive cascade and ask for an
+                    // explicit confirmation (HTTP 409 + detail.requires_force).
+                    // Show a second, stronger confirm and retry with force.
+                    if (err.status === 409 && err.detail && err.detail.requires_force) {
+                        this._confirmForceDelete(id, name, err.detail.message);
+                    } else {
+                        Toast.error(err.message);
+                    }
                 }
             },
             { saveText: 'Διαγραφή', saveClass: 'btn-danger' },
+        );
+    }
+
+    _confirmForceDelete(id, name, message) {
+        Modal.open(
+            '⚠️ Προσοχή — Καταστροφική διαγραφή',
+            `<p style="color:var(--accent-rose,#F43F5E);font-weight:600">${message}</p>
+             <p class="text-muted mt-sm">Η ενέργεια αυτή <strong>ΔΕΝ αναιρείται</strong> και επηρεάζει
+             ΟΛΑ τα προγράμματα. Αν θες απλώς να αλλάξεις ωράριο, χρησιμοποίησε «Σενάριο» αντί για διαγραφή.</p>`,
+            async () => {
+                try {
+                    await this.api.delete(id, true);  // force
+                    Toast.success(`Διαγράφηκε «${name}»`);
+                    Modal.close();
+                    await this.loadData();
+                } catch (err) {
+                    Toast.error(err.message);
+                }
+            },
+            { saveText: 'Ναι, διαγραφή όλων', saveClass: 'btn-danger' },
         );
     }
 }

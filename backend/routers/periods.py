@@ -2,11 +2,13 @@
 Periods API — CRUD for daily time slots / bell schedule.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Period
+from backend.models import (
+    Period, TimetableSlot, TeacherAvailability, StudentAvailability,
+)
 from backend.schemas import PeriodCreate, PeriodResponse
 
 router = APIRouter()
@@ -47,10 +49,56 @@ def update_period(period_id: int, data: PeriodCreate, db: Session = Depends(get_
 
 
 @router.delete("/{period_id}", status_code=204)
-def delete_period(period_id: int, db: Session = Depends(get_db)):
+def delete_period(
+    period_id: int,
+    force: bool = Query(False, description="Confirm destructive cascade delete"),
+    db: Session = Depends(get_db),
+):
     period = db.query(Period).filter(Period.id == period_id).first()
     if not period:
         raise HTTPException(status_code=404, detail="Η ώρα δεν βρέθηκε")
+
+    # ── Safety guard ────────────────────────────────────────────────────
+    # Deleting a period CASCADE-deletes every lesson placement
+    # (timetable_slots) AND availability on that hour, across ALL solutions
+    # — it is global and irreversible. Block unless the caller explicitly
+    # confirms with ?force=true (the frontend asks the user first).
+    if not force:
+        slot_count = (
+            db.query(TimetableSlot)
+            .filter(TimetableSlot.period_id == period_id).count()
+        )
+        ta_count = (
+            db.query(TeacherAvailability)
+            .filter(TeacherAvailability.period_id == period_id).count()
+        )
+        sa_count = (
+            db.query(StudentAvailability)
+            .filter(StudentAvailability.period_id == period_id).count()
+        )
+        if slot_count or ta_count or sa_count:
+            sol_count = (
+                db.query(TimetableSlot.solution_id)
+                .filter(TimetableSlot.period_id == period_id)
+                .distinct().count()
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "period_in_use",
+                    "requires_force": True,
+                    "message": (
+                        f"Η ώρα «{period.name}» χρησιμοποιείται. Η διαγραφή θα σβήσει "
+                        f"ΟΡΙΣΤΙΚΑ {slot_count} τοποθετήσεις μαθημάτων σε {sol_count} "
+                        f"προγράμματα και {ta_count + sa_count} δηλώσεις διαθεσιμότητας, "
+                        f"σε ΟΛΑ τα προγράμματα. Θέλεις σίγουρα να συνεχίσεις;"
+                    ),
+                    "slots": slot_count,
+                    "solutions": sol_count,
+                    "availability": ta_count + sa_count,
+                },
+            )
+
     db.delete(period)
     db.commit()
 

@@ -22,14 +22,20 @@ const API = {
 
         if (!response.ok) {
             let message = `Σφάλμα ${response.status}`;
-            if (data && data.detail) {
-                if (Array.isArray(data.detail)) {
-                    message = data.detail.map(err => `${err.loc.slice(-1)}: ${err.msg}`).join(', ');
+            const detail = data && data.detail;
+            if (detail) {
+                if (Array.isArray(detail)) {
+                    message = detail.map(err => `${err.loc.slice(-1)}: ${err.msg}`).join(', ');
+                } else if (typeof detail === 'object') {
+                    message = detail.message || message;  // structured error (e.g. confirmable)
                 } else {
-                    message = data.detail;
+                    message = detail;
                 }
             }
-            throw new Error(message);
+            const err = new Error(message);
+            err.status = response.status;
+            err.detail = detail;  // raw — lets callers detect e.g. requires_force
+            throw err;
         }
 
         return data;
@@ -85,7 +91,7 @@ const API = {
         get: (id) => API.get(`/periods/${id}`),
         create: (data) => API.post('/periods/', data),
         update: (id, data) => API.put(`/periods/${id}`, data),
-        delete: (id) => API.delete(`/periods/${id}`),
+        delete: (id, force = false) => API.delete(`/periods/${id}${force ? '?force=true' : ''}`),
         seedDefaults: () => API.post('/periods/seed-defaults', {}),
     },
     lessonsBulkImport: {
