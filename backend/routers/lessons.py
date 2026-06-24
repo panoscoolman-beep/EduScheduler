@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
 from backend.schemas import LessonCreate, LessonResponse
+from backend.services.term_context import get_active_term_id
 from backend.services.parking_lot_sync import (
     add_lesson_to_open_solutions,
     sync_lesson_slot_count,
@@ -39,6 +40,7 @@ def _enrich_lesson(lesson: Lesson) -> dict:
 def list_lessons(db: Session = Depends(get_db)):
     lessons = (
         db.query(Lesson)
+        .filter(Lesson.term_id == get_active_term_id(db))
         .options(
             joinedload(Lesson.subject),
             joinedload(Lesson.teacher),
@@ -112,7 +114,7 @@ def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
     if data.classroom_id and not db.query(Classroom).filter(Classroom.id == data.classroom_id).first():
         raise HTTPException(status_code=404, detail="Η αίθουσα δεν βρέθηκε")
 
-    lesson = Lesson(**data.model_dump())
+    lesson = Lesson(term_id=get_active_term_id(db), **data.model_dump())
     db.add(lesson)
     db.commit()
     db.refresh(lesson)

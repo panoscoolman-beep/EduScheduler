@@ -2,7 +2,44 @@
 Pydantic schemas for request/response validation.
 """
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
+
+
+# ─── Term (Σενάριο / Scenario) ──────────────────────────
+
+class TermBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, examples=["Χειμερινό 2026-27"])
+    short_name: str | None = Field(None, max_length=20)
+    notes: str | None = None
+
+
+class TermCreate(TermBase):
+    pass
+
+
+class TermUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    short_name: str | None = Field(None, max_length=20)
+    notes: str | None = None
+
+
+class TermResponse(TermBase):
+    id: int
+    is_active: bool
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class TermCloneRequest(BaseModel):
+    """Create a new term by deep-copying an existing one's inputs."""
+    name: str = Field(..., min_length=1, max_length=100, examples=["Χειμερινό 2026-27"])
+    short_name: str | None = Field(None, max_length=20)
+    notes: str | None = None
+    activate: bool = True
 
 
 # ─── Period ─────────────────────────────────────────────

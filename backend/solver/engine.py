@@ -53,7 +53,8 @@ class TimetableSolver:
     def __init__(self, db: Session, max_time_seconds: int = 120,
                  mode: str = "strict",
                  locked_assignments: list[dict] | None = None,
-                 warm_start_assignments: list[dict] | None = None):
+                 warm_start_assignments: list[dict] | None = None,
+                 term_id: int | None = None):
         """
         Args:
             db: SQLAlchemy session
@@ -80,6 +81,7 @@ class TimetableSolver:
         self.mode = mode if mode in ("strict", "permissive") else "strict"
         self.locked_assignments: list[dict] = locked_assignments or []
         self.warm_start_assignments: list[dict] = warm_start_assignments or []
+        self.term_id = term_id  # scenario scope; None = all (legacy/safety)
 
         # Data from DB (loaded in _load_data)
         self.teachers: list[Teacher] = []
@@ -150,14 +152,18 @@ class TimetableSolver:
         self.subjects = self.db.query(Subject).all()
         self.classes = self.db.query(SchoolClass).all()
         self.classrooms = self.db.query(Classroom).all()
-        self.lessons = self.db.query(Lesson).all()
+        # Scenario scope: only this term's lessons + availability feed the solve.
+        lessons_q = self.db.query(Lesson)
+        ta_q = self.db.query(TeacherAvailability).filter(TeacherAvailability.status == "unavailable")
+        sa_q = self.db.query(StudentAvailability).filter(StudentAvailability.status == "unavailable")
+        if self.term_id is not None:
+            lessons_q = lessons_q.filter(Lesson.term_id == self.term_id)
+            ta_q = ta_q.filter(TeacherAvailability.term_id == self.term_id)
+            sa_q = sa_q.filter(StudentAvailability.term_id == self.term_id)
+        self.lessons = lessons_q.all()
         self.periods = self.db.query(Period).filter(Period.is_break == False).order_by(Period.sort_order).all()
-        self.availabilities = self.db.query(TeacherAvailability).filter(
-            TeacherAvailability.status == "unavailable"
-        ).all()
-        self.student_availabilities = self.db.query(StudentAvailability).filter(
-            StudentAvailability.status == "unavailable"
-        ).all()
+        self.availabilities = ta_q.all()
+        self.student_availabilities = sa_q.all()
         self.enrollments = self.db.query(StudentClassEnrollment).all()
         self.constraints = self.db.query(Constraint).filter(Constraint.is_active == True).all()
 

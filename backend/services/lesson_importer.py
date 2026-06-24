@@ -207,12 +207,16 @@ def preview(csv_text: str, db: Session) -> PreviewResult:
     return result
 
 
-def commit(rows: list[PreviewRow], db: Session) -> dict:
+def commit(rows: list[PreviewRow], db: Session, term_id: int | None = None) -> dict:
     """Insert every valid row in a single transaction. If any row fails,
     rolls back everything. Returns a summary dict.
 
     Caller is expected to have run preview() and either filtered to
-    valid rows or accepted the warnings."""
+    valid rows or accepted the warnings. `term_id` scopes the new lessons to
+    a scenario (falls back to the active term)."""
+    if term_id is None:
+        from backend.services.term_context import get_active_term_id
+        term_id = get_active_term_id(db)
     invalid = [r for r in rows if not r.is_valid]
     if invalid:
         return {
@@ -224,7 +228,7 @@ def commit(rows: list[PreviewRow], db: Session) -> dict:
     try:
         created_lessons: list[Lesson] = []
         for r in rows:
-            lesson = Lesson(**r.to_lesson_kwargs())
+            lesson = Lesson(term_id=term_id, **r.to_lesson_kwargs())
             db.add(lesson)
             created_lessons.append(lesson)
         db.commit()

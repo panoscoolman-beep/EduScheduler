@@ -13,6 +13,7 @@ from backend.schemas import (
     TeacherAvailabilityResponse,
     TeacherAvailabilityBulkUpdate,
 )
+from backend.services.term_context import get_active_term_id
 
 router = APIRouter()
 
@@ -70,7 +71,14 @@ def get_availability(teacher_id: int, db: Session = Depends(get_db)):
     teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Ο καθηγητής δεν βρέθηκε")
-    return teacher.availabilities
+    return (
+        db.query(TeacherAvailability)
+        .filter(
+            TeacherAvailability.teacher_id == teacher_id,
+            TeacherAvailability.term_id == get_active_term_id(db),
+        )
+        .all()
+    )
 
 
 @router.put("/{teacher_id}/availability", response_model=list[TeacherAvailabilityResponse])
@@ -80,13 +88,18 @@ def update_availability(teacher_id: int, data: TeacherAvailabilityBulkUpdate, db
     if not teacher:
         raise HTTPException(status_code=404, detail="Ο καθηγητής δεν βρέθηκε")
 
-    # Delete existing availability
-    db.query(TeacherAvailability).filter(TeacherAvailability.teacher_id == teacher_id).delete()
+    term_id = get_active_term_id(db)
 
-    # Insert new entries
+    # Delete existing availability FOR THE ACTIVE SCENARIO ONLY
+    db.query(TeacherAvailability).filter(
+        TeacherAvailability.teacher_id == teacher_id,
+        TeacherAvailability.term_id == term_id,
+    ).delete()
+
+    # Insert new entries (scoped to the active scenario)
     new_entries = []
     for avail in data.availabilities:
-        entry = TeacherAvailability(teacher_id=teacher_id, **avail.model_dump())
+        entry = TeacherAvailability(teacher_id=teacher_id, term_id=term_id, **avail.model_dump())
         db.add(entry)
         new_entries.append(entry)
 

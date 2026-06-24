@@ -140,6 +140,7 @@ def _run_generation_job(
             mode=mode,
             warm_start_assignments=warm_start_assignments or [],
             locked_assignments=locked_assignments or [],
+            term_id=solution.term_id,
         )
         result = solver.solve()
         _persist_solver_result(db, solution, result, locked_assignments, extra_stats)

@@ -15,6 +15,7 @@ from backend.models import (
 )
 from backend.services import slot_history as slot_history_svc
 from backend.services.slot_placement import resolve_and_validate_target_room
+from backend.services.term_context import get_active_term_id
 from backend.services.solver_jobs import (
     _guard_no_active_solve,
     _iso_utc,
@@ -102,6 +103,7 @@ def generate_timetable(
         name=request.name,
         status="generating",
         created_at=utcnow_naive(),
+        term_id=get_active_term_id(db),
     )
     db.add(solution)
     db.commit()
@@ -236,6 +238,7 @@ def regenerate_with_locks(
         name=request.name or f"{source.name} (regenerated)",
         status="generating",
         created_at=utcnow_naive(),
+        term_id=source.term_id,  # stay in the same scenario as the source
     )
     db.add(solution)
     db.commit()
@@ -264,9 +267,10 @@ def regenerate_with_locks(
 
 @router.get("/solutions", response_model=list[TimetableSolutionResponse])
 def list_solutions(db: Session = Depends(get_db)):
-    """List all generated timetable solutions."""
+    """List generated timetable solutions for the ACTIVE scenario."""
     solutions = (
         db.query(TimetableSolution)
+        .filter(TimetableSolution.term_id == get_active_term_id(db))
         .order_by(TimetableSolution.created_at.desc())
         .all()
     )

@@ -4,11 +4,12 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Student, StudentClassEnrollment
 from backend.schemas import (
-    StudentCreate, 
+    StudentCreate,
     StudentResponse,
     StudentAvailabilityResponse,
     StudentAvailabilityBulkUpdate
 )
+from backend.services.term_context import get_active_term_id
 
 router = APIRouter()
 
@@ -66,7 +67,15 @@ def get_availability(student_id: int, db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
-    return student.availabilities
+    from backend.models import StudentAvailability
+    return (
+        db.query(StudentAvailability)
+        .filter(
+            StudentAvailability.student_id == student_id,
+            StudentAvailability.term_id == get_active_term_id(db),
+        )
+        .all()
+    )
 
 
 @router.put("/{student_id}/availability", response_model=list[StudentAvailabilityResponse])
@@ -78,13 +87,18 @@ def update_availability(student_id: int, data: StudentAvailabilityBulkUpdate, db
 
     from backend.models import StudentAvailability
 
-    # Delete existing availability
-    db.query(StudentAvailability).filter(StudentAvailability.student_id == student_id).delete()
+    term_id = get_active_term_id(db)
 
-    # Insert new entries
+    # Delete existing availability FOR THE ACTIVE SCENARIO ONLY
+    db.query(StudentAvailability).filter(
+        StudentAvailability.student_id == student_id,
+        StudentAvailability.term_id == term_id,
+    ).delete()
+
+    # Insert new entries (scoped to the active scenario)
     new_entries = []
     for avail in data.availabilities:
-        entry = StudentAvailability(student_id=student_id, **avail.model_dump())
+        entry = StudentAvailability(student_id=student_id, term_id=term_id, **avail.model_dump())
         db.add(entry)
         new_entries.append(entry)
 

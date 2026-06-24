@@ -34,6 +34,25 @@ class SchoolSettings(Base):
     institution_type = Column(String(50), default="frontistirio")  # frontistirio / school
 
 
+class Term(Base):
+    """A scheduling scenario / "session" (π.χ. Φθινοπωρινό, Χειμερινό).
+
+    Scopes the INPUT data that differs between scenarios — lessons,
+    availability, and generated solutions — so multiple scenarios coexist
+    without overwriting each other. Teachers/students/subjects/classrooms/
+    classes/periods stay GLOBAL (shared catalog).
+    """
+
+    __tablename__ = "terms"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    short_name = Column(String(20))
+    is_active = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=utcnow_naive)
+
+
 class Period(Base):
     """A teaching period / time slot within a day."""
 
@@ -79,13 +98,14 @@ class TeacherAvailability(Base):
     __tablename__ = "teacher_availability"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
     teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
     day_of_week = Column(Integer, nullable=False)  # 0=Monday, 4=Friday
     period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
     status = Column(String(20), nullable=False, default="available")  # available / unavailable / preferred
 
     __table_args__ = (
-        UniqueConstraint("teacher_id", "day_of_week", "period_id", name="uq_teacher_day_period"),
+        UniqueConstraint("term_id", "teacher_id", "day_of_week", "period_id", name="uq_teacher_term_day_period"),
         CheckConstraint("day_of_week >= 0 AND day_of_week <= 6", name="ck_day_range"),
         CheckConstraint("status IN ('available', 'unavailable', 'preferred')", name="ck_status_values"),
     )
@@ -166,13 +186,14 @@ class StudentAvailability(Base):
     __tablename__ = "student_availability"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     day_of_week = Column(Integer, nullable=False)  # 0=Monday, 4=Friday
     period_id = Column(Integer, ForeignKey("periods.id", ondelete="CASCADE"), nullable=False)
     status = Column(String(20), nullable=False, default="available")  # available / unavailable / preferred
 
     __table_args__ = (
-        UniqueConstraint("student_id", "day_of_week", "period_id", name="uq_student_day_period"),
+        UniqueConstraint("term_id", "student_id", "day_of_week", "period_id", name="uq_student_term_day_period"),
         CheckConstraint("day_of_week >= 0 AND day_of_week <= 6", name="ck_sday_range"),
         CheckConstraint("status IN ('available', 'unavailable', 'preferred')", name="ck_sstatus_values"),
     )
@@ -227,6 +248,7 @@ class Lesson(Base):
     __tablename__ = "lessons"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
     subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
     teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
@@ -276,6 +298,7 @@ class TimetableSolution(Base):
     __tablename__ = "timetable_solutions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(200), nullable=False)
     created_at = Column(DateTime, default=utcnow_naive)
     status = Column(String(20), default="draft")  # draft / generating / optimal / feasible / infeasible

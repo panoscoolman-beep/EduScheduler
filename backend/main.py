@@ -15,6 +15,7 @@ from backend.auth import BearerTokenMiddleware
 from backend.config import settings
 from backend.database import engine, Base
 from backend.routers import (
+    terms,
     teachers,
     subjects,
     classrooms,
@@ -131,6 +132,7 @@ def healthz():
 
 
 # API Routes
+app.include_router(terms.router, prefix="/api/terms", tags=["Σενάρια"])
 app.include_router(teachers.router, prefix="/api/teachers", tags=["Καθηγητές"])
 app.include_router(subjects.router, prefix="/api/subjects", tags=["Μαθήματα"])
 app.include_router(classrooms.router, prefix="/api/classrooms", tags=["Αίθουσες"])
