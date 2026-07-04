@@ -2,7 +2,7 @@
 Pydantic schemas for request/response validation.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,8 @@ class TermBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, examples=["Χειμερινό 2026-27"])
     short_name: str | None = Field(None, max_length=20)
     notes: str | None = None
+    start_date: date | None = None  # όρια σεναρίου — τροφοδοτούν το ICS (UNTIL/EXDATE)
+    end_date: date | None = None
 
 
 class TermCreate(TermBase):
@@ -23,6 +25,8 @@ class TermUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     short_name: str | None = Field(None, max_length=20)
     notes: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class TermResponse(TermBase):

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, Float, Text,
-    ForeignKey, DateTime, UniqueConstraint, CheckConstraint, Table
+    ForeignKey, Date, DateTime, UniqueConstraint, CheckConstraint, Table
 )
 
 
@@ -50,6 +50,10 @@ class Term(Base):
     short_name = Column(String(20))
     is_active = Column(Boolean, nullable=False, default=False)
     notes = Column(Text)
+    # Όρια σεναρίου (προαιρετικά): τροφοδοτούν το ICS export (DTSTART άγκυρα,
+    # RRULE UNTIL, EXDATE αργιών) ώστε τα events να μην «τρέχουν για πάντα».
+    start_date = Column(Date)
+    end_date = Column(Date)
     created_at = Column(DateTime, default=utcnow_naive)
 
 

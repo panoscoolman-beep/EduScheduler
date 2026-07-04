@@ -31,12 +31,36 @@ from backend.schemas import (
     TimetableSlotUpdate,
 )
 from backend.services.feasibility import check_feasibility
+from backend.services.solution_diff import compute_diff
+from backend.services.violations_report import compute_violations
 
 router = APIRouter()
 
 
 # Classroom resolution + manual-move conflict checks now live in
 # backend/services/slot_placement.py (extracted for readability).
+
+
+@router.get("/diff")
+def solution_diff(base_id: int, other_id: int, db: Session = Depends(get_db)):
+    """Slot-level diff δύο λύσεων: moved/added/removed ανά μάθημα (από
+    πού → πού) + μεταβολή φόρτου ανά καθηγητή. Το «τι άλλαξε;» μετά από
+    ένα regenerate, ώστε να μη συγκρίνεις δύο grids με το μάτι."""
+    diff = compute_diff(db, base_id, other_id)
+    if diff is None:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    return diff
+
+
+@router.get("/solutions/{solution_id}/violations")
+def solution_violations(solution_id: int, db: Session = Depends(get_db)):
+    """Ονομαστική αναφορά soft-constraint παραβιάσεων: ποιος καθηγητής έχει
+    κενό πότε, ποια μαθήματα πέφτουν αργά, φόρτος ανά καθηγητή — το
+    «γιατί αυτό το score;» πίσω από τον αριθμό της λύσης."""
+    report = compute_violations(db, solution_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    return report
 
 
 @router.get("/feasibility-check", response_model=FeasibilityReportResponse)

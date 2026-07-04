@@ -50,6 +50,9 @@ def update_term(term_id: int, data: TermUpdate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Το σενάριο δεν βρέθηκε")
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(term, key, value)
+    if term.start_date and term.end_date and term.start_date > term.end_date:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Η έναρξη είναι μετά τη λήξη.")
     db.commit()
     db.refresh(term)
     return term
@@ -75,7 +78,9 @@ def clone_term(term_id: int, data: TermCloneRequest, db: Session = Depends(get_d
     if not source:
         raise HTTPException(status_code=404, detail="Το σενάριο-πηγή δεν βρέθηκε")
 
-    new_term = Term(name=data.name, short_name=data.short_name, notes=data.notes, is_active=False)
+    # Τα όρια του σεναρίου κληρονομούνται στο αντίγραφο (ICS UNTIL/EXDATE).
+    new_term = Term(name=data.name, short_name=data.short_name, notes=data.notes,
+                    is_active=False, start_date=source.start_date, end_date=source.end_date)
     db.add(new_term)
     db.flush()  # assign id without committing yet
 

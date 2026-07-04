@@ -162,6 +162,32 @@ def test_clone_copies_inputs_but_not_solutions(client):
     assert res.json()["is_active"] is False
 
 
+def test_clone_inherits_term_dates(client):
+    """Τα όρια του σεναρίου (ICS UNTIL/EXDATE) περνούν στο αντίγραφο —
+    αλλιώς ο κλώνος θα έχανε σιωπηλά τη λήξη του ημερολογίου."""
+    import datetime as dt
+    s = client.session
+    seed = _seed_catalog(s)
+    term = _seed_term_with_inputs(s, seed)
+    term.start_date = dt.date(2026, 9, 7)
+    term.end_date = dt.date(2027, 5, 28)
+    s.commit()
+
+    res = client.post(f"/api/terms/{term.id}/clone",
+                      json={"name": "Κλώνος", "activate": False})
+    assert res.status_code == 201
+    body = res.json()
+    assert body["start_date"] == "2026-09-07"
+    assert body["end_date"] == "2027-05-28"
+
+
+def test_update_term_rejects_inverted_dates(client):
+    t = client.post("/api/terms/", json={"name": "Α"}).json()
+    res = client.put(f"/api/terms/{t['id']}",
+                     json={"start_date": "2027-01-01", "end_date": "2026-01-01"})
+    assert res.status_code == 400
+
+
 def test_clone_with_activate_switches_active(client):
     s = client.session
     seed = _seed_catalog(s)
