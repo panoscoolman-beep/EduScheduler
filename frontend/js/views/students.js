@@ -58,7 +58,65 @@ const StudentsView = {
             }),
         });
 
-        container.innerHTML = '<div id="students-table"></div>';
+        container.innerHTML = `
+            <div style="display:flex; justify-content:flex-end; margin-bottom:0.5rem">
+                <button class="btn btn-secondary" id="crm-import-btn"
+                        title="Τράβα τους μαθητές από το Korifi CRM — τέλος η διπλή καταχώρηση">
+                    ⬇️ Εισαγωγή από CRM
+                </button>
+            </div>
+            <div id="students-table"></div>`;
         await table.render(document.getElementById('students-table'));
+        document.getElementById('crm-import-btn').addEventListener('click', () =>
+            this._openCrmImport(container));
+    },
+
+    async _openCrmImport(container) {
+        Modal.open('⬇️ Εισαγωγή μαθητών από CRM',
+            '<div id="crm-import-body"><div class="loading-spinner"><div class="spinner"></div><p>Σύνδεση με CRM…</p></div></div>',
+            null, { hideFooter: true, wide: true });
+        let preview;
+        try {
+            preview = await API.students.crmPreview();
+        } catch (err) {
+            document.getElementById('crm-import-body').innerHTML =
+                `<p>⚠️ Σφάλμα: ${TimetableHelpers.esc(err.message)}</p>`;
+            return;
+        }
+        const body = document.getElementById('crm-import-body');
+        if (!body) return;  // ο χρήστης έκλεισε το modal
+        if (!preview.available) {
+            body.innerHTML = `<p>⚠️ ${TimetableHelpers.esc(preview.fatal_error || 'Το CRM δεν είναι διαθέσιμο.')}</p>`;
+            return;
+        }
+        const newRows = preview.rows.filter(r => r.status === 'new');
+        if (!newRows.length) {
+            body.innerHTML = `<p>✅ Όλοι οι μαθητές του CRM (${preview.exists_count}) υπάρχουν ήδη στο EduScheduler — τίποτα να εισαχθεί.</p>`;
+            return;
+        }
+        body.innerHTML = `
+            <p><b>${newRows.length}</b> νέοι μαθητές θα εισαχθούν · <b>${preview.exists_count}</b> υπάρχουν ήδη (θα παραλειφθούν).</p>
+            <div style="max-height:320px; overflow:auto; border:1px solid var(--border-color,#ccc); border-radius:6px; padding:0.5rem; margin:0.5rem 0">
+                <table class="data-table"><thead><tr><th>Επώνυμο</th><th>Όνομα</th><th>Email/Τηλ.</th></tr></thead>
+                <tbody>${newRows.map(r => `
+                    <tr><td>${TimetableHelpers.esc(r.last_name)}</td>
+                        <td>${TimetableHelpers.esc(r.first_name)}</td>
+                        <td>${TimetableHelpers.esc(r.email || r.phone || '—')}</td></tr>`).join('')}
+                </tbody></table>
+            </div>
+            <button class="btn btn-primary" id="crm-import-confirm">✅ Εισαγωγή ${newRows.length} μαθητών</button>`;
+        document.getElementById('crm-import-confirm').addEventListener('click', async () => {
+            try {
+                const res = await API.students.crmImport(newRows.map(r => ({
+                    first_name: r.first_name, last_name: r.last_name,
+                    email: r.email, phone: r.phone,
+                })));
+                Toast.success(`✅ Εισήχθησαν ${res.created} μαθητές (${res.skipped} παραλείφθηκαν)`);
+                Modal.close();
+                await this.render(container);
+            } catch (err) {
+                Toast.error(`Η εισαγωγή απέτυχε: ${err.message}`);
+            }
+        });
     },
 };

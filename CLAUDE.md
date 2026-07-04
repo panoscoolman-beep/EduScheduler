@@ -46,6 +46,8 @@ hard/soft constraints με βαρύτητα).
                        │  ├─ /api/terms  (σενάρια)    │
                        │  ├─ /api/exports (ics/print/ │
                        │  │               xlsx)       │
+                       │  ├─ /api/integration (CRM      │
+                       │  │        student import)      │
                        │  ├─ /api/settings            │
                        │  └─ /api/healthz (public)    │
                        └────────────┬─────────────────┘
@@ -166,8 +168,11 @@ curl -X POST http://localhost:8082/api/solver/generate \
 
 ## Integration με Korifi CRM
 
-Σε εξέλιξη — **Path C** integration για να σταματήσει η διπλή καταχώρηση
-μαθητών/καθηγητών στα δύο συστήματα. Πλήρες plan και progress:
+**Βήμα 1 LIVE (2026-07-04):** εισαγωγή μαθητών από CRM με preview→commit
+(`backend/services/crm_importer.py`, `/api/integration/crm/students/*`,
+κουμπί «⬇️ Εισαγωγή από CRM» στην καρτέλα Μαθητές). One-way pull· CRM master.
+Env στο EDS `.env`: `KORIFI_API_BASE` (default `http://korifi-crm-v2-api-1:8000`)
++ `KORIFI_API_TOKEN` (ίδιος με CRM). Πλήρες plan και progress:
 - `/home/coolman/korifi-crm-v2/docs/INTEGRATION.md`
 - `αλλαγες.md` ενότητα 6
 

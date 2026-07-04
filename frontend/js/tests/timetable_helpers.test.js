@@ -248,3 +248,42 @@ test('buildViolationsHtml: clean solution message', () => {
     });
     assert.match(html, /καθαρή λύση/);
 });
+
+// ---------------------------------------------------------------------------
+// buildFeasibilityHtml — «γιατί δεν βγαίνει;» (2026-07)
+// ---------------------------------------------------------------------------
+
+test('buildFeasibilityHtml: infeasible shows errors, warnings, suggestions', () => {
+    const html = H.buildFeasibilityHtml({
+        feasible: false,
+        errors: ['Δεν επαρκούν τα slots: χρειάζονται 40 αλλά υπάρχουν 30'],
+        warnings: ['Καθηγητής Νικολάου: φόρτος 18/20 — οριακά'],
+        suggestions: ['Πρόσθεσε αίθουσα ή λιγόστεψε ώρες.'],
+        stats: { total_periods_needed: 40, total_slots_available: 30, load_factor: 1.33,
+                 total_lessons: 12, total_teachers: 4, total_classes: 3 },
+    });
+    assert.match(html, /Δεν βγαίνει/);
+    assert.match(html, /Σίγουρα προβλήματα \(1\)/);
+    assert.match(html, /Πιθανά προβλήματα \(1\)/);
+    assert.match(html, /Τι να κάνεις/);
+    assert.match(html, /Πρόσθεσε αίθουσα/);
+    assert.match(html, /40 \/ 30/);
+});
+
+test('buildFeasibilityHtml: feasible with no warnings shows green all-clear', () => {
+    const html = H.buildFeasibilityHtml({
+        feasible: true, errors: [], warnings: [], suggestions: [],
+        stats: { total_periods_needed: 20, total_slots_available: 60, load_factor: 0.33 },
+    });
+    assert.match(html, /✅ Εφικτό/);
+    assert.match(html, /Όλα τα checks πέρασαν/);
+    assert.ok(!/Τι να κάνεις/.test(html));
+});
+
+test('buildFeasibilityHtml: escapes error text', () => {
+    const html = H.buildFeasibilityHtml({
+        feasible: false, errors: ['<script>x</script>'], warnings: [], suggestions: [], stats: {},
+    });
+    assert.ok(!html.includes('<script>x'));
+    assert.match(html, /&lt;script&gt;/);
+});

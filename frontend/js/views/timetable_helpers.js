@@ -341,6 +341,46 @@ const TimetableHelpers = {
             + work;
     },
 
+    /**
+     * HTML αναφοράς εφικτότητας — «γιατί δεν βγαίνει;». Pure.
+     * `report` = το JSON του GET /api/solver/feasibility-check
+     * (feasible, errors, warnings, suggestions, stats).
+     */
+    buildFeasibilityHtml(report) {
+        const esc = this.esc.bind(this);
+        const stats = report.stats || {};
+        const verdict = report.feasible
+            ? '<span style="color:var(--success,#10B981)">✅ Εφικτό</span>'
+            : '<span style="color:var(--danger,#EF4444)">❌ Δεν βγαίνει με τα τρέχοντα δεδομένα</span>';
+        const loadPct = stats.load_factor != null ? Math.round(stats.load_factor * 100) : '—';
+
+        const list = (title, items, color) => items && items.length
+            ? `<div style="margin-top:0.5rem"><b>${title} (${items.length}):</b>
+                 <ul style="margin:0.3em 0 0 1.4em; color:${color}">
+                   ${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`
+            : '';
+
+        const suggestions = report.suggestions && report.suggestions.length
+            ? `<div style="margin-top:0.6rem; padding:0.5rem 0.75rem; background:var(--surface-2,#f4f6fb); border-radius:6px">
+                 <b>💡 Τι να κάνεις:</b>
+                 <ul style="margin:0.3em 0 0 1.4em">${report.suggestions.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>`
+            : '';
+
+        return `
+            <div class="card" style="padding:0.75rem">
+                <div style="font-size:1.1em; margin-bottom:0.4rem">${verdict}</div>
+                <div style="font-size:0.9em; color:var(--text-muted,#6B7280)">
+                    Φόρτος: <b>${stats.total_periods_needed ?? '—'} / ${stats.total_slots_available ?? '—'}</b> slots
+                    (${loadPct}%) · ${stats.total_lessons ?? 0} μαθήματα, ${stats.total_teachers ?? 0} καθηγητές, ${stats.total_classes ?? 0} τάξεις
+                </div>
+                ${list('Σίγουρα προβλήματα', report.errors, 'var(--danger,#EF4444)')}
+                ${list('Πιθανά προβλήματα', report.warnings, 'var(--warning,#F59E0B)')}
+                ${suggestions}
+                ${report.feasible && !(report.warnings || []).length
+                    ? '<p style="color:var(--success,#10B981); margin-top:0.5rem">Όλα τα checks πέρασαν — μπορείς να τρέξεις τον solver.</p>' : ''}
+            </div>`;
+    },
+
     /** Convert a #RRGGBB hex colour to an rgba() string at the given alpha. */
     hexToRgba(hex, alpha = 1) {
         const r = parseInt(hex.slice(1, 3), 16);
