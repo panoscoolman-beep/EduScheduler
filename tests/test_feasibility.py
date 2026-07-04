@@ -401,5 +401,45 @@ def test_to_dict_serializes_all_fields(db):
     _seed_minimal(db)
     report = check_feasibility(db)
     payload = report.to_dict()
-    assert set(payload.keys()) == {"feasible", "errors", "warnings", "stats"}
+    assert set(payload.keys()) == {"feasible", "errors", "warnings", "stats", "suggestions"}
     assert isinstance(payload["feasible"], bool)
+    assert isinstance(payload["suggestions"], list)
+
+
+# ---------------------------------------------------------------------------
+# «Γιατί δεν βγαίνει;» — suggestions (2026-07)
+# ---------------------------------------------------------------------------
+
+def test_suggest_fixes_maps_causes_to_actions():
+    from backend.services.feasibility import suggest_fixes
+
+    sug = suggest_fixes(["Δεν επαρκούν τα slots: χρειάζονται 40 αλλά υπάρχουν 30"], [])
+    assert sug and any("αίθουσα" in s or "ώρες" in s for s in sug)
+
+    teacher = suggest_fixes(
+        ["Καθηγητής Νικολάου: χρειάζεται 20 ώρες αλλά η διαθεσιμότητά του επιτρέπει μόνο 12"], [])
+    assert any("καθηγητ" in s.lower() for s in teacher)
+
+    lab = suggest_fixes(["Απαιτείται αίθουσα τύπου 'lab' για 4 ώρες αλλά δεν υπάρχει καμία τέτοια αίθουσα"], [])
+    assert any("εργαστήρι" in s or "τύπου" in s for s in lab)
+
+
+def test_suggest_fixes_dedupes_and_empty():
+    from backend.services.feasibility import suggest_fixes
+
+    assert suggest_fixes([], []) == []
+    # Δύο errors ίδιας κατηγορίας → μία πρόταση.
+    dup = suggest_fixes(
+        ["Καθηγητής Α: ... επιτρέπει μόνο 5", "Καθηγητής Β: ... επιτρέπει μόνο 3"], [])
+    assert len(dup) == len(set(dup))
+
+
+def test_feasibility_report_includes_suggestions_on_error(db):
+    seed = _seed_minimal(db, days_per_week=5, n_periods=2, n_rooms=1)
+    from backend.models import Lesson
+    db.add(Lesson(subject_id=seed["subject"].id, teacher_id=seed["teacher"].id,
+                  class_id=seed["class"].id, periods_per_week=11, duration=1))
+    db.commit()
+    report = check_feasibility(db).to_dict()
+    assert report["feasible"] is False
+    assert report["suggestions"]  # μη κενό — δίνει «τι να κάνεις»

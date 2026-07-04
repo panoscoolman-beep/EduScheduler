@@ -381,6 +381,7 @@ class FeasibilityReportResponse(BaseModel):
     errors: list[str]
     warnings: list[str]
     stats: dict
+    suggestions: list[str] = []
 
 
 # ─── Settings ───────────────────────────────────────────

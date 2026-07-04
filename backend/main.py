@@ -27,6 +27,7 @@ from backend.routers import (
     students,
     settings as settings_router,
     exports,
+    integration,
 )
 
 
@@ -144,6 +145,7 @@ app.include_router(constraints.router, prefix="/api/constraints", tags=["Περ�
 app.include_router(solver.router, prefix="/api/solver", tags=["Solver"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Ρυθμίσεις"])
 app.include_router(exports.router, prefix="/api/exports", tags=["Εξαγωγές"])
+app.include_router(integration.router, prefix="/api/integration", tags=["Ενσωμάτωση CRM"])
 
 # Serve frontend static files
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
