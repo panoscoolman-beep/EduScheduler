@@ -60,7 +60,10 @@ const TimetableView = {
                             <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.5rem" disabled>↪ Επανάληψη</button>
                             <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.5rem">👤 Αντικατάσταση</button>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
-                            <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.5rem">📊 Σύγκριση</button>
+                            <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
+                            <button class="btn btn-secondary" id="tt-diff" title="Slot-level διαφορές με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε" style="margin-right:0.25rem">🔀 Τι άλλαξε;</button>
+                            <button class="btn btn-secondary" id="tt-violations" title="Γιατί αυτό το score; Κενά καθηγητών, αργές ώρες, φόρτος" style="margin-right:0.5rem">⚖️ Ποιότητα</button>
+                            <button class="btn btn-secondary" id="tt-bulk-export" title="Όλα τα προγράμματα μαζί: εκτύπωση με μία σελίδα ανά καθηγητή/τμήμα, ή Excel" style="margin-right:0.25rem">📦 Μαζική εξαγωγή</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση: με επιλεγμένο καθηγητή/μαθητή ανοίγει καθαρή σελίδα εκτύπωσης" style="margin-right:0.25rem">🖨️ Εκτύπωση</button>
                             <button class="btn btn-secondary" id="tt-ics" title="Εξαγωγή .ics για Google/Apple Calendar (διάλεξε πρώτα καθηγητή ή μαθητή στο φίλτρο)" style="margin-right:0.5rem">📆 ICS</button>
                             <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
@@ -79,6 +82,7 @@ const TimetableView = {
                                 <option value="student">Μαθητή</option>
                                 <option value="overview_teacher">Συνολική: Καθηγητές × Ώρες</option>
                                 <option value="overview_class">Συνολική: Τμήματα × Ώρες</option>
+                                <option value="free_rooms">Ελεύθερες Αίθουσες</option>
                             </select>
                         </div>
                         <div class="form-group" style="margin:0; min-width: 200px;">
@@ -139,6 +143,21 @@ const TimetableView = {
             // Event: Compare με άλλη λύση
             document.getElementById('tt-compare').addEventListener('click', () => {
                 CompareModal.open(solutions, solutionId);
+            });
+
+            // Event: Slot-level diff με άλλη λύση
+            document.getElementById('tt-diff').addEventListener('click', () => {
+                InsightsModal.openDiff(solutions, solutionId);
+            });
+
+            // Event: Αναφορά παραβιάσεων soft constraints
+            document.getElementById('tt-violations').addEventListener('click', () => {
+                InsightsModal.openViolations(solutionId);
+            });
+
+            // Event: Μαζική εκτύπωση / Excel
+            document.getElementById('tt-bulk-export').addEventListener('click', () => {
+                InsightsModal.openBulkExport(solutionId);
             });
 
             // Event: Substitute teacher mode
@@ -211,6 +230,22 @@ const TimetableView = {
             // show ALL days at once (entity × day×hour), so they ignore the
             // entity filter; the regular views use it.
             const renderGrid = (viewType, filterValue) => {
+                if (viewType === 'free_rooms') {
+                    const mount = document.getElementById('timetable-grid-view');
+                    mount.innerHTML = '<p>Φόρτωση αιθουσών…</p>';
+                    // Χωρίς cache: η λίστα αιθουσών είναι μικρή και έτσι νέες/
+                    // διαγραμμένες αίθουσες φαίνονται αμέσως. Guard: αν ο χρήστης
+                    // άλλαξε view όσο φορτώναμε, μην πατήσουμε το άλλο grid.
+                    API.classrooms.list()
+                        .then(rooms => {
+                            if (document.getElementById('tt-view-type')?.value !== 'free_rooms') return;
+                            mount.innerHTML = TimetableHelpers.buildFreeRoomsHtml(
+                                solution.slots, periods, daysCount, rooms,
+                            );
+                        })
+                        .catch(err => Toast.error(`Αδύνατη η φόρτωση αιθουσών: ${err.message}`));
+                    return;
+                }
                 if (viewType && viewType.startsWith('overview')) {
                     const axis = viewType === 'overview_class' ? 'class' : 'teacher';
                     TimetableGrid.renderOverview(
@@ -234,7 +269,7 @@ const TimetableView = {
                 App._ttViewType = vt;  // persist across full re-renders
 
                 const parkingLot = document.getElementById('parking-lot-container');
-                if (vt.startsWith('overview')) {
+                if (vt.startsWith('overview') || vt === 'free_rooms') {
                     // Overview shows every day at once → no entity filter needed.
                     // Hide the parking lot too: dropping an unplaced (entity-less)
                     // card into an overview row would land it in the wrong row.

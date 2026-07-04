@@ -43,7 +43,11 @@ hard/soft constraints με βαρύτητα).
                        │  ├─ /api/constraints         │
                        │  ├─ /api/solver/generate     │
                        │  ├─ /api/solver/solutions    │
-                       │  └─ /api/settings            │
+                       │  ├─ /api/terms  (σενάρια)    │
+                       │  ├─ /api/exports (ics/print/ │
+                       │  │               xlsx)       │
+                       │  ├─ /api/settings            │
+                       │  └─ /api/healthz (public)    │
                        └────────────┬─────────────────┘
                                     │ SQLAlchemy
                                     ▼
@@ -88,6 +92,7 @@ manual ALTER TABLE.
 | `timetable_slots` | Το παραγόμενο πρόγραμμα — ποια ώρα/μέρα/αίθουσα τι μάθημα |
 | `timetable_solutions` | Solver runs — multiple "what-if" λύσεις |
 | `school_settings` | Global ρυθμίσεις (έναρξη/λήξη ημέρας, διάρκεια διδακτικής ώρας...) |
+| `terms` | Σενάρια ωραρίου — scope για lessons/availability/solutions (term_id NOT NULL παντού), προαιρετικά start/end dates για ICS |
 
 ## Solver (`backend/solver/engine.py`)
 
@@ -133,13 +138,13 @@ docker exec -it edscheduler-db psql -U edscheduler -d edscheduler
 cd /home/coolman/EduScheduler
 docker compose up -d --build
 
-# Generate timetable (από API)
+# Generate timetable (από API — θέλει bearer token από το .env)
 curl -X POST http://localhost:8082/api/solver/generate \
+  -H "Authorization: Bearer $EDSCHEDULER_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"period_id": 1, "max_runtime_seconds": 30}'
+  -d '{"max_time_seconds": 30}'
 
-# Browse Swagger UI
-open http://localhost:8082/docs
+# Swagger UI: ΔΕΝ εκτίθεται σε production (404) — μόνο τοπικά με dev run
 ```
 
 ## Known issues
@@ -147,15 +152,15 @@ open http://localhost:8082/docs
 1. ~~No versioned migrations~~ ✅ **Resolved (2026-05-06)** — Alembic
    εισήχθη στο commit `fa8d556` ("chore: introduce Alembic for versioned
    schema migrations").
-2. **No authentication**: το API είναι ανοιχτό (κανένα bearer token). Πρόσβαση
-   ελέγχεται μόνο μέσω network isolation (το container είναι σε ξεχωριστό
-   docker network).
-3. **Self-hosted runner τρέχει manual** (όχι μέσω systemd) — επιβιώνει
-   όσο δεν γίνει reboot. Recent deploys δουλεύουν κανονικά.
-   Recommendation: εφαρμογή του pattern που εφαρμόστηκε στο korifi-crm
-   (`/home/coolman/korifi-crm-v2/tools/migrate_runner_to_systemd.sh`)
-   προσαρμοσμένο για το `actions.runner.panoscoolman-beep-EduScheduler.*`
-   service — drop-in override με `Restart=on-failure`.
+2. ~~No authentication~~ ✅ **Resolved (2026-06-13):** fail-closed Bearer
+   auth σε όλα τα /api/* (`BearerTokenMiddleware`, `EDSCHEDULER_API_TOKEN`)·
+   δημόσιο μόνο το `/api/healthz`. ⚠️ Γνωστό όριο: το same-origin exemption
+   βασίζεται σε client-settable headers (Sec-Fetch-Site/Origin) — non-browser
+   caller μπορεί να τα πλαστογραφήσει· η ουσιαστική περίμετρος είναι το
+   firewall/Tailscale (APP-PORT-GUARD).
+3. ~~Self-hosted runner manual~~ ✅ **Resolved:** τρέχει μέσω systemd
+   (`actions.runner.panoscoolman-beep-EduScheduler.debian-edscheduler.service`)
+   με auto-restart, self-updated (v2.335+).
 4. **Frontend είναι vanilla JS** — λιγότερο maintainable από framework. Για
    τώρα δουλεύει — refactor σε React/Svelte θα ήταν επόμενη εργασία.
 

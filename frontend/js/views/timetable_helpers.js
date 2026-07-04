@@ -203,6 +203,144 @@ const TimetableHelpers = {
         `;
     },
 
+    /** Μικρό table CSS που συνοδεύει τα builder HTML (grid + modals). */
+    _tableCss() {
+        return `<style>
+              .fr-table { border-collapse: collapse; width: 100%; }
+              .fr-table th, .fr-table td { border: 1px solid var(--border-color, #ccc);
+                  padding: 6px 8px; font-size: 0.85rem; text-align: center; vertical-align: top; }
+              .fr-time { white-space: nowrap; }
+              .fr-count { font-weight: 700; margin-bottom: 2px; }
+              td.fr-none { opacity: 0.55; }
+            </style>`;
+    },
+
+    /**
+     * «Ελεύθερες Αίθουσες»: grid Ώρα × Ημέρα όπου κάθε κελί δείχνει ποιες
+     * αίθουσες ΔΕΝ έχουν μάθημα εκείνη τη στιγμή. Pure: slots της λύσης +
+     * περίοδοι + ΟΛΕΣ οι αίθουσες μέσα, HTML string έξω.
+     */
+    buildFreeRoomsHtml(slots, periods, daysCount, allRooms) {
+        const esc = this.esc.bind(this);
+        const dayNames = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        const days = [...Array(Math.min(daysCount, 7)).keys()];
+        const teaching = periods.filter(p => !p.is_break);
+        const roomNames = allRooms.map(r => r.name);
+
+        // (day, period_id) → Set κατειλημμένων αιθουσών
+        const busy = new Map();
+        for (const s of slots) {
+            if (s.is_unplaced || s.day_of_week === null || s.day_of_week === undefined) continue;
+            if (!s.classroom_name) continue;
+            const key = `${s.day_of_week}|${s.period_id}`;
+            if (!busy.has(key)) busy.set(key, new Set());
+            busy.get(key).add(s.classroom_name);
+        }
+
+        const header = days.map(d => `<th>${dayNames[d]}</th>`).join('');
+        const rows = teaching.map(p => {
+            const cells = days.map(d => {
+                const taken = busy.get(`${d}|${p.id}`) || new Set();
+                const free = roomNames.filter(n => !taken.has(n));
+                const badgeClass = free.length === 0 ? 'fr-none' : 'fr-some';
+                const list = free.length
+                    ? free.map(esc).join('<br>')
+                    : '<em>Καμία ελεύθερη</em>';
+                return `<td class="${badgeClass}"><div class="fr-count">${free.length}/${roomNames.length}</div>${list}</td>`;
+            }).join('');
+            return `<tr><th class="fr-time">${esc(p.start_time)}–${esc(p.end_time)}</th>${cells}</tr>`;
+        }).join('');
+
+        return `
+            ${this._tableCss()}
+            <table class="fr-table">
+              <thead><tr><th class="fr-time">Ώρα</th>${header}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table>`;
+    },
+
+    /**
+     * HTML αποτελεσμάτων του diff δύο λύσεων («τι άλλαξε;»). Pure.
+     * `diff` = το JSON του GET /api/solver/diff.
+     */
+    buildDiffResultHtml(diff) {
+        const esc = this.esc.bind(this);
+        const posLabel = (p) => `${esc(p.day_name)} ${esc(p.period_name)}`
+            + (p.room ? ` · 🏫 ${esc(p.room)}` : '');
+
+        const section = (title, items, line) => items.length
+            ? `<h4 style="margin:0.75rem 0 0.25rem">${title} (${items.length})</h4>
+               <ul style="margin:0; padding-left:1.2rem">${items.map(line).join('')}</ul>`
+            : '';
+
+        const moved = section('🔀 Μετακινήθηκαν', diff.moved, m =>
+            `<li><b>${esc(m.lesson)}</b> — ${posLabel(m.from)} → ${posLabel(m.to)}</li>`);
+        const added = section('➕ Προστέθηκαν', diff.added, a =>
+            `<li><b>${esc(a.lesson)}</b> — ${posLabel(a.at)}</li>`);
+        const removed = section('➖ Αφαιρέθηκαν', diff.removed, r =>
+            `<li><b>${esc(r.lesson)}</b> — ${posLabel(r.at)}</li>`);
+
+        const changedLoads = diff.teacher_load.filter(t => t.delta !== 0);
+        const loads = changedLoads.length
+            ? `<h4 style="margin:0.75rem 0 0.25rem">👤 Μεταβολή φόρτου</h4>
+               <table class="fr-table"><thead><tr><th>Καθηγητής</th><th>${esc(diff.base.name)}</th><th>${esc(diff.other.name)}</th><th>Δ</th></tr></thead>
+               <tbody>${changedLoads.map(t =>
+                   `<tr><td>${esc(t.teacher)}</td><td>${t.base_hours}</td><td>${t.other_hours}</td><td>${t.delta > 0 ? '+' : ''}${t.delta}</td></tr>`
+               ).join('')}</tbody></table>`
+            : '';
+
+        const nothing = !diff.moved.length && !diff.added.length && !diff.removed.length;
+        return `
+            ${this._tableCss()}
+            <div style="font-size:0.9rem; color:var(--text-secondary,#666)">
+                ${esc(diff.base.name)} → ${esc(diff.other.name)} ·
+                ${diff.unchanged_count} ώρες έμειναν ως είχαν
+            </div>
+            ${nothing ? '<p>✅ Καμία διαφορά στις τοποθετήσεις.</p>' : moved + added + removed}
+            ${loads}`;
+    },
+
+    /**
+     * HTML της αναφοράς παραβιάσεων soft constraints («γιατί αυτό το score;»).
+     * Pure. `rep` = το JSON του GET /api/solver/solutions/{id}/violations.
+     */
+    buildViolationsHtml(rep) {
+        const esc = this.esc.bind(this);
+        const s = rep.summary;
+        const badges = `
+            <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap">
+                <span class="constraint-badge ${s.gap_total ? 'hard' : 'soft'}">Κενά καθηγητών: ${s.gap_total}</span>
+                <span class="constraint-badge ${s.late_total ? 'hard' : 'soft'}">Αργές ώρες: ${s.late_total}</span>
+                <span class="constraint-badge soft">σ φόρτου: ${s.workload_stddev}</span>
+            </div>`;
+
+        const gaps = rep.teacher_gaps.length
+            ? `<h4 style="margin:0.5rem 0 0.25rem">🕳️ Κενά καθηγητών</h4>
+               <ul style="margin:0; padding-left:1.2rem">${rep.teacher_gaps.map(g =>
+                   `<li><b>${esc(g.teacher)}</b> — ${esc(g.day_name)}: κενό στη ${g.gap_periods.map(esc).join(', ')}</li>`
+               ).join('')}</ul>`
+            : '';
+
+        const late = rep.late_slots.length
+            ? `<h4 style="margin:0.75rem 0 0.25rem">🌙 Αργές ώρες</h4>
+               <ul style="margin:0; padding-left:1.2rem">${rep.late_slots.map(l =>
+                   `<li><b>${esc(l.subject)}</b> (${esc(l.class_name)}, ${esc(l.teacher)}) — ${esc(l.day_name)} ${esc(l.period_name)} ${esc(l.time)}</li>`
+               ).join('')}</ul>`
+            : '';
+
+        const work = rep.workload.length
+            ? `<h4 style="margin:0.75rem 0 0.25rem">⚖️ Φόρτος ανά καθηγητή</h4>
+               <table class="fr-table"><thead><tr><th>Καθηγητής</th><th>Ώρες</th></tr></thead>
+               <tbody>${rep.workload.map(w =>
+                   `<tr><td>${esc(w.teacher)}</td><td>${w.hours}</td></tr>`).join('')}</tbody></table>`
+            : '';
+
+        const clean = !rep.teacher_gaps.length && !rep.late_slots.length;
+        return this._tableCss() + badges
+            + (clean ? '<p>✅ Καμία παραβίαση soft constraint — καθαρή λύση.</p>' : gaps + late)
+            + work;
+    },
+
     /** Convert a #RRGGBB hex colour to an rgba() string at the given alpha. */
     hexToRgba(hex, alpha = 1) {
         const r = parseInt(hex.slice(1, 3), 16);

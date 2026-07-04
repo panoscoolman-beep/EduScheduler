@@ -140,6 +140,8 @@ const API = {
         historySummary: (solutionId) => API.get(`/solver/solutions/${solutionId}/history-summary`),
         substituteSuggestions: (solutionId, teacherId, dayOfWeek) =>
             API.get(`/solver/solutions/${solutionId}/substitute-suggestions?teacher_id=${teacherId}&day_of_week=${dayOfWeek}`),
+        diff: (baseId, otherId) => API.get(`/solver/diff?base_id=${baseId}&other_id=${otherId}`),
+        violations: (solutionId) => API.get(`/solver/solutions/${solutionId}/violations`),
     },
     settings: {
         get: () => API.get('/settings/'),

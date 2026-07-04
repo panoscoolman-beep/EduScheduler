@@ -43,17 +43,19 @@ const TermsView = {
         const host = document.getElementById('terms-list');
         host.innerHTML = `
             <table class="data-table">
-                <thead><tr><th>Σενάριο</th><th>Σύντομο</th><th>Κατάσταση</th><th style="text-align:right">Ενέργειες</th></tr></thead>
+                <thead><tr><th>Σενάριο</th><th>Σύντομο</th><th>Διάρκεια</th><th>Κατάσταση</th><th style="text-align:right">Ενέργειες</th></tr></thead>
                 <tbody>
                     ${terms.map(t => `
                         <tr>
                             <td><strong>${this._esc(t.name)}</strong></td>
                             <td>${this._esc(t.short_name || '—')}</td>
+                            <td>${t.start_date && t.end_date ? `${this._esc(t.start_date)} → ${this._esc(t.end_date)}` : '<span class="text-muted">—</span>'}</td>
                             <td>${t.is_active ? '<span class="constraint-badge soft">● Ενεργό</span>' : '<span class="text-muted">ανενεργό</span>'}</td>
                             <td style="text-align:right; white-space:nowrap">
                                 ${t.is_active ? '' : `<button class="btn btn-sm btn-secondary" data-act="activate" data-id="${t.id}">Ενεργοποίηση</button>`}
                                 <button class="btn btn-sm btn-secondary" data-act="clone" data-id="${t.id}" data-name="${this._esc(t.name)}">Αντιγραφή</button>
                                 <button class="btn btn-sm btn-secondary" data-act="shift" data-id="${t.id}" data-name="${this._esc(t.name)}">Μετατόπιση ωρών</button>
+                                <button class="btn btn-sm btn-secondary" data-act="dates" data-id="${t.id}" data-name="${this._esc(t.name)}" data-start="${t.start_date || ''}" data-end="${t.end_date || ''}">📅 Ημερομηνίες</button>
                                 <button class="btn btn-sm btn-danger" data-act="delete" data-id="${t.id}" data-name="${this._esc(t.name)}">Διαγραφή</button>
                             </td>
                         </tr>`).join('')}
@@ -66,6 +68,7 @@ const TermsView = {
 
     async _action(ds, container) {
         const id = parseInt(ds.id);
+        if (ds.act === 'dates') { this._openDates(id, ds, container); return; }
         if (ds.act === 'activate') {
             try {
                 await API.terms.activate(id);
@@ -105,6 +108,32 @@ const TermsView = {
                     await this.render(container);
                 } catch (err) { Toast.error(err.message); }
             }, { saveText: '🕐 Μετατόπιση' });
+    },
+
+    _openDates(id, ds, container) {
+        Modal.open(`📅 Διάρκεια — ${ds.name}`,  // textContent — όχι esc
+            `<p class="text-muted" style="margin-top:0">Τα όρια του σεναρίου μπαίνουν στο ICS export:
+                τα μαθήματα ξεκινούν/σταματούν στις σωστές ημερομηνίες στο ημερολόγιο
+                και εξαιρούνται οι ελληνικές αργίες.</p>
+             <div class="form-group">
+                <label class="form-label">Έναρξη</label>
+                <input class="form-input" id="term-start" type="date" value="${ds.start || ''}">
+             </div>
+             <div class="form-group">
+                <label class="form-label">Λήξη</label>
+                <input class="form-input" id="term-end" type="date" value="${ds.end || ''}">
+             </div>`,
+            async () => {
+                const start = document.getElementById('term-start').value || null;
+                const end = document.getElementById('term-end').value || null;
+                if (start && end && start > end) { Toast.error('Η έναρξη είναι μετά τη λήξη.'); return; }
+                try {
+                    await API.terms.update(id, { start_date: start, end_date: end });
+                    Toast.success('Οι ημερομηνίες αποθηκεύτηκαν');
+                    Modal.close();
+                    await this.render(container);
+                } catch (err) { Toast.error(err.message); }
+            }, { saveText: 'Αποθήκευση' });
     },
 
     _openCreate(container) {

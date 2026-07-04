@@ -160,3 +160,91 @@ test('buildParkingLotHtml: single slot uses the singular header', () => {
     assert.match(html, /Parking Lot — 1/);
     assert.match(html, /ώρα δεν τοποθετήθηκε/);     // singular
 });
+
+// ---------------------------------------------------------------------------
+// Νέοι builders (2026-07): ελεύθερες αίθουσες, diff λύσεων, αναφορά ποιότητας
+// ---------------------------------------------------------------------------
+
+const FR_PERIODS = [
+    { id: 11, start_time: '16:00', end_time: '16:50', is_break: false },
+    { id: 12, start_time: '17:00', end_time: '17:50', is_break: false },
+    { id: 13, start_time: '17:50', end_time: '18:00', is_break: true },
+];
+
+test('buildFreeRoomsHtml: free rooms per cell, occupied excluded, breaks skipped', () => {
+    const slots = [
+        { day_of_week: 0, period_id: 11, classroom_name: 'Αίθουσα 1', is_unplaced: false },
+        { day_of_week: 0, period_id: 11, classroom_name: 'Αίθουσα 2', is_unplaced: false },
+        { day_of_week: 1, period_id: 12, classroom_name: 'Αίθουσα 1', is_unplaced: false },
+        { day_of_week: null, period_id: null, classroom_name: 'Αίθουσα 2', is_unplaced: true },
+    ];
+    const rooms = [{ name: 'Αίθουσα 1' }, { name: 'Αίθουσα 2' }, { name: 'Εργαστήριο' }];
+    const html = H.buildFreeRoomsHtml(slots, FR_PERIODS, 5, rooms);
+    // Δευτέρα 16:00: μόνο το Εργαστήριο ελεύθερο (1/3).
+    assert.match(html, /1\/3/);
+    assert.match(html, /Εργαστήριο/);
+    // Το διάλειμμα (is_break) δεν εμφανίζεται ως γραμμή.
+    assert.ok(!html.includes('17:50–18:00'));
+    // Κελί χωρίς κανένα μάθημα: όλα ελεύθερα (3/3).
+    assert.match(html, /3\/3/);
+});
+
+test('buildFreeRoomsHtml: escapes room names', () => {
+    const html = H.buildFreeRoomsHtml([], FR_PERIODS, 5, [{ name: '<b>Κακό</b>' }]);
+    assert.ok(!html.includes('<b>Κακό</b>'));
+    assert.match(html, /&lt;b&gt;Κακό&lt;\/b&gt;/);
+});
+
+test('buildDiffResultHtml: moved/added/removed sections + load table with delta', () => {
+    const html = H.buildDiffResultHtml({
+        base: { id: 1, name: 'Πριν' }, other: { id: 2, name: 'Μετά' },
+        unchanged_count: 4,
+        moved: [{ lesson: 'Άλγεβρα (Β1)', teacher: 'Νίκος',
+                  from: { day_name: 'Τρίτη', period_name: '2η', room: 'Α1' },
+                  to: { day_name: 'Πέμπτη', period_name: '3η', room: '' } }],
+        added: [], removed: [],
+        teacher_load: [
+            { teacher: 'Νίκος', base_hours: 3, other_hours: 4, delta: 1 },
+            { teacher: 'Μαρία', base_hours: 2, other_hours: 2, delta: 0 },
+        ],
+    });
+    assert.match(html, /Μετακινήθηκαν \(1\)/);
+    assert.match(html, /Άλγεβρα \(Β1\)/);
+    assert.match(html, /Τρίτη 2η/);
+    assert.match(html, /4 ώρες έμειναν ως είχαν/);
+    assert.match(html, /\+1/);           // delta του Νίκου
+    assert.ok(!html.match(/Μαρία/));     // αμετάβλητος φόρτος δεν εμφανίζεται
+});
+
+test('buildDiffResultHtml: no differences → clean message', () => {
+    const html = H.buildDiffResultHtml({
+        base: { id: 1, name: 'A' }, other: { id: 2, name: 'B' },
+        unchanged_count: 9, moved: [], added: [], removed: [], teacher_load: [],
+    });
+    assert.match(html, /Καμία διαφορά/);
+});
+
+test('buildViolationsHtml: badges, named gaps and late slots', () => {
+    const html = H.buildViolationsHtml({
+        solution: { id: 1, name: 'Λ', score: 12 },
+        teacher_gaps: [{ teacher: 'Νίκος', day: 0, day_name: 'Δευτέρα', gap_periods: ['2η'] }],
+        late_slots: [{ day: 1, day_name: 'Τρίτη', period_name: '7η', time: '20:00–20:50',
+                       subject: 'Φυσική', class_name: 'Γ1', teacher: 'Μαρία' }],
+        workload: [{ teacher: 'Νίκος', hours: 12 }],
+        summary: { gap_total: 1, late_total: 1, workload_stddev: 1.5 },
+    });
+    assert.match(html, /Κενά καθηγητών: 1/);
+    assert.match(html, /Νίκος<\/b> — Δευτέρα/);
+    assert.match(html, /Φυσική/);
+    assert.match(html, /σ φόρτου: 1.5/);
+});
+
+test('buildViolationsHtml: clean solution message', () => {
+    const html = H.buildViolationsHtml({
+        solution: { id: 1, name: 'Λ', score: 0 },
+        teacher_gaps: [], late_slots: [],
+        workload: [{ teacher: 'Νίκος', hours: 5 }],
+        summary: { gap_total: 0, late_total: 0, workload_stddev: 0 },
+    });
+    assert.match(html, /καθαρή λύση/);
+});
