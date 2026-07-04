@@ -10,6 +10,6 @@ alembic==1.14.0
 openpyxl==3.1.5  # XLSX export ωρολογίου
 
 # Testing
-pytest==8.3.3
+pytest==9.0.3
 httpx==0.28.0  # for FastAPI TestClient
 pytest-asyncio==0.24.0
