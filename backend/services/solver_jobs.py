@@ -54,7 +54,9 @@ def _persist_solver_result(
     # otherwise only gets from a manual "Έλεγχος Εφικτότητας".
     if result.status == "infeasible":
         try:
-            report = check_feasibility(db).to_dict()
+            # Scoped στο σενάριο της λύσης — αλλιώς οι «λόγοι» θα
+            # υπολογίζονταν πάνω στην ένωση όλων των σεναρίων.
+            report = check_feasibility(db, term_id=solution.term_id).to_dict()
             stats["feasibility_errors"] = report.get("errors", [])
             stats["feasibility_warnings"] = report.get("warnings", [])
         except Exception:  # noqa: BLE001 — diagnostics must never break persistence

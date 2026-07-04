@@ -26,6 +26,7 @@ from backend.models import (
     Teacher,
     TeacherAvailability,
     TimetableSlot,
+    TimetableSolution,
 )
 
 
@@ -102,12 +103,25 @@ def find_substitutes(
         .all()
     )
     all_teachers = db.query(Teacher).filter(Teacher.id != teacher_id).all()
-    all_lessons = db.query(Lesson).all()
-    teacher_unavail = (
-        db.query(TeacherAvailability)
-        .filter(TeacherAvailability.status == "unavailable")
-        .all()
+    # Scenario scope (Terms Phase 1): lessons και availability κρίνονται μόνο
+    # στο σενάριο της λύσης — κώλυμα/φόρτος δηλωμένα σε άλλο σενάριο δεν
+    # πρέπει να αποκλείουν υποψήφιους ή να πετάνε reschedule slots.
+    solution_term_id = (
+        db.query(TimetableSolution.term_id)
+        .filter(TimetableSolution.id == solution_id)
+        .scalar()
     )
+    lessons_q = db.query(Lesson)
+    teacher_unavail_q = db.query(TeacherAvailability).filter(
+        TeacherAvailability.status == "unavailable"
+    )
+    if solution_term_id is not None:
+        lessons_q = lessons_q.filter(Lesson.term_id == solution_term_id)
+        teacher_unavail_q = teacher_unavail_q.filter(
+            TeacherAvailability.term_id == solution_term_id
+        )
+    all_lessons = lessons_q.all()
+    teacher_unavail = teacher_unavail_q.all()
     periods = (
         db.query(Period)
         .filter(Period.is_break == False)  # noqa: E712

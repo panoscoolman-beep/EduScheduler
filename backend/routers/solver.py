@@ -40,14 +40,15 @@ router = APIRouter()
 
 
 @router.get("/feasibility-check", response_model=FeasibilityReportResponse)
-def feasibility_check(db: Session = Depends(get_db)):
+def feasibility_check(term_id: int | None = None, db: Session = Depends(get_db)):
     """Run a fast pre-solve feasibility analysis without invoking CP-SAT.
 
     Helps the user catch over-constrained problems (overloaded teachers,
     missing labs, blocks too long for the school day) in milliseconds
     instead of waiting 30+ seconds for the solver to fail.
+    ?term_id= σκοπεύει συγκεκριμένο σενάριο (default: το ενεργό).
     """
-    return check_feasibility(db).to_dict()
+    return check_feasibility(db, term_id=term_id).to_dict()
 
 
 @router.post("/generate", response_model=SolverStatusResponse)

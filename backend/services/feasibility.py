@@ -25,6 +25,7 @@ from backend.models import (
     Teacher,
     TeacherAvailability,
 )
+from backend.services.term_context import get_active_term_id
 
 
 @dataclass
@@ -63,14 +64,38 @@ def _lesson_label(lesson: Lesson) -> str:
     return f"{subj} ({cls})"
 
 
-def check_feasibility(db: Session) -> FeasibilityReport:
-    """Run all pre-solve checks against the current DB state."""
+def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityReport:
+    """Run all pre-solve checks against ONE scenario's data.
+
+    term_id=None → το ενεργό σενάριο. Τα lessons και οι availability rows
+    είναι scenario-scoped (Terms Phase 1) — χωρίς το φίλτρο ο έλεγχος
+    άθροιζε τη ζήτηση/μη-διαθεσιμότητα ΟΛΩΝ των σεναρίων μαζί, δηλ. ψευδή
+    «δεν επαρκούν» μόλις υπάρξει δεύτερο σενάριο. Mirrors engine._load_data.
+    """
     report = FeasibilityReport()
+
+    if term_id is None:
+        term_id = get_active_term_id(db)
 
     teachers = db.query(Teacher).all()
     classes = db.query(SchoolClass).all()
     classrooms = db.query(Classroom).all()
-    lessons = db.query(Lesson).all()
+    lessons_q = db.query(Lesson)
+    teacher_unavail_q = db.query(TeacherAvailability).filter(
+        TeacherAvailability.status == "unavailable"
+    )
+    student_unavail_q = db.query(StudentAvailability).filter(
+        StudentAvailability.status == "unavailable"
+    )
+    if term_id is not None:
+        lessons_q = lessons_q.filter(Lesson.term_id == term_id)
+        teacher_unavail_q = teacher_unavail_q.filter(
+            TeacherAvailability.term_id == term_id
+        )
+        student_unavail_q = student_unavail_q.filter(
+            StudentAvailability.term_id == term_id
+        )
+    lessons = lessons_q.all()
     periods = (
         db.query(Period)
         .filter(Period.is_break == False)  # noqa: E712
@@ -81,17 +106,11 @@ def check_feasibility(db: Session) -> FeasibilityReport:
     settings = db.query(SchoolSettings).first()
     days_per_week = settings.days_per_week if settings else 5
 
-    teacher_unavail = (
-        db.query(TeacherAvailability)
-        .filter(TeacherAvailability.status == "unavailable")
-        .all()
-    )
-    student_unavail = (
-        db.query(StudentAvailability)
-        .filter(StudentAvailability.status == "unavailable")
-        .all()
-    )
+    teacher_unavail = teacher_unavail_q.all()
+    student_unavail = student_unavail_q.all()
     enrollments = db.query(StudentClassEnrollment).all()
+
+    report.stats["term_id"] = term_id
 
     n_periods = len(periods)
     report.stats["days_per_week"] = days_per_week

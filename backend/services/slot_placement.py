@@ -103,6 +103,10 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
     """
     solution_id = slot.solution_id
     slot_id = slot.id
+    # Η διαθεσιμότητα είναι scenario-scoped (Terms Phase 1): οι έλεγχοι 4/5
+    # πρέπει να κοιτούν ΜΟΝΟ το σενάριο της λύσης, αλλιώς κώλυμα δηλωμένο σε
+    # άλλο σενάριο μπλοκάρει λάθος τη μετακίνηση (ψευδές 400 στο drag&drop).
+    solution_term_id = slot.solution.term_id if slot.solution else None
 
     # Resolve a target classroom up front. Parking-lot slots have
     # classroom_id=NULL; if the caller didn't provide one in the body
@@ -156,9 +160,9 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
     elif room_conflict:
         raise HTTPException(status_code=400, detail="Η αίθουσα είναι κατειλημμένη αυτή τη μέρα/ώρα.")
 
-    # 4. Teacher availability
+    # 4. Teacher availability (scoped στο σενάριο της λύσης)
     if slot.lesson.teacher_id:
-        teacher_unav = (
+        teacher_unav_q = (
             db.query(TeacherAvailability)
             .filter(
                 TeacherAvailability.teacher_id == slot.lesson.teacher_id,
@@ -166,8 +170,12 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
                 TeacherAvailability.period_id == data.period_id,
                 TeacherAvailability.status == "unavailable",
             )
-            .first()
         )
+        if solution_term_id is not None:
+            teacher_unav_q = teacher_unav_q.filter(
+                TeacherAvailability.term_id == solution_term_id
+            )
+        teacher_unav = teacher_unav_q.first()
         if teacher_unav:
             raise HTTPException(status_code=400, detail="Ο καθηγητής έχει δηλώσει κώλυμα (Μη Διαθέσιμος) αυτή τη μέρα και ώρα.")
 
@@ -180,7 +188,7 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
             .all()
         ]
         if enrolled_student_ids:
-            student_unav = (
+            student_unav_q = (
                 db.query(StudentAvailability)
                 .filter(
                     StudentAvailability.student_id.in_(enrolled_student_ids),
@@ -188,8 +196,12 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
                     StudentAvailability.period_id == data.period_id,
                     StudentAvailability.status == "unavailable",
                 )
-                .first()
             )
+            if solution_term_id is not None:
+                student_unav_q = student_unav_q.filter(
+                    StudentAvailability.term_id == solution_term_id
+                )
+            student_unav = student_unav_q.first()
             if student_unav:
                 raise HTTPException(status_code=400, detail="Ένας ή περισσότεροι μαθητές του τμήματος έχουν δηλώσει κώλυμα αυτή τη μέρα και ώρα.")
 
