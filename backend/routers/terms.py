@@ -99,7 +99,10 @@ def shift_times(term_id: int, data: TermShiftRequest, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Το σενάριο δεν βρέθηκε")
     if data.offset == 0:
         raise HTTPException(status_code=400, detail="Η μετατόπιση δεν μπορεί να είναι 0.")
-    res = term_time_shift.shift_term_times(db, term_id, data.offset, data.shift_solutions)
+    try:
+        res = term_time_shift.shift_term_times(db, term_id, data.offset, data.shift_solutions)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
     return {"status": "ok", **res}
 

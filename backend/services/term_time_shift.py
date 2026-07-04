@@ -33,8 +33,19 @@ def _build_period_map(db: Session, offset: int):
 
 
 def shift_term_times(db: Session, term_id: int, offset: int, shift_solutions: bool = True) -> dict:
-    """Apply a uniform period offset to a term. Caller commits. Returns counts."""
-    target, _ = _build_period_map(db, offset)
+    """Apply a uniform period offset to a term. Caller commits. Returns counts.
+
+    Raises ValueError για offset που δεν αφήνει ΚΑΜΙΑ ώρα εντός εύρους —
+    θα διέγραφε όλη τη διαθεσιμότητα και θα ξεκρέμαγε όλα τα slots του
+    σεναρίου με ένα κλικ, χωρίς undo. (Το Pydantic bound ±20 δεν προστατεύει:
+    με 14 διδακτικές ώρες ένα +14 είναι εντός bound και ολικά καταστροφικό.)
+    """
+    target, n_periods = _build_period_map(db, offset)
+    if n_periods and abs(offset) >= n_periods:
+        raise ValueError(
+            f"Μετατόπιση κατά {offset:+d} με μόνο {n_periods} διδακτικές ώρες "
+            "θα έβγαζε ΟΛΕΣ τις ώρες του σεναρίου εκτός εύρους — καμία αλλαγή."
+        )
     res = {"availability_moved": 0, "availability_dropped": 0,
            "slots_moved": 0, "slots_unplaced": 0}
 
