@@ -360,6 +360,12 @@ const TimetableView = {
                 }
             };
 
+            // Bug fix: μετά από χειροκίνητη αλλαγή (drop/swap/unplace/lock)
+            // τα κουμπιά Undo/Redo έμεναν στην αρχική τους κατάσταση — αν η
+            // προβολή ξεκινούσε χωρίς ιστορικό, το Ctrl+Z έμενε νεκρό μέχρι
+            // το επόμενο πλήρες re-render. Το TimetableGrid ειδοποιεί εδώ.
+            this._refreshHistoryButtons = refreshHistoryButtons;
+
             undoBtn.addEventListener('click', () => performUndoRedo('undo'));
             redoBtn.addEventListener('click', () => performUndoRedo('redo'));
             this._historyKeyHandler = (e) => {
@@ -557,6 +563,7 @@ const TimetableView = {
             Toast.success(`Τοποθετήθηκε: ${dayName} ${period ? period.short_name : ''}${room}`);
             this.refreshPalette();
             if (this._rerenderGrid) this._rerenderGrid();
+            if (this._refreshHistoryButtons) this._refreshHistoryButtons();
         } catch (err) {
             Toast.error('Αποτυχία τοποθέτησης: ' + err.message);
         }

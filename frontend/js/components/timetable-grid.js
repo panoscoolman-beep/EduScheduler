@@ -347,7 +347,7 @@ const TimetableGrid = {
                 <p style="margin-bottom:0.5rem">👨‍🏫 <strong>Καθηγητής:</strong> ${slot.teacher_name || slot.teacher_short || '-'}</p>
                 <p style="margin-bottom:0.5rem">🎓 <strong>Τάξη:</strong> ${slot.class_name || slot.class_short || '-'}</p>
                 <p style="margin-bottom:0.5rem">🏫 <strong>Αίθουσα:</strong> ${slot.classroom_name || '-'}</p>
-                <p style="margin-bottom:0.5rem">📅 <strong>Ημέρα:</strong> ${days[slot.day_of_week]}</p>
+                <p style="margin-bottom:0.5rem">📅 <strong>Ημέρα:</strong> ${slot.is_unplaced ? '🅿️ Στην Παλέτα (μη τοποθετημένο)' : (days[slot.day_of_week] ?? '-')}</p>
                 ${unplaceBtn}
             </div>
         `;
@@ -384,6 +384,7 @@ const TimetableGrid = {
                 if (TimetableView.refreshPalette) TimetableView.refreshPalette();
                 if (TimetableView._rerenderGrid) TimetableView._rerenderGrid();
             }
+            this._notifyHistoryChanged();
         } catch (err) {
             Toast.error('Αποτυχία αφαίρεσης: ' + err.message);
         }
@@ -660,6 +661,7 @@ const TimetableGrid = {
             if (wasParkingCard) {
                 this._notifyParkingLotChanged();
             }
+            this._notifyHistoryChanged();
         } catch (err) {
             // 3) Rollback the optimistic move
             if (originalNextSibling) {
@@ -724,8 +726,20 @@ const TimetableGrid = {
             if (typeof TimetableView !== 'undefined' && TimetableView._rerenderGrid) {
                 TimetableView._rerenderGrid();
             }
+            this._notifyHistoryChanged();
         } catch (err) {
             Toast.error('Αποτυχία ανταλλαγής: ' + err.message);
+        }
+    },
+
+    /**
+     * Κάθε επιτυχημένο χειροκίνητο edit (drop/swap/unplace/lock) αλλάζει
+     * το undo ιστορικό — φρεσκάρισε τα κουμπιά Αναίρεση/Επανάληψη ώστε
+     * το Ctrl+Z να δουλεύει αμέσως, όχι μετά το επόμενο re-render.
+     */
+    _notifyHistoryChanged() {
+        if (typeof TimetableView !== 'undefined' && TimetableView._refreshHistoryButtons) {
+            TimetableView._refreshHistoryButtons();
         }
     },
 
@@ -824,6 +838,7 @@ const TimetableGrid = {
             // Sync the in-memory slots array so a view/filter change keeps the lock.
             this._syncSlot(slotId, { is_locked: newLockedValue });
             Toast.success(newLockedValue ? '🔒 Κλειδώθηκε' : '🔓 Ξεκλειδώθηκε');
+            this._notifyHistoryChanged();
         } catch (err) {
             // 3) Rollback the optimistic flip
             btn.textContent = newLockedValue ? '🔓' : '🔒';
