@@ -453,7 +453,17 @@ def update_solution_slot(
     db.commit()
     # Return the new state so the frontend can keep its in-memory copy in sync
     # (esp. classroom_id, which the server may have auto-reassigned on conflict).
-    return {"status": "ok", "message": "Το slot ενημερώθηκε", "slot": {"id": slot.id, **new_state}}
+    # classroom_name included so the card/toast can show the new room without
+    # a full re-fetch.
+    room_name = None
+    if slot.classroom_id is not None:
+        room = db.query(Classroom).filter(Classroom.id == slot.classroom_id).first()
+        room_name = room.name if room else None
+    return {
+        "status": "ok",
+        "message": "Το slot ενημερώθηκε",
+        "slot": {"id": slot.id, **new_state, "classroom_name": room_name},
+    }
 
 
 @router.post("/solutions/{solution_id}/undo")

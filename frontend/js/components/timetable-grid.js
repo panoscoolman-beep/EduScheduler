@@ -447,6 +447,8 @@ const TimetableGrid = {
             period_id: slotData.period_id,
             is_unplaced: slotData.is_unplaced,
         };
+        const prevRoomId = slotData.classroom_id;
+        const prevRoomName = slotData.classroom_name || '';
 
         // 1) Optimistic move
         target.appendChild(sourceCard);
@@ -473,15 +475,38 @@ const TimetableGrid = {
                 day_of_week: newDay,
                 period_id: newPeriod,
             });
+            // Ο server μπορεί να άλλαξε αίθουσα (auto-reassign όταν η
+            // τρέχουσα είναι κατειλημμένη στη νέα ώρα) — πέρνα id + όνομα
+            // στην κάρτα ώστε να μη δείχνει την παλιά αίθουσα.
+            const newRoom = (res && res.slot) ? res.slot : null;
+            const roomChanged = !!newRoom && prevRoomId != null
+                && newRoom.classroom_id !== prevRoomId;
+            if (newRoom && newRoom.classroom_id != null) {
+                slotData.classroom_id = newRoom.classroom_id;
+                if (newRoom.classroom_name) slotData.classroom_name = newRoom.classroom_name;
+                sourceCard.dataset.json = JSON.stringify(slotData);
+                // Το .room-name span δείχνει την αίθουσα σε όλα τα views
+                // ΕΚΤΟΣ του room view (εκεί έχει τον καθηγητή) — άγγιξέ το
+                // μόνο αν έδειχνε όντως την προηγούμενη αίθουσα.
+                const roomEl = sourceCard.querySelector('.room-name');
+                if (roomEl && newRoom.classroom_name
+                    && roomEl.textContent.trim() === prevRoomName.trim()) {
+                    roomEl.textContent = newRoom.classroom_name;
+                }
+            }
             // Keep the in-memory slots array in sync so switching view/filter
             // (which re-renders from it WITHOUT re-fetching) doesn't revert it.
             this._syncSlot(slotId, {
                 day_of_week: newDay,
                 period_id: newPeriod,
                 is_unplaced: false,
-                classroom_id: (res && res.slot) ? res.slot.classroom_id : undefined,
+                classroom_id: newRoom ? newRoom.classroom_id : undefined,
+                classroom_name: (newRoom && newRoom.classroom_name)
+                    ? newRoom.classroom_name : undefined,
             });
-            Toast.success('Η κάρτα μετακινήθηκε επιτυχώς!');
+            Toast.success(roomChanged
+                ? `Μετακινήθηκε — άλλαξε αίθουσα σε «${slotData.classroom_name}» (η προηγούμενη ήταν κατειλημμένη)`
+                : 'Η κάρτα μετακινήθηκε επιτυχώς!');
             if (wasParkingCard) {
                 this._notifyParkingLotChanged();
             }

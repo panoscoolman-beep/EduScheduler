@@ -277,6 +277,163 @@ def test_grid_to_grid_drop_keeps_existing_classroom(client):
 
 
 # ---------------------------------------------------------------------------
+# Auto room-reassign για ΤΟΠΟΘΕΤΗΜΕΝΕΣ κάρτες — grid→grid move όταν η
+# τρέχουσα αίθουσα είναι κατειλημμένη στη νέα μέρα/ώρα
+# ---------------------------------------------------------------------------
+
+def _occupy_room_at(client, day, period_id, room_id, tag):
+    """Occupy (day, period, room) with an unrelated teacher+class so that
+    ONLY the classroom check can fire for the slot under test."""
+    t = Teacher(name=f"TB-{tag}", short_name=f"TB{tag}", color="#000")
+    c = SchoolClass(name=f"BB-{tag}", short_name=f"BB{tag}")
+    client.session.add_all([t, c])
+    client.session.commit()
+    client.session.refresh(t)
+    client.session.refresh(c)
+    bl = Lesson(
+        subject_id=client.subj.id, teacher_id=t.id, class_id=c.id,
+        classroom_id=room_id, periods_per_week=1, duration=1,
+    )
+    client.session.add(bl)
+    client.session.commit()
+    client.session.refresh(bl)
+    client.session.add(
+        TimetableSlot(
+            solution_id=client.sol.id, lesson_id=bl.id, day_of_week=day,
+            period_id=period_id, classroom_id=room_id, is_unplaced=False,
+        )
+    )
+    client.session.commit()
+
+
+def _make_placed_slot(client, lesson, day, room_id):
+    slot = TimetableSlot(
+        solution_id=client.sol.id, lesson_id=lesson.id, day_of_week=day,
+        period_id=client.period.id, classroom_id=room_id, is_unplaced=False,
+    )
+    client.session.add(slot)
+    client.session.commit()
+    client.session.refresh(slot)
+    return slot
+
+
+def test_grid_move_reassigns_room_when_current_is_busy(client):
+    """Μετακίνηση τοποθετημένης κάρτας σε ώρα όπου η αίθουσά της είναι
+    κατειλημμένη → ο server αλλάζει αυτόματα σε ελεύθερη αίθουσα αντί
+    για 400 (ίδιο fallback με τις parking-lot κάρτες)."""
+    r2 = Classroom(name="R2", short_name="R2", room_type="regular")
+    client.session.add(r2)
+    client.session.commit()
+    client.session.refresh(r2)
+
+    lesson = Lesson(
+        subject_id=client.subj.id, teacher_id=client.teacher.id,
+        class_id=client.cls.id, classroom_id=None,
+        periods_per_week=1, duration=1,
+    )
+    client.session.add(lesson)
+    client.session.commit()
+    client.session.refresh(lesson)
+
+    # Η κάρτα μας είναι στην R1 τη μέρα 2· η R1 είναι πιασμένη τη μέρα 0.
+    slot = _make_placed_slot(client, lesson, day=2, room_id=client.regular.id)
+    _occupy_room_at(client, day=0, period_id=client.period.id,
+                    room_id=client.regular.id, tag="a")
+
+    res = client.put(
+        f"/api/solver/solutions/{client.sol.id}/slots/{slot.id}",
+        json={"day_of_week": 0, "period_id": client.period.id},
+    )
+    assert res.status_code == 200, res.text
+    client.session.refresh(slot)
+    assert slot.day_of_week == 0
+    assert slot.classroom_id == r2.id
+    # Το response δίνει και το όνομα της νέας αίθουσας για το UI toast.
+    assert res.json()["slot"]["classroom_id"] == r2.id
+    assert res.json()["slot"]["classroom_name"] == "R2"
+
+
+def test_grid_move_explicit_busy_room_still_rejected(client):
+    """Ρητό classroom_id στο body = ο χρήστης διάλεξε συγκεκριμένη αίθουσα.
+    Αν είναι κατειλημμένη, παραμένει σκληρό σφάλμα — όχι σιωπηλή αλλαγή."""
+    r2 = Classroom(name="R2", short_name="R2", room_type="regular")
+    client.session.add(r2)
+    client.session.commit()
+    client.session.refresh(r2)
+
+    lesson = Lesson(
+        subject_id=client.subj.id, teacher_id=client.teacher.id,
+        class_id=client.cls.id, classroom_id=None,
+        periods_per_week=1, duration=1,
+    )
+    client.session.add(lesson)
+    client.session.commit()
+    client.session.refresh(lesson)
+
+    slot = _make_placed_slot(client, lesson, day=2, room_id=r2.id)
+    _occupy_room_at(client, day=0, period_id=client.period.id,
+                    room_id=client.regular.id, tag="b")
+
+    res = client.put(
+        f"/api/solver/solutions/{client.sol.id}/slots/{slot.id}",
+        json={"day_of_week": 0, "period_id": client.period.id,
+              "classroom_id": client.regular.id},
+    )
+    assert res.status_code == 400
+    assert "κατειλημμένη" in res.json()["detail"]
+
+
+def test_grid_move_all_rooms_busy_rejected(client):
+    """Αν ΟΛΕΣ οι αίθουσες είναι πιασμένες στη νέα μέρα/ώρα, η μετακίνηση
+    απορρίπτεται με σαφές μήνυμα."""
+    lesson = Lesson(
+        subject_id=client.subj.id, teacher_id=client.teacher.id,
+        class_id=client.cls.id, classroom_id=None,
+        periods_per_week=1, duration=1,
+    )
+    client.session.add(lesson)
+    client.session.commit()
+    client.session.refresh(lesson)
+
+    slot = _make_placed_slot(client, lesson, day=2, room_id=client.regular.id)
+    # Πιάνουμε ΚΑΙ τις δύο αίθουσες του fixture (R1 regular + L1 lab).
+    _occupy_room_at(client, day=0, period_id=client.period.id,
+                    room_id=client.regular.id, tag="c")
+    _occupy_room_at(client, day=0, period_id=client.period.id,
+                    room_id=client.lab.id, tag="d")
+
+    res = client.put(
+        f"/api/solver/solutions/{client.sol.id}/slots/{slot.id}",
+        json={"day_of_week": 0, "period_id": client.period.id},
+    )
+    assert res.status_code == 400
+    assert "Όλες οι αίθουσες" in res.json()["detail"]
+
+
+def test_grid_move_lab_lesson_never_falls_back_to_regular(client):
+    """Μάθημα που απαιτεί lab δεν επιτρέπεται να «σωθεί» σε regular
+    αίθουσα — αν το μόνο lab είναι πιασμένο, η μετακίνηση απορρίπτεται."""
+    lesson = Lesson(
+        subject_id=client.lab_subj.id, teacher_id=client.teacher.id,
+        class_id=client.cls.id, classroom_id=None,
+        periods_per_week=1, duration=1,
+    )
+    client.session.add(lesson)
+    client.session.commit()
+    client.session.refresh(lesson)
+
+    slot = _make_placed_slot(client, lesson, day=2, room_id=client.lab.id)
+    _occupy_room_at(client, day=0, period_id=client.period.id,
+                    room_id=client.lab.id, tag="e")
+
+    res = client.put(
+        f"/api/solver/solutions/{client.sol.id}/slots/{slot.id}",
+        json={"day_of_week": 0, "period_id": client.period.id},
+    )
+    assert res.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # H7 — shared-student conflict on manual move
 # ---------------------------------------------------------------------------
 

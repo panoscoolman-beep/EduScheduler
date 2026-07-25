@@ -147,18 +147,21 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
         if conflict_query.filter(Lesson.class_id == slot.lesson.class_id).first():
             raise HTTPException(status_code=400, detail="Η συγκεκριμένη τάξη κάνει ήδη άλλο μάθημα αυτή τη μέρα/ώρα.")
 
-    # 3. Classroom conflict — try to fall back to another room if the
-    # auto-picked one is busy
+    # 3. Classroom conflict. Ρητό classroom_id στο body σημαίνει «θέλω ΑΥΤΗ
+    # την αίθουσα», οπότε το conflict παραμένει σκληρό σφάλμα. Χωρίς ρητή
+    # επιλογή (το drag&drop στέλνει μόνο μέρα/ώρα) η κατειλημμένη αίθουσα δεν
+    # είναι αδιέξοδο: δοκιμάζουμε οποιαδήποτε άλλη ελεύθερη — ισχύει και για
+    # ήδη τοποθετημένες κάρτες, όχι μόνο για parking-lot (classroom_id NULL).
     room_conflict = conflict_query.filter(TimetableSlot.classroom_id == target_room).first()
-    if room_conflict and data.classroom_id is None and slot.classroom_id is None:
+    if room_conflict and data.classroom_id is not None:
+        raise HTTPException(status_code=400, detail="Η αίθουσα είναι κατειλημμένη αυτή τη μέρα/ώρα.")
+    if room_conflict:
         target_room = pick_default_classroom(
             db, slot.lesson,
             exclude_room_ids=busy_room_ids(db, solution_id, data.day_of_week, data.period_id, slot_id),
         )
         if target_room is None:
             raise HTTPException(status_code=400, detail="Όλες οι αίθουσες είναι κατειλημμένες αυτή τη μέρα/ώρα.")
-    elif room_conflict:
-        raise HTTPException(status_code=400, detail="Η αίθουσα είναι κατειλημμένη αυτή τη μέρα/ώρα.")
 
     # 4. Teacher availability (scoped στο σενάριο της λύσης)
     if slot.lesson.teacher_id:
