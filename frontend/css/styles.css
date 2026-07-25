@@ -1299,3 +1299,17 @@ a:hover { color: var(--accent-blue-hover); }
 .palette-missing .palette-sync-btn {
     margin-top: 6px;
 }
+
+/* ─── Γκρίζα κελιά κατά το σύρσιμο (placement map) ──────────────────── */
+.droppable-cell.cell-blocked {
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(107, 114, 128, 0.10) 0 6px,
+        rgba(107, 114, 128, 0.20) 6px 12px
+    );
+    cursor: not-allowed;
+}
+.droppable-cell.cell-blocked .lesson-card {
+    opacity: 0.45;
+    filter: grayscale(0.7);
+}

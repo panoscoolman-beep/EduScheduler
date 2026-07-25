@@ -469,6 +469,18 @@ const TimetableHelpers = {
         return { entries, totals };
     },
 
+    /**
+     * Index a placement-map cell list by "day:period_id" for O(1) lookup
+     * while shading the grid during a drag. Pure.
+     */
+    indexPlacementMap(cells) {
+        const idx = new Map();
+        for (const c of cells || []) {
+            idx.set(`${c.day}:${c.period_id}`, { ok: !!c.ok, reason: c.reason || null });
+        }
+        return idx;
+    },
+
     /** One palette card. Split out of buildLessonPaletteHtml for readability. */
     _paletteCardHtml(e) {
         const esc = TimetableHelpers.esc;

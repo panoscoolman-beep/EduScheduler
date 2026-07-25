@@ -8,6 +8,7 @@ const TimetableGrid = {
         const container = document.getElementById(containerId);
         if (!container) return;
         this._slots = slots;  // keep a reference so edits stay in sync on re-render
+        this._solutionId = solutionId;  // needed by the drag placement-map fetch
 
         const teachingPeriods = periods.filter(p => !p.is_break);
         const days = this.DAY_NAMES.slice(0, daysCount);
@@ -164,6 +165,7 @@ const TimetableGrid = {
         const container = document.getElementById(containerId);
         if (!container) return;
         this._slots = slots;  // keep a reference so edits stay in sync on re-render
+        this._solutionId = solutionId;  // needed by the drag placement-map fetch
 
         const SEP = '\x1f'; // unit separator — safe composite-key delimiter
         const esc = (s) => String(s == null ? '' : s)
@@ -347,15 +349,59 @@ const TimetableGrid = {
         event.dataTransfer.setData('text/plain', slotId);
         event.dataTransfer.effectAllowed = 'move';
         event.target.classList.add('dragging');
+        this._loadPlacementMap(slotId);
     },
 
     handleDragEnd(event) {
         event.target.classList.remove('dragging');
         document.querySelectorAll('.droppable-cell').forEach(c => c.classList.remove('drag-over'));
+        this._clearPlacementMap();
+    },
+
+    /**
+     * Γκρίζα κελιά κατά το σύρσιμο: φέρε το placement map της κάρτας και
+     * σκίασε τα κελιά όπου δεν μπορεί να πέσει (με αιτία σε tooltip).
+     * Καθαρά advisory — αν το fetch αργήσει ή αποτύχει, το σύρσιμο απλώς
+     * δουλεύει όπως πριν και ο server κρίνει στο drop. Το token guard
+     * πετάει απαντήσεις που φτάνουν μετά το dragend (stale).
+     */
+    async _loadPlacementMap(slotId) {
+        if (!this._solutionId) return;
+        const token = (this._mapToken = (this._mapToken || 0) + 1);
+        try {
+            const map = await API.solver.placementMap(this._solutionId, slotId);
+            if (token !== this._mapToken) return;  // η λαβή άλλαξε/τελείωσε
+            const idx = TimetableHelpers.indexPlacementMap(map.cells);
+            document.querySelectorAll('.droppable-cell').forEach(cell => {
+                const info = idx.get(`${cell.dataset.day}:${cell.dataset.period}`);
+                if (info && !info.ok) {
+                    cell.classList.add('cell-blocked');
+                    if (info.reason) cell.title = info.reason;
+                }
+            });
+        } catch (err) {
+            // Σιωπηλά: χωρίς σκίαση, το drop παραμένει ο enforcer.
+        }
+    },
+
+    _clearPlacementMap() {
+        this._mapToken = (this._mapToken || 0) + 1;  // invalidate in-flight fetch
+        document.querySelectorAll('.droppable-cell.cell-blocked').forEach(c => {
+            c.classList.remove('cell-blocked');
+            c.removeAttribute('title');
+        });
     },
 
     handleDragOver(event) {
-        event.preventDefault(); 
+        let target = event.target;
+        while (target && !target.classList.contains('droppable-cell')) target = target.parentElement;
+        if (target && target.classList.contains('cell-blocked')) {
+            // Χωρίς preventDefault το κελί ΔΕΝ είναι drop target — ο browser
+            // δείχνει 🚫 και το drop δεν πυροδοτείται εδώ.
+            event.dataTransfer.dropEffect = 'none';
+            return;
+        }
+        event.preventDefault();
         event.dataTransfer.dropEffect = 'move';
     },
 
@@ -363,7 +409,7 @@ const TimetableGrid = {
         event.preventDefault();
         let target = event.target;
         while (target && !target.classList.contains('droppable-cell')) target = target.parentElement;
-        if (target) target.classList.add('drag-over');
+        if (target && !target.classList.contains('cell-blocked')) target.classList.add('drag-over');
     },
 
     handleDragLeave(event) {

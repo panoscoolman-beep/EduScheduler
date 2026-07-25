@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from backend.models import (
     Classroom,
     Lesson,
+    Period,
+    SchoolSettings,
     StudentAvailability,
     StudentClassEnrollment,
     TeacherAvailability,
@@ -212,7 +214,9 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
     # student must not run at the same (day, period). The solver enforces
     # this when generating; the manual editor bypasses the solver, so we
     # re-check it here (different teacher AND room would pass every other
-    # check).
+    # check). ΣΥΓΧΡΟΝΙΣΜΟΣ: το build_placement_map παρακάτω καθρεφτίζει
+    # ΟΛΟΥΣ αυτούς τους ελέγχους σε bulk — αν προστεθεί έλεγχος εδώ,
+    # πρόσθεσέ τον και εκεί (τα agreement tests το κλειδώνουν).
     if enrolled_student_ids:
         other_class_ids = {
             cid for (cid,) in conflict_query
@@ -237,3 +241,150 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
                 )
 
     return target_room
+
+
+def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
+    """Advisory per-cell legality map for dragging `slot` across the grid.
+
+    Για κάθε (μέρα, διδακτική ώρα) απαντά αν το slot μπορεί να πέσει εκεί
+    και γιατί όχι — ίδιοι έλεγχοι με το resolve_and_validate_target_room
+    (τον enforcer του drop), υπολογισμένοι μαζικά με προφορτωμένο context
+    αντί για per-cell queries. Read-only: δεν αγγίζει τίποτα.
+
+    Συμφωνία με τον enforcer: κλειδωμένη από τα agreement tests στο
+    tests/test_placement_map.py — κάθε «ok» κελί δέχεται το PUT, κάθε
+    «μπλοκαρισμένο» απορρίπτεται. Αν αλλάξεις έλεγχο στο ένα, άλλαξε
+    και το άλλο.
+    """
+    lesson = slot.lesson
+    solution_id = slot.solution_id
+    term_id = slot.solution.term_id if slot.solution else None
+
+    settings = db.query(SchoolSettings).first()
+    days_count = settings.days_per_week if settings else 5
+    periods = (
+        db.query(Period)
+        .filter(Period.is_break == False)  # noqa: E712
+        .order_by(Period.sort_order)
+        .all()
+    )
+
+    # Όλα τα ΑΛΛΑ τοποθετημένα slots της λύσης, με ταυτότητα μαθήματος.
+    others = (
+        db.query(
+            TimetableSlot.day_of_week,
+            TimetableSlot.period_id,
+            TimetableSlot.classroom_id,
+            Lesson.teacher_id,
+            Lesson.class_id,
+        )
+        .join(Lesson)
+        .filter(
+            TimetableSlot.solution_id == solution_id,
+            TimetableSlot.id != slot.id,
+            TimetableSlot.is_unplaced == False,  # noqa: E712
+        )
+        .all()
+    )
+
+    teacher_busy: set = set()
+    class_busy: set = set()
+    rooms_busy: dict = {}
+    classes_at: dict = {}
+    for day, pid, room_id, t_id, c_id in others:
+        cell = (day, pid)
+        if lesson.teacher_id and t_id == lesson.teacher_id:
+            teacher_busy.add(cell)
+        if lesson.class_id and c_id == lesson.class_id:
+            class_busy.add(cell)
+        if room_id is not None:
+            rooms_busy.setdefault(cell, set()).add(room_id)
+        if c_id is not None and c_id != lesson.class_id:
+            classes_at.setdefault(cell, set()).add(c_id)
+
+    # Κώλυμα καθηγητή (scoped στο σενάριο της λύσης — βλ. check 4).
+    teacher_unav: set = set()
+    if lesson.teacher_id:
+        q = db.query(
+            TeacherAvailability.day_of_week, TeacherAvailability.period_id
+        ).filter(
+            TeacherAvailability.teacher_id == lesson.teacher_id,
+            TeacherAvailability.status == "unavailable",
+        )
+        if term_id is not None:
+            q = q.filter(TeacherAvailability.term_id == term_id)
+        teacher_unav = {(d, p) for d, p in q.all()}
+
+    # Κωλύματα εγγεγραμμένων μαθητών (check 5) + κοινοί μαθητές για H7.
+    enrolled_student_ids: list[int] = []
+    if lesson.class_id:
+        enrolled_student_ids = [
+            sid for (sid,) in db.query(StudentClassEnrollment.student_id)
+            .filter(StudentClassEnrollment.class_id == lesson.class_id)
+            .all()
+        ]
+    student_unav: set = set()
+    if enrolled_student_ids:
+        q = db.query(
+            StudentAvailability.day_of_week, StudentAvailability.period_id
+        ).filter(
+            StudentAvailability.student_id.in_(enrolled_student_ids),
+            StudentAvailability.status == "unavailable",
+        )
+        if term_id is not None:
+            q = q.filter(StudentAvailability.term_id == term_id)
+        student_unav = {(d, p) for d, p in q.all()}
+
+    shared_classes: set = set()
+    if enrolled_student_ids and classes_at:
+        all_other_class_ids = set().union(*classes_at.values())
+        rows = (
+            db.query(StudentClassEnrollment.class_id)
+            .filter(
+                StudentClassEnrollment.class_id.in_(all_other_class_ids),
+                StudentClassEnrollment.student_id.in_(enrolled_student_ids),
+            )
+            .distinct()
+            .all()
+        )
+        shared_classes = {cid for (cid,) in rows}
+
+    # Αποδεκτές αίθουσες — καθρέφτης του pick_default_classroom:
+    # μάθημα με special room απαιτεί αίθουσα του τύπου (ή τη δική του
+    # καρφωμένη)· αλλιώς κάνει οποιαδήποτε (fallback «any room»).
+    rooms = db.query(Classroom).all()
+    if lesson.subject and lesson.subject.requires_special_room:
+        acceptable_rooms = {
+            r.id for r in rooms
+            if r.room_type == lesson.subject.special_room_type
+        }
+        if lesson.classroom_id:
+            acceptable_rooms.add(lesson.classroom_id)
+    else:
+        acceptable_rooms = {r.id for r in rooms}
+
+    cells = []
+    for day in range(days_count):
+        for p in periods:
+            cell = (day, p.id)
+            reason = None
+            if cell in teacher_busy:
+                reason = "Ο καθηγητής διδάσκει ήδη εκείνη την ώρα"
+            elif cell in class_busy:
+                reason = "Το τμήμα έχει ήδη μάθημα εκείνη την ώρα"
+            elif cell in teacher_unav:
+                reason = "Κώλυμα καθηγητή"
+            elif cell in student_unav:
+                reason = "Κώλυμα μαθητή του τμήματος"
+            elif shared_classes and (classes_at.get(cell, set()) & shared_classes):
+                reason = "Κοινός μαθητής με άλλο τμήμα εκείνη την ώρα"
+            elif not (acceptable_rooms - rooms_busy.get(cell, set())):
+                reason = "Καμία κατάλληλη αίθουσα ελεύθερη"
+            cells.append({
+                "day": day,
+                "period_id": p.id,
+                "ok": reason is None,
+                "reason": reason,
+            })
+
+    return {"slot_id": slot.id, "days": days_count, "cells": cells}

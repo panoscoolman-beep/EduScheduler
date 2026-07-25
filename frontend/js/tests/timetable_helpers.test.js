@@ -243,6 +243,17 @@ test('buildLessonPaletteHtml: empty palette renders nothing', () => {
     assert.equal(H.buildLessonPaletteHtml({ entries: [], totals: {} }), '');
 });
 
+test('indexPlacementMap: keys day:period, normalises ok/reason', () => {
+    const idx = H.indexPlacementMap([
+        { day: 0, period_id: 5, ok: true, reason: null },
+        { day: 2, period_id: 7, ok: false, reason: 'Κώλυμα καθηγητή' },
+    ]);
+    assert.deepEqual(idx.get('0:5'), { ok: true, reason: null });
+    assert.deepEqual(idx.get('2:7'), { ok: false, reason: 'Κώλυμα καθηγητή' });
+    assert.equal(idx.get('1:5'), undefined);
+    assert.equal(H.indexPlacementMap(null).size, 0);
+});
+
 // ---------------------------------------------------------------------------
 // Νέοι builders (2026-07): ελεύθερες αίθουσες, diff λύσεων, αναφορά ποιότητας
 // ---------------------------------------------------------------------------

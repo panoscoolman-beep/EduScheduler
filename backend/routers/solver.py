@@ -14,7 +14,10 @@ from backend.models import (
     utcnow_naive,
 )
 from backend.services import slot_history as slot_history_svc
-from backend.services.slot_placement import resolve_and_validate_target_room
+from backend.services.slot_placement import (
+    build_placement_map,
+    resolve_and_validate_target_room,
+)
 from backend.services.term_context import get_active_term_id
 from backend.services.solver_jobs import (
     _guard_no_active_solve,
@@ -464,6 +467,31 @@ def update_solution_slot(
         "message": "Το slot ενημερώθηκε",
         "slot": {"id": slot.id, **new_state, "classroom_name": room_name},
     }
+
+
+@router.get("/solutions/{solution_id}/slots/{slot_id}/placement-map")
+def get_placement_map(
+    solution_id: int,
+    slot_id: int,
+    db: Session = Depends(get_db),
+):
+    """Per-cell legality map για το σύρσιμο μιας κάρτας.
+
+    Το frontend το φορτώνει στο dragstart και γκριζάρει τα κελιά όπου η
+    κάρτα δεν μπορεί να πέσει (με αιτία σε tooltip). Καθαρά advisory —
+    ο enforcer παραμένει το PUT του slot· εδώ τίποτα δεν αλλάζει.
+    """
+    slot = (
+        db.query(TimetableSlot)
+        .filter(
+            TimetableSlot.id == slot_id,
+            TimetableSlot.solution_id == solution_id,
+        )
+        .first()
+    )
+    if not slot:
+        raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
+    return build_placement_map(db, slot)
 
 
 @router.post("/solutions/{solution_id}/lessons/{lesson_id}/sync-slots")
