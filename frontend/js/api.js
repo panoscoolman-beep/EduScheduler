@@ -114,10 +114,14 @@ const API = {
         API.get(`/lessons/distribution-suggestions?ppw=${ppw}`),
     lessons: {
         list: () => API.get('/lessons/'),
+        listByTerm: (termId) => API.get(`/lessons/?term_id=${termId}`),
         get: (id) => API.get(`/lessons/${id}`),
         create: (data) => API.post('/lessons/', data),
         update: (id, data) => API.put(`/lessons/${id}`, data),
         delete: (id) => API.delete(`/lessons/${id}`),
+        importFromTerm: (sourceTermId, lessonIds) =>
+            API.post('/lessons/import-from-term',
+                { source_term_id: sourceTermId, lesson_ids: lessonIds }),
     },
     constraints: {
         list: () => API.get('/constraints/'),

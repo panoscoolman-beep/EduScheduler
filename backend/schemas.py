@@ -331,6 +331,12 @@ class TimetableSlotUpdate(BaseModel):
     is_locked: bool | None = None
 
 
+class LessonTermImportRequest(BaseModel):
+    """Επιλεκτική εισαγωγή μαθημάτων-καρτών από άλλο σενάριο στο ενεργό."""
+    source_term_id: int
+    lesson_ids: list[int] = Field(..., min_length=1)
+
+
 class SlotSwapRequest(BaseModel):
     """Ανταλλαγή δύο τοποθετημένων slots (drag κάρτας πάνω σε κάρτα)."""
     slot_a_id: int

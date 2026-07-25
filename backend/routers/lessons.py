@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
-from backend.schemas import LessonCreate, LessonResponse
+from backend.schemas import (
+    LessonCreate,
+    LessonResponse,
+    LessonTermImportRequest,
+)
 from backend.services.term_context import get_active_term_id
 from backend.services.parking_lot_sync import (
     add_lesson_to_open_solutions,
@@ -37,10 +41,18 @@ def _enrich_lesson(lesson: Lesson) -> dict:
 
 
 @router.get("/", response_model=list[LessonResponse])
-def list_lessons(db: Session = Depends(get_db)):
+def list_lessons(term_id: int | None = None, db: Session = Depends(get_db)):
+    """Λίστα μαθημάτων-καρτών. Default: το ενεργό σενάριο· με ?term_id=X
+    επιστρέφει τα μαθήματα ΑΛΛΟΥ σεναρίου (τροφοδοτεί τον picker της
+    επιλεκτικής εισαγωγής)."""
+    if term_id is not None:
+        from backend.models import Term
+        if not db.query(Term).filter(Term.id == term_id).first():
+            raise HTTPException(status_code=404, detail="Το σενάριο δεν βρέθηκε")
+    scope_term_id = term_id if term_id is not None else get_active_term_id(db)
     lessons = (
         db.query(Lesson)
-        .filter(Lesson.term_id == get_active_term_id(db))
+        .filter(Lesson.term_id == scope_term_id)
         .options(
             joinedload(Lesson.subject),
             joinedload(Lesson.teacher),
@@ -175,6 +187,83 @@ def delete_lesson(lesson_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
     db.delete(lesson)
     db.commit()
+
+
+@router.post("/import-from-term")
+def import_lessons_from_term(data: LessonTermImportRequest, db: Session = Depends(get_db)):
+    """Επιλεκτική εισαγωγή μαθημάτων-καρτών από άλλο σενάριο στο ΕΝΕΡΓΟ.
+
+    Το αντίθετο του all-or-nothing clone: ο χρήστης διαλέγει ποια
+    μαθήματα «έρχονται». Αντιγράφονται τα ίδια πεδία με τον term cloner·
+    διπλότυπα (ίδιο μάθημα+καθηγητής+τμήμα στο ενεργό) παραλείπονται με
+    αναφορά. Οι ώρες των νέων μαθημάτων πάνε στην Παλέτα των ανοιχτών
+    λύσεων του ενεργού σεναρίου (parking-lot sync).
+    """
+    from backend.models import Term
+
+    active_term_id = get_active_term_id(db)
+    if data.source_term_id == active_term_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Το σενάριο-πηγή είναι το ήδη ενεργό σενάριο.",
+        )
+    if not db.query(Term).filter(Term.id == data.source_term_id).first():
+        raise HTTPException(status_code=404, detail="Το σενάριο-πηγή δεν βρέθηκε")
+
+    existing_triples = {
+        (l.subject_id, l.teacher_id, l.class_id)
+        for l in db.query(Lesson)
+        .filter(Lesson.term_id == active_term_id)
+        .all()
+    }
+
+    created_ids: list[int] = []
+    skipped: list[dict] = []
+    for lid in data.lesson_ids:
+        src = (
+            db.query(Lesson)
+            .filter(Lesson.id == lid, Lesson.term_id == data.source_term_id)
+            .first()
+        )
+        if not src:
+            skipped.append({"lesson_id": lid, "reason": "not_in_source_term"})
+            continue
+        triple = (src.subject_id, src.teacher_id, src.class_id)
+        if triple in existing_triples:
+            skipped.append({"lesson_id": lid, "reason": "already_exists"})
+            continue
+        new_lesson = Lesson(
+            term_id=active_term_id,
+            subject_id=src.subject_id,
+            teacher_id=src.teacher_id,
+            class_id=src.class_id,
+            classroom_id=src.classroom_id,
+            periods_per_week=src.periods_per_week,
+            duration=src.duration,
+            distribution=src.distribution,
+            is_locked=src.is_locked,
+        )
+        db.add(new_lesson)
+        db.flush()
+        existing_triples.add(triple)
+        created_ids.append(new_lesson.id)
+    db.commit()
+
+    # Οι νέες ώρες εμφανίζονται αμέσως στην Παλέτα των ενεργών λύσεων
+    # (idempotent, term-scoped — αγγίζει μόνο λύσεις του ενεργού).
+    for nid in created_ids:
+        add_lesson_to_open_solutions(db, nid)
+
+    return {
+        "status": "ok",
+        "created": len(created_ids),
+        "created_ids": created_ids,
+        "skipped": skipped,
+        "message": (
+            f"Εισήχθησαν {len(created_ids)} μαθήματα"
+            + (f", παραλείφθηκαν {len(skipped)}" if skipped else "")
+        ),
+    }
 
 
 @router.post("/bulk-import/preview")

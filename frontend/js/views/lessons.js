@@ -53,9 +53,16 @@ const LessonsView = {
         container.innerHTML = `
             <div class="flex-between mb-lg">
                 <div></div>
-                <button class="btn btn-secondary" id="bulk-import-lessons">
-                    📥 Bulk Import (CSV)
-                </button>
+                <div>
+                    <button class="btn btn-secondary" id="term-import-lessons"
+                            style="margin-right:0.5rem"
+                            title="Διάλεξε μαθήματα-κάρτες από παλιότερο σενάριο και φέρ' τα στο ενεργό">
+                        📚 Από άλλο σενάριο
+                    </button>
+                    <button class="btn btn-secondary" id="bulk-import-lessons">
+                        📥 Bulk Import (CSV)
+                    </button>
+                </div>
             </div>
             <div id="lessons-table"></div>
         `;
@@ -63,6 +70,111 @@ const LessonsView = {
 
         document.getElementById('bulk-import-lessons')
             .addEventListener('click', () => self._openBulkImportModal(table));
+        document.getElementById('term-import-lessons')
+            .addEventListener('click', () => self._openTermImportModal(table));
+    },
+
+    // ---------- selective import from another term -------------------------
+
+    async _openTermImportModal(table) {
+        let terms;
+        try {
+            terms = await API.terms.list();
+        } catch (err) {
+            Toast.error('Αδύνατη η φόρτωση σεναρίων: ' + err.message);
+            return;
+        }
+        const active = terms.find(t => t.is_active);
+        const others = terms.filter(t => !t.is_active);
+        if (!others.length) {
+            Toast.error('Δεν υπάρχει άλλο σενάριο για εισαγωγή — δημιούργησε πρώτα ένα.');
+            return;
+        }
+
+        const options = others.map(t =>
+            `<option value="${t.id}">${LessonsHelpers._esc(t.name)}</option>`).join('');
+        Modal.open(
+            `📚 Εισαγωγή μαθημάτων στο «${LessonsHelpers._esc(active ? active.name : 'ενεργό')}»`,
+            `
+            <p class="text-muted" style="margin-bottom:0.75rem;">
+                Διάλεξε σενάριο-πηγή και μετά ποια μαθήματα-κάρτες θα αντιγραφούν
+                στο ενεργό σενάριο. Όσα υπάρχουν ήδη (ίδιο μάθημα, καθηγητής και
+                τμήμα) παραλείπονται αυτόματα. Οι ώρες τους θα εμφανιστούν στην
+                Παλέτα για τοποθέτηση.
+            </p>
+            <div class="form-group">
+                <label class="form-label">Σενάριο-πηγή</label>
+                <select class="form-select" id="term-import-source">
+                    <option value="">— διάλεξε σενάριο —</option>
+                    ${options}
+                </select>
+            </div>
+            <div id="term-import-body"></div>
+            `,
+            () => this._commitTermImport(table),
+            { saveText: '⬇️ Εισαγωγή επιλεγμένων', wide: true },
+        );
+
+        document.getElementById('term-import-source')
+            .addEventListener('change', (e) => this._loadTermImportList(e.target.value));
+    },
+
+    async _loadTermImportList(sourceTermId) {
+        const body = document.getElementById('term-import-body');
+        if (!body) return;
+        if (!sourceTermId) {
+            body.innerHTML = '';
+            return;
+        }
+        body.innerHTML = '<p class="text-muted">Φόρτωση…</p>';
+        try {
+            const [sourceLessons, activeLessons] = await Promise.all([
+                API.lessons.listByTerm(sourceTermId),
+                API.lessons.list(),
+            ]);
+            const marked = LessonsHelpers.markTermImportDuplicates(sourceLessons, activeLessons);
+            body.innerHTML = LessonsHelpers.buildTermImportListHtml(marked);
+            this._wireTermImportList(body);
+        } catch (err) {
+            body.innerHTML = '';
+            Toast.error('Αδύνατη η φόρτωση μαθημάτων: ' + err.message);
+        }
+    },
+
+    _wireTermImportList(body) {
+        const checks = () => [...body.querySelectorAll('.term-import-check')];
+        const counter = body.querySelector('#term-import-count');
+        const updateCount = () => {
+            if (counter) counter.textContent = checks().filter(c => c.checked).length;
+        };
+        body.querySelector('#term-import-all')?.addEventListener('change', (e) => {
+            checks().forEach(c => { c.checked = e.target.checked; });
+            updateCount();
+        });
+        checks().forEach(c => c.addEventListener('change', updateCount));
+    },
+
+    async _commitTermImport(table) {
+        const source = document.getElementById('term-import-source')?.value;
+        const ids = [...document.querySelectorAll('#term-import-body .term-import-check')]
+            .filter(c => c.checked)
+            .map(c => parseInt(c.value));
+        if (!source) {
+            Toast.error('Διάλεξε πρώτα σενάριο-πηγή.');
+            return;
+        }
+        if (!ids.length) {
+            Toast.error('Δεν έχει επιλεγεί κανένα μάθημα.');
+            return;
+        }
+        try {
+            const res = await API.lessons.importFromTerm(parseInt(source), ids);
+            Toast.success(res.message || `Εισήχθησαν ${res.created} μαθήματα`);
+            Modal.close();
+            await table.loadData();
+        } catch (err) {
+            Toast.error('Αποτυχία εισαγωγής: ' + err.message);
+        }
     },
 
     // ---------- bulk import modal -----------------------------------------

@@ -1359,3 +1359,32 @@ a:hover { color: var(--accent-blue-hover); }
     outline: 2px dashed var(--warning, #F59E0B);
     outline-offset: 3px;
 }
+
+/* ─── Εισαγωγή μαθημάτων από άλλο σενάριο (picker) ──────────────────── */
+.term-import-toolbar {
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border, #374151);
+    margin-bottom: 6px;
+}
+.term-import-list {
+    max-height: 320px;
+    overflow-y: auto;
+}
+.term-import-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.term-import-row:hover { background: var(--bg-secondary); }
+.term-import-exists { opacity: 0.55; cursor: default; }
+.term-import-badge {
+    margin-left: auto;
+    font-size: 0.75em;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border, #374151);
+    border-radius: 999px;
+    padding: 1px 8px;
+}
