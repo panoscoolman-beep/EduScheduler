@@ -112,7 +112,7 @@ const TimetableView = {
             // Initial render
             const firstFilter = 'all';
             TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,'class', firstFilter, solutionId);
-            this._renderLessonPalette('parking-lot-container', solution.slots, solutionId);
+            this._renderLessonPalette('parking-lot-container', solution.slots, solutionId, periods);
 
             // Resolve the current view/filter to export query params, or
             // null when the selection isn't a single teacher/student.
@@ -263,6 +263,15 @@ const TimetableView = {
                 }
             };
 
+            // Ξαναζωγράφισε το grid στην ΤΡΕΧΟΥΣΑ προβολή/φίλτρο — το
+            // χρειάζεται το «Βρες μου θέση» για να εμφανίσει την κάρτα
+            // που μόλις τοποθετήθηκε χωρίς πλήρες view re-render.
+            this._rerenderGrid = () => {
+                const vt = document.getElementById('tt-view-type')?.value || 'class';
+                const fv = document.getElementById('tt-filter')?.value || 'all';
+                renderGrid(vt, (vt.startsWith('overview') || vt === 'free_rooms') ? null : fv);
+            };
+
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
                 const filterSelect = document.getElementById('tt-filter');
@@ -388,10 +397,15 @@ const TimetableView = {
      * αναζήτηση. Οι κάρτες με διαθέσιμες ώρες σέρνονται στο πλέγμα (ίδιο
      * drop-flow με το παλιό parking lot — μία ώρα ανά drop).
      */
-    _renderLessonPalette(containerId, allSlots, solutionId) {
+    _renderLessonPalette(containerId, allSlots, solutionId, periods = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
-        this._paletteCtx = { containerId, slots: allSlots, solutionId };
+        this._paletteCtx = {
+            containerId, slots: allSlots, solutionId,
+            // Τα periods χρειάζονται στο modal του «Βρες μου θέση» για
+            // ετικέτες ωρών· στο refresh κρατάμε τα ήδη γνωστά.
+            periods: periods || (this._paletteCtx ? this._paletteCtx.periods : []),
+        };
         const ui = this._paletteUi || (this._paletteUi = {
             collapsed: localStorage.getItem('eds-palette-collapsed') === '1',
             search: '', fClass: '', fTeacher: '', fSubject: '',
@@ -452,6 +466,67 @@ const TimetableView = {
         const ctx = this._paletteCtx;
         if (!ctx) return;
         this._renderLessonPalette(ctx.containerId, ctx.slots, ctx.solutionId);
+    },
+
+    /**
+     * «🎯 Βρες μου θέση»: φέρε το placement map για την επόμενη διαθέσιμη
+     * ώρα του μαθήματος και δείξε ΟΛΕΣ τις νόμιμες θέσεις ως chips ανά
+     * μέρα — κλικ σε chip = τοποθέτηση (ίδιο PUT με το drag & drop).
+     */
+    async findPlacement(lessonId) {
+        const ctx = this._paletteCtx;
+        if (!ctx) return;
+        const slot = ctx.slots.find(s => s.lesson_id === lessonId && s.is_unplaced);
+        if (!slot) {
+            Toast.error('Δεν υπάρχει διαθέσιμη ώρα για τοποθέτηση σε αυτό το μάθημα.');
+            return;
+        }
+        try {
+            const map = await API.solver.placementMap(ctx.solutionId, slot.id);
+            const html = TimetableHelpers.buildPlacementChoicesHtml(map, ctx.periods);
+            const title = `🎯 ${slot.subject_name || 'Μάθημα'} — ${slot.class_name || ''}`;
+            if (!html) {
+                Toast.error('Καμία νόμιμη θέση δεν είναι ελεύθερη για αυτό το μάθημα αυτή τη στιγμή.');
+                return;
+            }
+            Modal.open(title, html, () => Modal.close(),
+                { saveText: 'Κλείσιμο', saveClass: 'btn-secondary' });
+        } catch (err) {
+            Toast.error('Αποτυχία αναζήτησης θέσης: ' + err.message);
+        }
+    },
+
+    /** Chip click από το modal του «Βρες μου θέση» — τοποθέτηση slot. */
+    async placeAt(slotId, dayOfWeek, periodId) {
+        Modal.close();
+        const ctx = this._paletteCtx;
+        if (!ctx) return;
+        try {
+            const res = await API.solver.updateSlot(ctx.solutionId, slotId, {
+                day_of_week: dayOfWeek,
+                period_id: periodId,
+            });
+            const rec = ctx.slots.find(s => s.id === slotId);
+            if (rec) {
+                rec.day_of_week = dayOfWeek;
+                rec.period_id = periodId;
+                rec.is_unplaced = false;
+                rec.unplaced_reason = null;
+                if (res && res.slot) {
+                    rec.classroom_id = res.slot.classroom_id;
+                    if (res.slot.classroom_name) rec.classroom_name = res.slot.classroom_name;
+                }
+            }
+            const dayName = TimetableGrid.DAY_NAMES[dayOfWeek] || '';
+            const period = (ctx.periods || []).find(p => p.id === periodId);
+            const room = (res && res.slot && res.slot.classroom_name)
+                ? ` — αίθουσα ${res.slot.classroom_name}` : '';
+            Toast.success(`Τοποθετήθηκε: ${dayName} ${period ? period.short_name : ''}${room}`);
+            this.refreshPalette();
+            if (this._rerenderGrid) this._rerenderGrid();
+        } catch (err) {
+            Toast.error('Αποτυχία τοποθέτησης: ' + err.message);
+        }
     },
 
     /**

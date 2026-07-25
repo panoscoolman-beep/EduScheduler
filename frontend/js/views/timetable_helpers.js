@@ -481,6 +481,56 @@ const TimetableHelpers = {
         return idx;
     },
 
+    /**
+     * Build the «Βρες μου θέση» modal body: every OK cell of a placement
+     * map as clickable chips grouped by day, sorted by period order.
+     * Pure: map + periods in, HTML out ('' when nothing is legal).
+     */
+    buildPlacementChoicesHtml(map, periods) {
+        const DAY_NAMES = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        const okCells = ((map && map.cells) || []).filter(c => c.ok);
+        if (!okCells.length) return '';
+
+        const periodById = new Map((periods || []).map(p => [p.id, p]));
+        const byDay = new Map();
+        for (const c of okCells) {
+            if (!byDay.has(c.day)) byDay.set(c.day, []);
+            byDay.get(c.day).push(c);
+        }
+
+        const rows = [...byDay.keys()].sort((a, b) => a - b).map(day => {
+            const chips = byDay.get(day)
+                .slice()
+                .sort((a, b) => {
+                    const pa = periodById.get(a.period_id);
+                    const pb = periodById.get(b.period_id);
+                    return (pa ? pa.sort_order : 0) - (pb ? pb.sort_order : 0);
+                })
+                .map(c => {
+                    const p = periodById.get(c.period_id);
+                    const label = p
+                        ? `${TimetableHelpers.esc(p.short_name)} (${TimetableHelpers.esc(p.start_time)})`
+                        : `#${c.period_id}`;
+                    return `<button class="btn btn-secondary btn-sm placement-chip"
+                                onclick="TimetableView.placeAt(${map.slot_id}, ${c.day}, ${c.period_id})">
+                                ${label}
+                            </button>`;
+                }).join('');
+            return `
+                <div class="placement-day-row">
+                    <strong>${DAY_NAMES[day] || `Ημέρα ${day + 1}`}</strong>
+                    <div class="placement-chips">${chips}</div>
+                </div>`;
+        }).join('');
+
+        return `
+            <p class="text-muted" style="margin-bottom:0.75rem;">
+                ${okCells.length} νόμιμες θέσεις — διάλεξε μία και η ώρα τοποθετείται
+                αμέσως (η αίθουσα επιλέγεται αυτόματα).
+            </p>
+            ${rows}`;
+    },
+
     /** One palette card. Split out of buildLessonPaletteHtml for readability. */
     _paletteCardHtml(e) {
         const esc = TimetableHelpers.esc;
@@ -511,6 +561,11 @@ const TimetableHelpers = {
                     <div class="palette-card-title" style="color:${color};">${subject}</div>
                     <div class="palette-card-sub">${sub}</div>
                     <span class="palette-badge">×${e.remaining}</span>
+                    <button class="palette-find-btn"
+                            onmousedown="event.stopPropagation();"
+                            ondragstart="event.stopPropagation(); event.preventDefault();"
+                            onclick="event.stopPropagation(); TimetableView.findPlacement(${e.lesson_id})"
+                            title="Βρες μου θέση — δείξε όλες τις νόμιμες θέσεις">🎯</button>
                 </div>`;
         }
         if (e.missing > 0) {

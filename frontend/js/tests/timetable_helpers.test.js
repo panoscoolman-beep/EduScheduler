@@ -243,6 +243,43 @@ test('buildLessonPaletteHtml: empty palette renders nothing', () => {
     assert.equal(H.buildLessonPaletteHtml({ entries: [], totals: {} }), '');
 });
 
+test('buildPlacementChoicesHtml: chips grouped by day, sorted by period order', () => {
+    const periods = [
+        { id: 5, short_name: '1η', start_time: '16:00', sort_order: 1 },
+        { id: 7, short_name: '2η', start_time: '17:00', sort_order: 2 },
+    ];
+    const map = { slot_id: 42, days: 5, cells: [
+        { day: 0, period_id: 7, ok: true, reason: null },
+        { day: 0, period_id: 5, ok: true, reason: null },
+        { day: 2, period_id: 5, ok: true, reason: null },
+        { day: 1, period_id: 5, ok: false, reason: 'Κώλυμα' },
+    ]};
+    const html = H.buildPlacementChoicesHtml(map, periods);
+    assert.match(html, /3 νόμιμες θέσεις/);
+    assert.match(html, /Δευτέρα/);
+    assert.match(html, /Τετάρτη/);
+    assert.doesNotMatch(html, /Τρίτη/);                       // blocked day absent
+    assert.match(html, /placeAt\(42, 0, 5\)/);
+    assert.match(html, /placeAt\(42, 2, 5\)/);
+    assert.doesNotMatch(html, /placeAt\(42, 1, 5\)/);          // blocked cell no chip
+    // Sort: 1η (16:00) chip appears before 2η (17:00) on Monday
+    assert.ok(html.indexOf('1η (16:00)') < html.indexOf('2η (17:00)'));
+});
+
+test('buildPlacementChoicesHtml: empty when no legal cell', () => {
+    assert.equal(H.buildPlacementChoicesHtml(
+        { slot_id: 1, cells: [{ day: 0, period_id: 5, ok: false, reason: 'x' }] }, [],
+    ), '');
+    assert.equal(H.buildPlacementChoicesHtml(null, []), '');
+});
+
+test('palette card: available card carries the 🎯 find-placement button', () => {
+    const palette = H.buildLessonPalette(PALETTE_SLOTS, PALETTE_LESSONS);
+    const html = H.buildLessonPaletteHtml(palette);
+    assert.match(html, /findPlacement\(1\)/);      // lesson 1 has remaining hours
+    assert.doesNotMatch(html, /findPlacement\(2\)/); // lesson 2 fully placed
+});
+
 test('indexPlacementMap: keys day:period, normalises ok/reason', () => {
     const idx = H.indexPlacementMap([
         { day: 0, period_id: 5, ok: true, reason: null },

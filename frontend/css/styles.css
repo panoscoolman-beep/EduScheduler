@@ -1313,3 +1313,21 @@ a:hover { color: var(--accent-blue-hover); }
     opacity: 0.45;
     filter: grayscale(0.7);
 }
+
+/* ─── «Βρες μου θέση» (placement chips modal + κουμπί κάρτας) ───────── */
+.palette-find-btn {
+    position: absolute;
+    bottom: 6px;
+    right: 8px;
+    background: none;
+    border: none;
+    font-size: 0.95em;
+    cursor: pointer;
+    padding: 2px;
+    opacity: 0.7;
+}
+.palette-find-btn:hover { opacity: 1; transform: scale(1.15); }
+.placement-day-row { margin-bottom: 0.75rem; }
+.placement-day-row strong { display: block; margin-bottom: 0.35rem; }
+.placement-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.placement-chip { cursor: pointer; }
