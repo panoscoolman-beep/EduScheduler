@@ -1353,3 +1353,9 @@ a:hover { color: var(--accent-blue-hover); }
     font-weight: 700;
     flex: 0 0 auto;
 }
+
+/* ─── Παλέτα ως drop zone (unplace) ─────────────────────────────────── */
+.lesson-palette.palette-drop-ready {
+    outline: 2px dashed var(--warning, #F59E0B);
+    outline-offset: 3px;
+}

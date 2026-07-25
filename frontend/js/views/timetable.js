@@ -426,6 +426,39 @@ const TimetableView = {
         wire('palette-f-teacher', 'fTeacher', 'change');
         wire('palette-f-subject', 'fSubject', 'change');
         this.applyPaletteFilters();
+        this._wirePaletteDropZone(container);
+    },
+
+    /**
+     * Η Παλέτα ως drop zone: σέρνεις τοποθετημένη κάρτα από το πλέγμα και
+     * την αφήνεις εδώ → η ώρα αφαιρείται από το πρόγραμμα (unplace).
+     * Delegation στο σταθερό container (επιβιώνει τα re-renders)· οι
+     * κάρτες της ίδιας της Παλέτας αγνοούνται.
+     */
+    _wirePaletteDropZone(container) {
+        if (container._unplaceWired) return;
+        container._unplaceWired = true;
+        const panel = () => container.querySelector('.lesson-palette');
+        const draggingPlacedCard = () =>
+            TimetableGrid._dragSlotId && !TimetableGrid._dragIsParking;
+
+        container.addEventListener('dragover', (e) => {
+            if (!draggingPlacedCard()) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            panel()?.classList.add('palette-drop-ready');
+        });
+        container.addEventListener('dragleave', (e) => {
+            if (!container.contains(e.relatedTarget)) {
+                panel()?.classList.remove('palette-drop-ready');
+            }
+        });
+        container.addEventListener('drop', (e) => {
+            panel()?.classList.remove('palette-drop-ready');
+            if (!draggingPlacedCard()) return;
+            e.preventDefault();
+            TimetableGrid.unplaceSlot(TimetableGrid._dragSlotId);
+        });
     },
 
     /** Show/hide palette cards to match the current search + filters. */

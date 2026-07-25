@@ -573,6 +573,70 @@ def swap_slots(
     }
 
 
+MANUAL_UNPLACE_REASON = "Αφαιρέθηκε χειροκίνητα από το πρόγραμμα"
+
+
+@router.post("/solutions/{solution_id}/slots/{slot_id}/unplace")
+def unplace_slot(
+    solution_id: int,
+    slot_id: int,
+    db: Session = Depends(get_db),
+):
+    """Αφαίρεση τοποθετημένης ώρας πίσω στην Παλέτα (parking).
+
+    Το αντίστροφο της τοποθέτησης: day/period/room γίνονται NULL και
+    is_unplaced=True — η κάρτα ξαναγίνεται διαθέσιμη ώρα στην Παλέτα.
+    Καταγράφεται ως 'unplace' στο ιστορικό, άρα πλήρως αναιρέσιμο
+    (το undo επαναφέρει την ώρα ακριβώς εκεί που ήταν).
+    """
+    slot = (
+        db.query(TimetableSlot)
+        .filter(
+            TimetableSlot.id == slot_id,
+            TimetableSlot.solution_id == solution_id,
+        )
+        .first()
+    )
+    if not slot:
+        raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
+    if slot.is_unplaced:
+        raise HTTPException(
+            status_code=400, detail="Η ώρα είναι ήδη στην Παλέτα."
+        )
+    if slot.is_locked:
+        raise HTTPException(
+            status_code=400,
+            detail="Η κάρτα είναι κλειδωμένη 🔒 — ξεκλείδωσέ την πρώτα.",
+        )
+
+    prev_state = {
+        "day_of_week": slot.day_of_week,
+        "period_id": slot.period_id,
+        "classroom_id": slot.classroom_id,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": False,
+    }
+    slot.day_of_week = None
+    slot.period_id = None
+    slot.classroom_id = None
+    slot.is_unplaced = True
+    slot.unplaced_reason = MANUAL_UNPLACE_REASON
+    new_state = {
+        "day_of_week": None,
+        "period_id": None,
+        "classroom_id": None,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": True,
+    }
+    slot_history_svc.record_edit(db, slot, prev_state, new_state, "unplace")
+    db.commit()
+    return {
+        "status": "ok",
+        "message": "Η ώρα επέστρεψε στην Παλέτα",
+        "slot": {"id": slot.id, **new_state},
+    }
+
+
 @router.get("/solutions/{solution_id}/slots/{slot_id}/placement-map")
 def get_placement_map(
     solution_id: int,

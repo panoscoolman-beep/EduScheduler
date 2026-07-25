@@ -333,6 +333,14 @@ const TimetableGrid = {
             return;
         }
         const days = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        // Αφαίρεση: μόνο για τοποθετημένες, ξεκλείδωτες κάρτες — μια
+        // κάρτα της Παλέτας δεν έχει από πού να αφαιρεθεί.
+        const unplaceBtn = (!slot.is_unplaced && !slot.is_locked)
+            ? `<button class="btn btn-secondary" style="margin-top:0.5rem"
+                       onclick="TimetableGrid.unplaceFromDetails(${slot.id})">
+                   🅿️ Αφαίρεση από το πρόγραμμα
+               </button>`
+            : '';
         const content = `
             <div style="font-size:1.1rem; padding-bottom: 1rem;">
                 <p style="margin-bottom:0.5rem">📚 <strong>Μάθημα:</strong> ${slot.subject_name || slot.subject_short || '-'}</p>
@@ -340,9 +348,45 @@ const TimetableGrid = {
                 <p style="margin-bottom:0.5rem">🎓 <strong>Τάξη:</strong> ${slot.class_name || slot.class_short || '-'}</p>
                 <p style="margin-bottom:0.5rem">🏫 <strong>Αίθουσα:</strong> ${slot.classroom_name || '-'}</p>
                 <p style="margin-bottom:0.5rem">📅 <strong>Ημέρα:</strong> ${days[slot.day_of_week]}</p>
+                ${unplaceBtn}
             </div>
         `;
         Modal.open("Πληροφορίες Μαθήματος", content, () => Modal.close(), { saveText: "Κλείσιμο", saveClass: "btn-secondary" });
+    },
+
+    /** «🅿️ Αφαίρεση» από το info modal — κλείσε και εκτέλεσε. */
+    unplaceFromDetails(slotId) {
+        Modal.close();
+        this.unplaceSlot(slotId);
+    },
+
+    /**
+     * Αφαίρεση τοποθετημένης ώρας πίσω στην Παλέτα. Direct action (χωρίς
+     * επιβεβαίωση) γιατί είναι πλήρως αναιρέσιμη με ένα undo — και το
+     * άδειασμα π.χ. ενός καθηγητή γίνεται με γρήγορες επαναλήψεις.
+     */
+    async unplaceSlot(slotId) {
+        if (!this._solutionId) return;
+        try {
+            await API.solver.unplaceSlot(this._solutionId, slotId);
+            this._syncSlot(slotId, {
+                day_of_week: null, period_id: null,
+                classroom_id: null, classroom_name: null,
+                is_unplaced: true,
+            });
+            Toast.success('Η ώρα επέστρεψε στην Παλέτα 🅿️ — Ctrl+Z για επαναφορά');
+            // Το redraw καταστρέφει το συρόμενο element πριν το dragend
+            // προλάβει να τρέξει — καθάρισε το drag state ρητά εδώ.
+            this._dragSlotId = null;
+            this._dragIsParking = false;
+            this._clearPlacementMap();
+            if (typeof TimetableView !== 'undefined') {
+                if (TimetableView.refreshPalette) TimetableView.refreshPalette();
+                if (TimetableView._rerenderGrid) TimetableView._rerenderGrid();
+            }
+        } catch (err) {
+            Toast.error('Αποτυχία αφαίρεσης: ' + err.message);
+        }
     },
 
     handleDragStart(event, slotId) {
@@ -358,6 +402,8 @@ const TimetableGrid = {
         event.target.classList.remove('dragging');
         document.querySelectorAll('.droppable-cell').forEach(c => c.classList.remove('drag-over'));
         document.querySelectorAll('.lesson-card.swap-hover').forEach(c => c.classList.remove('swap-hover'));
+        document.querySelectorAll('.lesson-palette.palette-drop-ready')
+            .forEach(p => p.classList.remove('palette-drop-ready'));
         this._dragSlotId = null;
         this._dragIsParking = false;
         this._clearPlacementMap();
@@ -670,6 +716,11 @@ const TimetableGrid = {
                 });
             }
             Toast.success('Οι κάρτες αντάλλαξαν θέσεις ✔');
+            // Ίδιο σκεπτικό με το unplace: το redraw σκοτώνει το dragged
+            // element, το dragend ίσως δεν τρέξει — ρητό cleanup.
+            this._dragSlotId = null;
+            this._dragIsParking = false;
+            this._clearPlacementMap();
             if (typeof TimetableView !== 'undefined' && TimetableView._rerenderGrid) {
                 TimetableView._rerenderGrid();
             }

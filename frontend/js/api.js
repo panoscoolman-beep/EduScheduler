@@ -144,6 +144,8 @@ const API = {
         swapSlots: (solutionId, slotAId, slotBId) =>
             API.post(`/solver/solutions/${solutionId}/slots/swap`,
                 { slot_a_id: slotAId, slot_b_id: slotBId }),
+        unplaceSlot: (solutionId, slotId) =>
+            API.post(`/solver/solutions/${solutionId}/slots/${slotId}/unplace`, {}),
         undo: (solutionId) => API.post(`/solver/solutions/${solutionId}/undo`, {}),
         redo: (solutionId) => API.post(`/solver/solutions/${solutionId}/redo`, {}),
         historySummary: (solutionId) => API.get(`/solver/solutions/${solutionId}/history-summary`),
