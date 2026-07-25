@@ -349,13 +349,43 @@ const TimetableGrid = {
         event.dataTransfer.setData('text/plain', slotId);
         event.dataTransfer.effectAllowed = 'move';
         event.target.classList.add('dragging');
+        this._dragSlotId = slotId;
+        this._dragIsParking = event.target.classList.contains('parking-card');
         this._loadPlacementMap(slotId);
     },
 
     handleDragEnd(event) {
         event.target.classList.remove('dragging');
         document.querySelectorAll('.droppable-cell').forEach(c => c.classList.remove('drag-over'));
+        document.querySelectorAll('.lesson-card.swap-hover').forEach(c => c.classList.remove('swap-hover'));
+        this._dragSlotId = null;
+        this._dragIsParking = false;
         this._clearPlacementMap();
+    },
+
+    /**
+     * Αν ο κέρσορας είναι πάνω σε κάρτα που μπορεί να γίνει στόχος
+     * ανταλλαγής, γύρνα το card element — αλλιώς null. Στόχος swap:
+     * τοποθετημένη, ξεκλείδωτη κάρτα του grid (όχι palette), διαφορετική
+     * από αυτήν που σέρνεται· και η συρόμενη να ΜΗΝ είναι της παλέτας
+     * (οι κάρτες της παλέτας κάνουν απλή τοποθέτηση στο κελί).
+     */
+    _swapTargetCard(event) {
+        if (!this._dragSlotId || this._dragIsParking) return null;
+        let el = event.target;
+        while (el && !el.classList?.contains('droppable-cell')) {
+            if (el.classList?.contains('lesson-card')) {
+                if (el.classList.contains('parking-card')
+                    || el.classList.contains('palette-card')
+                    || el.classList.contains('dragging')
+                    || el.classList.contains('locked')) return null;
+                const targetId = parseInt(el.dataset.slotId);
+                if (!targetId || targetId === this._dragSlotId) return null;
+                return el;
+            }
+            el = el.parentElement;
+        }
+        return null;
     },
 
     /**
@@ -393,6 +423,14 @@ const TimetableGrid = {
     },
 
     handleDragOver(event) {
+        // Πάνω σε κάρτα-στόχο ανταλλαγής το drop επιτρέπεται ΠΑΝΤΑ — ακόμα
+        // και σε γκρίζο κελί: το map αφορά απλή μετακίνηση, ενώ το swap
+        // έχει δικό του έλεγχο (ο κάτοικος του κελιού αδειάζει ταυτόχρονα).
+        if (this._swapTargetCard(event)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            return;
+        }
         let target = event.target;
         while (target && !target.classList.contains('droppable-cell')) target = target.parentElement;
         if (target && target.classList.contains('cell-blocked')) {
@@ -407,6 +445,14 @@ const TimetableGrid = {
 
     handleDragEnter(event) {
         event.preventDefault();
+        const swapCard = this._swapTargetCard(event);
+        document.querySelectorAll('.lesson-card.swap-hover').forEach(c => {
+            if (c !== swapCard) c.classList.remove('swap-hover');
+        });
+        if (swapCard) {
+            swapCard.classList.add('swap-hover');
+            return;
+        }
         let target = event.target;
         while (target && !target.classList.contains('droppable-cell')) target = target.parentElement;
         if (target && !target.classList.contains('cell-blocked')) target.classList.add('drag-over');
@@ -442,6 +488,15 @@ const TimetableGrid = {
         if (!slotIdStr || !solutionId) return;
 
         const slotId = parseInt(slotIdStr);
+
+        // Drop ΠΑΝΩ σε άλλη τοποθετημένη κάρτα = πρόταση ανταλλαγής.
+        // Καμία optimistic μετακίνηση — πρώτα επιβεβαίωση, μετά ο server.
+        const swapCard = this._swapTargetCard(event);
+        if (swapCard) {
+            swapCard.classList.remove('swap-hover');
+            this._proposeSwap(solutionId, slotId, swapCard);
+            return;
+        }
         let target = event.target;
         while (target && !target.classList.contains('droppable-cell')) {
             target = target.parentElement;
@@ -578,6 +633,48 @@ const TimetableGrid = {
             }
             sourceCard.dataset.json = JSON.stringify(slotData);
             Toast.error('Αποτυχία: ' + err.message);
+        }
+    },
+
+    /** Άνοιξε το modal επιβεβαίωσης ανταλλαγής για dragged → target. */
+    _proposeSwap(solutionId, dragSlotId, targetCardEl) {
+        let slotA, slotB;
+        try {
+            const dragCard = document.querySelector(`.lesson-card[data-slot-id="${dragSlotId}"]`);
+            slotA = JSON.parse(dragCard.dataset.json);
+            slotB = JSON.parse(targetCardEl.dataset.json);
+        } catch (e) {
+            Toast.error('Σφάλμα ανάγνωσης δεδομένων καρτών');
+            return;
+        }
+        const periods = (typeof TimetableView !== 'undefined' && TimetableView._paletteCtx)
+            ? TimetableView._paletteCtx.periods : [];
+        const html = TimetableHelpers.buildSwapConfirmHtml(slotA, slotB, periods);
+        Modal.open('🔀 Ανταλλαγή θέσεων;', html, async () => {
+            Modal.close();
+            await this._doSwap(solutionId, slotA.id, slotB.id);
+        }, { saveText: '🔀 Ανταλλαγή', saveClass: 'btn-primary' });
+    },
+
+    /** Εκτέλεση swap μέσω API + in-place συγχρονισμός + redraw. */
+    async _doSwap(solutionId, slotAId, slotBId) {
+        try {
+            const res = await API.solver.swapSlots(solutionId, slotAId, slotBId);
+            for (const s of [res.slot_a, res.slot_b]) {
+                this._syncSlot(s.id, {
+                    day_of_week: s.day_of_week,
+                    period_id: s.period_id,
+                    classroom_id: s.classroom_id,
+                    classroom_name: s.classroom_name || undefined,
+                    is_unplaced: false,
+                });
+            }
+            Toast.success('Οι κάρτες αντάλλαξαν θέσεις ✔');
+            if (typeof TimetableView !== 'undefined' && TimetableView._rerenderGrid) {
+                TimetableView._rerenderGrid();
+            }
+        } catch (err) {
+            Toast.error('Αποτυχία ανταλλαγής: ' + err.message);
         }
     },
 

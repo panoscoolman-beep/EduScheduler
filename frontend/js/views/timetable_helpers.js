@@ -470,6 +470,44 @@ const TimetableHelpers = {
     },
 
     /**
+     * Build the swap-confirmation modal body: the two cards side by side
+     * with their current positions and the ⇄ direction. Pure.
+     */
+    buildSwapConfirmHtml(slotA, slotB, periods) {
+        const esc = TimetableHelpers.esc;
+        const DAY_NAMES = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        const periodById = new Map((periods || []).map(p => [p.id, p]));
+        const posLabel = (s) => {
+            const day = DAY_NAMES[s.day_of_week] || `Ημέρα ${(s.day_of_week ?? 0) + 1}`;
+            const p = periodById.get(s.period_id);
+            return p ? `${day} ${p.short_name} (${p.start_time})` : day;
+        };
+        const card = (s) => {
+            const color = s.subject_color || '#9CA3AF';
+            const sub = [esc(s.class_name || s.class_short || ''),
+                         esc(s.teacher_name || '')].filter(Boolean).join(' • ');
+            return `
+                <div class="swap-confirm-card" style="border-left: 4px solid ${color};">
+                    <div style="font-weight:600; color:${color};">${esc(s.subject_name || '?')}</div>
+                    <div class="text-muted" style="font-size:0.85em;">${sub}</div>
+                    <div style="margin-top:4px;">📅 ${esc(posLabel(s))}</div>
+                    ${s.classroom_name ? `<div class="text-muted" style="font-size:0.85em;">🚪 ${esc(s.classroom_name)}</div>` : ''}
+                </div>`;
+        };
+        return `
+            <p class="text-muted" style="margin-bottom:0.75rem;">
+                Οι δύο κάρτες θα ανταλλάξουν μέρα/ώρα. Οι αίθουσες διατηρούνται
+                όπου χωράνε, αλλιώς επιλέγεται αυτόματα άλλη ελεύθερη — όλοι οι
+                έλεγχοι (κωλύματα, κοινοί μαθητές κ.λπ.) τρέχουν πριν την αλλαγή.
+            </p>
+            <div class="swap-confirm-row">
+                ${card(slotA)}
+                <div class="swap-confirm-arrow">⇄</div>
+                ${card(slotB)}
+            </div>`;
+    },
+
+    /**
      * Index a placement-map cell list by "day:period_id" for O(1) lookup
      * while shading the grid during a drag. Pure.
      */

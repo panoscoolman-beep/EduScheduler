@@ -1331,3 +1331,25 @@ a:hover { color: var(--accent-blue-hover); }
 .placement-day-row strong { display: block; margin-bottom: 0.35rem; }
 .placement-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .placement-chip { cursor: pointer; }
+
+/* ─── Ανταλλαγή καρτών (swap on drop) ───────────────────────────────── */
+.lesson-card.swap-hover {
+    outline: 2px dashed var(--primary, #3B82F6);
+    outline-offset: 2px;
+}
+.swap-confirm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.swap-confirm-card {
+    flex: 1 1 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--bg-secondary);
+}
+.swap-confirm-arrow {
+    font-size: 1.6em;
+    font-weight: 700;
+    flex: 0 0 auto;
+}

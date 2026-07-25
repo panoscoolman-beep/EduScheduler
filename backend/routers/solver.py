@@ -27,6 +27,7 @@ from backend.services.solver_jobs import (
 from backend.services.substitute_finder import find_substitutes
 from backend.schemas import (
     FeasibilityReportResponse,
+    SlotSwapRequest,
     SolverRequest,
     SolverStatusResponse,
     TimetableSolutionResponse,
@@ -466,6 +467,109 @@ def update_solution_slot(
         "status": "ok",
         "message": "Το slot ενημερώθηκε",
         "slot": {"id": slot.id, **new_state, "classroom_name": room_name},
+    }
+
+
+@router.post("/solutions/{solution_id}/slots/swap")
+def swap_slots(
+    solution_id: int,
+    data: SlotSwapRequest,
+    db: Session = Depends(get_db),
+):
+    """Ανταλλαγή θέσεων δύο τοποθετημένων slots (κάρτα πάνω σε κάρτα).
+
+    Ο Α ελέγχεται στο κελί του Β αγνοώντας τον Β (αδειάζει ταυτόχρονα)
+    και αντίστροφα — ίδιοι έλεγχοι με το μεμονωμένο drop (καθηγητής/
+    τμήμα/αίθουσες/κωλύματα/H7). Οι αίθουσες διατηρούνται αν χωράνε,
+    αλλιώς επιλέγεται αυτόματα άλλη ελεύθερη. Ατομικό: ή γίνονται και
+    οι δύο μετακινήσεις ή καμία. Καταγράφονται δύο βήματα undo.
+    """
+    if data.slot_a_id == data.slot_b_id:
+        raise HTTPException(status_code=400, detail="Ίδιο slot — τίποτα να ανταλλάξω.")
+
+    def _load(slot_id: int) -> TimetableSlot:
+        s = (
+            db.query(TimetableSlot)
+            .filter(
+                TimetableSlot.id == slot_id,
+                TimetableSlot.solution_id == solution_id,
+            )
+            .first()
+        )
+        if not s:
+            raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
+        return s
+
+    slot_a = _load(data.slot_a_id)
+    slot_b = _load(data.slot_b_id)
+
+    if slot_a.is_unplaced or slot_b.is_unplaced:
+        raise HTTPException(
+            status_code=400,
+            detail="Ανταλλαγή γίνεται μόνο μεταξύ τοποθετημένων καρτών — "
+                   "για κάρτα της παλέτας κάνε απλό drop στο κελί.",
+        )
+    if slot_a.is_locked or slot_b.is_locked:
+        raise HTTPException(
+            status_code=400,
+            detail="Μία από τις δύο κάρτες είναι κλειδωμένη 🔒 — ξεκλείδωσέ την πρώτα.",
+        )
+    if (slot_a.day_of_week, slot_a.period_id) == (slot_b.day_of_week, slot_b.period_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Οι κάρτες είναι ήδη στην ίδια μέρα/ώρα — τίποτα να ανταλλάξω.",
+        )
+
+    # Στόχος του καθενός: το κελί του άλλου. Χωρίς ρητή αίθουσα — κρατά
+    # τη δική του αν είναι ελεύθερη εκεί, αλλιώς auto-εναλλακτική.
+    target_a = TimetableSlotUpdate(
+        day_of_week=slot_b.day_of_week, period_id=slot_b.period_id
+    )
+    target_b = TimetableSlotUpdate(
+        day_of_week=slot_a.day_of_week, period_id=slot_a.period_id
+    )
+    room_a = resolve_and_validate_target_room(
+        db, slot_a, target_a, extra_exclude_slot_id=slot_b.id
+    )
+    room_b = resolve_and_validate_target_room(
+        db, slot_b, target_b, extra_exclude_slot_id=slot_a.id
+    )
+
+    def _state(s: TimetableSlot) -> dict:
+        return {
+            "day_of_week": s.day_of_week,
+            "period_id": s.period_id,
+            "classroom_id": s.classroom_id,
+            "is_locked": bool(s.is_locked),
+            "is_unplaced": bool(s.is_unplaced),
+        }
+
+    prev_a, prev_b = _state(slot_a), _state(slot_b)
+    slot_a.day_of_week, slot_a.period_id, slot_a.classroom_id = (
+        target_a.day_of_week, target_a.period_id, room_a,
+    )
+    slot_b.day_of_week, slot_b.period_id, slot_b.classroom_id = (
+        target_b.day_of_week, target_b.period_id, room_b,
+    )
+    # Το history CHECK επιτρέπει move/lock/unlock/place/unplace — ένα swap
+    # καταγράφεται ως δύο "move" (δύο βήματα undo, χωρίς schema migration).
+    slot_history_svc.record_edit(db, slot_a, prev_a, _state(slot_a), "move")
+    slot_history_svc.record_edit(db, slot_b, prev_b, _state(slot_b), "move")
+    db.commit()
+
+    room_names = {
+        r.id: r.name
+        for r in db.query(Classroom)
+        .filter(Classroom.id.in_([room_a, room_b]))
+        .all()
+    }
+    return {
+        "status": "ok",
+        "message": "Οι κάρτες αντάλλαξαν θέσεις",
+        "slot_a": {"id": slot_a.id, **_state(slot_a),
+                   "classroom_name": room_names.get(room_a)},
+        "slot_b": {"id": slot_b.id, **_state(slot_b),
+                   "classroom_name": room_names.get(room_b)},
     }
 
 

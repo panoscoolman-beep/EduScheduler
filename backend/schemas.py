@@ -331,6 +331,12 @@ class TimetableSlotUpdate(BaseModel):
     is_locked: bool | None = None
 
 
+class SlotSwapRequest(BaseModel):
+    """Ανταλλαγή δύο τοποθετημένων slots (drag κάρτας πάνω σε κάρτα)."""
+    slot_a_id: int
+    slot_b_id: int
+
+
 class TimetableSolutionResponse(BaseModel):
     id: int
     name: str

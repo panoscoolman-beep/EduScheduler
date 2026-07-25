@@ -79,10 +79,12 @@ def busy_room_ids(
     day_of_week: int,
     period_id: int,
     exclude_slot_id: int,
+    extra_exclude_slot_id: int | None = None,
 ) -> set[int]:
     """Set of classroom_ids already occupied at this exact (day, period)
-    in this solution, excluding the slot being moved."""
-    rows = (
+    in this solution, excluding the slot being moved — and, on a swap,
+    the counterpart slot that is vacating the cell at the same time."""
+    q = (
         db.query(TimetableSlot.classroom_id)
         .filter(
             TimetableSlot.solution_id == solution_id,
@@ -91,17 +93,25 @@ def busy_room_ids(
             TimetableSlot.id != exclude_slot_id,
             TimetableSlot.classroom_id.isnot(None),
         )
-        .all()
     )
-    return {r[0] for r in rows}
+    if extra_exclude_slot_id is not None:
+        q = q.filter(TimetableSlot.id != extra_exclude_slot_id)
+    return {r[0] for r in q.all()}
 
 
-def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> int:
+def resolve_and_validate_target_room(
+    db: Session,
+    slot: TimetableSlot,
+    data,
+    extra_exclude_slot_id: int | None = None,
+) -> int:
     """Resolve the target classroom and run every conflict check for a
     manual slot move. Returns the chosen classroom_id, or raises
     HTTPException(400) on the first conflict.
 
     `data` is a TimetableSlotUpdate (day_of_week, period_id, classroom_id).
+    `extra_exclude_slot_id`: σε ανταλλαγή (swap) ο έλεγχος του Α στο κελί
+    του Β πρέπει να αγνοήσει τον Β (αδειάζει ταυτόχρονα) — και αντίστροφα.
     """
     solution_id = slot.solution_id
     slot_id = slot.id
@@ -138,6 +148,10 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
             TimetableSlot.id != slot_id,
         )
     )
+    if extra_exclude_slot_id is not None:
+        conflict_query = conflict_query.filter(
+            TimetableSlot.id != extra_exclude_slot_id
+        )
 
     # 1. Teacher conflict
     if slot.lesson.teacher_id:
@@ -160,7 +174,10 @@ def resolve_and_validate_target_room(db: Session, slot: TimetableSlot, data) -> 
     if room_conflict:
         target_room = pick_default_classroom(
             db, slot.lesson,
-            exclude_room_ids=busy_room_ids(db, solution_id, data.day_of_week, data.period_id, slot_id),
+            exclude_room_ids=busy_room_ids(
+                db, solution_id, data.day_of_week, data.period_id,
+                slot_id, extra_exclude_slot_id,
+            ),
         )
         if target_room is None:
             raise HTTPException(status_code=400, detail="Όλες οι αίθουσες είναι κατειλημμένες αυτή τη μέρα/ώρα.")

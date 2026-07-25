@@ -280,6 +280,25 @@ test('palette card: available card carries the 🎯 find-placement button', () =
     assert.doesNotMatch(html, /findPlacement\(2\)/); // lesson 2 fully placed
 });
 
+test('buildSwapConfirmHtml: both cards with positions and the ⇄ arrow', () => {
+    const periods = [
+        { id: 5, short_name: '1η', start_time: '16:00', sort_order: 1 },
+        { id: 7, short_name: '3η', start_time: '18:00', sort_order: 3 },
+    ];
+    const a = { id: 1, subject_name: 'Άλγεβρα', class_name: 'Β2', teacher_name: 'Νίκος',
+                subject_color: '#3366CC', day_of_week: 0, period_id: 5, classroom_name: 'R1' };
+    const b = { id: 2, subject_name: 'Φυσική', class_name: 'Γ1', teacher_name: 'Κώστας',
+                subject_color: '#CC3333', day_of_week: 2, period_id: 7, classroom_name: 'L1' };
+    const html = H.buildSwapConfirmHtml(a, b, periods);
+    assert.match(html, /Άλγεβρα/);
+    assert.match(html, /Φυσική/);
+    assert.match(html, /Δευτέρα 1η \(16:00\)/);
+    assert.match(html, /Τετάρτη 3η \(18:00\)/);
+    assert.match(html, /⇄/);
+    assert.match(html, /R1/);
+    assert.match(html, /L1/);
+});
+
 test('indexPlacementMap: keys day:period, normalises ok/reason', () => {
     const idx = H.indexPlacementMap([
         { day: 0, period_id: 5, ok: true, reason: null },
