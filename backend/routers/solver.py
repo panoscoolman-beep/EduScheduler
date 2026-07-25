@@ -466,6 +466,61 @@ def update_solution_slot(
     }
 
 
+@router.post("/solutions/{solution_id}/lessons/{lesson_id}/sync-slots")
+def sync_solution_lesson_slots(
+    solution_id: int,
+    lesson_id: int,
+    db: Session = Depends(get_db),
+):
+    """Συμπλήρωσε τις ώρες που λείπουν από ένα μάθημα ως parking-lot slots.
+
+    Η Παλέτα Μαθημάτων δείχνει «λείπουν N ώρες» όταν μια λύση έχει
+    λιγότερα slots από το periods_per_week του μαθήματος (π.χ. λύση
+    παλαιότερη από το parking-lot sync, ή μάθημα που δεν είχε ποτέ slots
+    σε αυτήν). Το endpoint τα υλοποιεί ως is_unplaced ώστε να γίνουν
+    draggable κάρτες. Idempotent — αν δεν λείπει τίποτα, added=0.
+    """
+    from backend.services.parking_lot_sync import sync_lesson_slot_count
+
+    solution = (
+        db.query(TimetableSolution)
+        .filter(TimetableSolution.id == solution_id)
+        .first()
+    )
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+    if lesson.term_id != solution.term_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Το μάθημα ανήκει σε άλλο σενάριο από αυτή τη λύση.",
+        )
+    if solution.status not in ("optimal", "feasible"):
+        raise HTTPException(
+            status_code=409,
+            detail="Η λύση δεν είναι ενεργή (optimal/feasible) — δεν συγχρονίζεται.",
+        )
+
+    result = sync_lesson_slot_count(db, lesson_id)
+    mine = next(
+        (s for s in result.get("synced", []) if s["solution_id"] == solution_id),
+        None,
+    )
+    added = mine["added"] if mine else 0
+    return {
+        "status": "ok",
+        "solution_id": solution_id,
+        "lesson_id": lesson_id,
+        "added": added,
+        "message": (
+            f"Προστέθηκαν {added} ώρες στην παλέτα"
+            if added else "Δεν έλειπε καμία ώρα — καμία αλλαγή"
+        ),
+    }
+
+
 @router.post("/solutions/{solution_id}/undo")
 def undo_last_edit(solution_id: int, db: Session = Depends(get_db)):
     """Roll back the most recent manual edit to this solution."""

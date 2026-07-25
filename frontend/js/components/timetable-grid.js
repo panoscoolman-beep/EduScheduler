@@ -459,9 +459,12 @@ const TimetableGrid = {
         slotData.period_id = newPeriod;
         if (wasParkingCard) {
             slotData.is_unplaced = false;
-            sourceCard.classList.remove('parking-card');
-            // The parking-lot inline styling (border-left, padding, background)
-            // came from _renderParkingLot. Reset to grid-card defaults so it
+            sourceCard.classList.remove('parking-card', 'palette-card');
+            // Palette chrome (×N counter) belongs to the palette, not the grid.
+            const badge = sourceCard.querySelector('.palette-badge');
+            if (badge) badge.remove();
+            // The palette inline styling (border-left, padding, background)
+            // came from the palette builder. Reset to grid-card defaults so it
             // visually matches its new neighbours.
             sourceCard.style.borderLeft = '';
             sourceCard.style.padding = '';
@@ -522,6 +525,10 @@ const TimetableGrid = {
             slotData.is_unplaced = prev.is_unplaced;
             if (wasParkingCard) {
                 sourceCard.classList.add('parking-card');
+                // A full palette re-render (from the unchanged in-memory
+                // slots) restores the card with its counter/badge intact —
+                // the rolled-back DOM node is discarded by the rebuild.
+                this._notifyParkingLotChanged();
             }
             sourceCard.dataset.json = JSON.stringify(slotData);
             Toast.error('Αποτυχία: ' + err.message);
@@ -529,24 +536,15 @@ const TimetableGrid = {
     },
 
     /**
-     * Update the parking-lot header label after a card leaves it.
-     * Touches only the count text — leaves filter selects, scroll
-     * position, and other view state intact.
+     * A parking/palette card entered (or bounced off) the grid — ask the
+     * view to re-render the Παλέτα from the shared in-memory slots array.
+     * The rebuild keeps the user's palette filters/search (stored in
+     * TimetableView._paletteUi), refreshes the ×N counters, and surfaces
+     * the next draggable slot of the lesson.
      */
     _notifyParkingLotChanged() {
-        const lot = document.querySelector('.parking-lot');
-        if (!lot) return;
-        const remaining = lot.querySelectorAll('.parking-card').length;
-        const title = lot.querySelector('.card-title');
-        if (remaining === 0) {
-            // Whole lot is empty — hide the panel
-            lot.style.display = 'none';
-            return;
-        }
-        if (title) {
-            title.textContent = `🅿️ Parking Lot — ${remaining} ${
-                remaining === 1 ? 'ώρα δεν τοποθετήθηκε' : 'ώρες δεν τοποθετήθηκαν'
-            }`;
+        if (typeof TimetableView !== 'undefined' && TimetableView.refreshPalette) {
+            TimetableView.refreshPalette();
         }
     },
 

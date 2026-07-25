@@ -390,53 +390,200 @@ const TimetableHelpers = {
     },
 
     /**
-     * Build the parking-lot panel HTML (draggable cards for the slots the
-     * solver couldn't place). Pure: a NON-empty list of unplaced slots in,
-     * HTML string out. The caller handles the empty case + the DOM mount.
+     * Group a solution's slots by lesson into palette entries — the data
+     * behind the «Παλέτα Μαθημάτων». Pure: slots + lessons in, entries out.
+     *
+     * Per entry:
+     *   placed    — slots on the grid
+     *   remaining — unplaced (parking) slots, i.e. draggable hours
+     *   missing   — hours the lesson SHOULD have (periods_per_week) but has
+     *               no slot row at all (solutions older than the parking-lot
+     *               sync) — fixable via the sync-slots endpoint
+     *   drag_slot — the first unplaced slot (the card the user drags next)
+     *
+     * The `lessons` list drives ppw/missing and surfaces lessons with ZERO
+     * slots in this solution; slots provide names/colors. Either input may
+     * be empty.
      */
-    buildParkingLotHtml(unplaced) {
-        const cards = unplaced.map(slot => {
-            const bgColor = slot.subject_color || '#9CA3AF';
-            const bgLight = TimetableHelpers.hexToRgba(bgColor, 0.15);
-            const reasonText = slot.unplaced_reason
-                ? ` <span class="text-muted" style="font-size:0.8em">— ${slot.unplaced_reason}</span>`
-                : '';
+    buildLessonPalette(slots, lessons) {
+        const byLesson = new Map();
+        const entryFor = (lessonId) => {
+            let e = byLesson.get(lessonId);
+            if (!e) {
+                e = {
+                    lesson_id: lessonId, total: 0, placed: 0, remaining: 0,
+                    missing: 0, drag_slot: null, subject_name: null,
+                    subject_color: null, class_name: null, teacher_name: null,
+                };
+                byLesson.set(lessonId, e);
+            }
+            return e;
+        };
+
+        for (const l of lessons || []) {
+            const e = entryFor(l.id);
+            e.total = l.periods_per_week || 0;
+            e.subject_name = l.subject_name || null;
+            e.class_name = l.class_name || null;
+            e.teacher_name = l.teacher_name || null;
+        }
+        for (const s of slots || []) {
+            if (s.lesson_id == null) continue;
+            const e = entryFor(s.lesson_id);
+            // Slots are the richer source (colors, short names) — fill gaps.
+            if (!e.subject_name) e.subject_name = s.subject_name || s.subject_short || null;
+            if (!e.class_name) e.class_name = s.class_name || s.class_short || null;
+            if (!e.teacher_name) e.teacher_name = s.teacher_name || null;
+            if (!e.subject_color && s.subject_color) e.subject_color = s.subject_color;
+            if (s.is_unplaced) {
+                e.remaining += 1;
+                if (!e.drag_slot) e.drag_slot = s;
+            } else {
+                e.placed += 1;
+            }
+        }
+
+        const entries = [...byLesson.values()];
+        for (const e of entries) {
+            const known = e.placed + e.remaining;
+            // A lesson deleted from the catalog can still have slots — treat
+            // the slots we see as the whole truth (total=known, missing=0).
+            if (e.total < known) e.total = known;
+            e.missing = Math.max(0, e.total - known);
+        }
+
+        // Draggable work first, then fixable deficits, fully-placed last.
+        const rank = (e) => (e.remaining > 0 ? 0 : (e.missing > 0 ? 1 : 2));
+        entries.sort((a, b) =>
+            rank(a) - rank(b)
+            || String(a.class_name || '').localeCompare(String(b.class_name || ''), 'el')
+            || String(a.subject_name || '').localeCompare(String(b.subject_name || ''), 'el'));
+
+        const totals = { hours_total: 0, hours_placed: 0, hours_remaining: 0, hours_missing: 0 };
+        for (const e of entries) {
+            totals.hours_total += e.total;
+            totals.hours_placed += e.placed;
+            totals.hours_remaining += e.remaining;
+            totals.hours_missing += e.missing;
+        }
+        return { entries, totals };
+    },
+
+    /** One palette card. Split out of buildLessonPaletteHtml for readability. */
+    _paletteCardHtml(e) {
+        const esc = TimetableHelpers.esc;
+        const color = e.subject_color || '#9CA3AF';
+        const bgLight = TimetableHelpers.hexToRgba(color, 0.15);
+        const subject = esc(e.subject_name || '?');
+        const sub = [esc(e.class_name || ''), esc(e.teacher_name || '')]
+            .filter(Boolean).join(' • ');
+        const filterAttrs = `data-fclass="${esc(e.class_name || '')}"
+                     data-fteacher="${esc(e.teacher_name || '')}"
+                     data-fsubject="${esc(e.subject_name || '')}"
+                     data-search="${esc([e.subject_name, e.class_name, e.teacher_name]
+                         .filter(Boolean).join(' ').toLowerCase())}"`;
+
+        if (e.remaining > 0) {
+            const slotJson = JSON.stringify(e.drag_slot).replace(/'/g, '&#39;');
             return `
-                <div class="lesson-card parking-card"
-                     data-slot-id="${slot.id}"
+                <div class="lesson-card parking-card palette-card"
+                     data-slot-id="${e.drag_slot.id}" data-lesson-id="${e.lesson_id}"
+                     ${filterAttrs}
                      draggable="true"
-                     ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
+                     ondragstart="TimetableGrid.handleDragStart(event, ${e.drag_slot.id})"
                      ondragend="TimetableGrid.handleDragEnd(event)"
                      onclick="TimetableGrid.showDetails(this)"
-                     data-json='${JSON.stringify(slot).replace(/'/g, "&#39;")}'
-                     style="background:${bgLight}; cursor: grab; padding: 10px 14px;
-                            border-left: 4px solid ${bgColor}; margin-bottom: 6px;
-                            border-radius: 6px;"
-                     title="Σύρε στο πρόγραμμα για να τοποθετηθεί">
-                    <div style="font-weight: 600; color: ${bgColor};">
-                        ${slot.subject_name || slot.subject_short || '?'}
-                    </div>
-                    <div style="font-size: 0.9em; color: var(--text-muted);">
-                        ${slot.class_name || slot.class_short || ''}
-                        ${slot.teacher_name ? ' • ' + slot.teacher_name : ''}
-                    </div>
-                    ${reasonText ? `<div style="font-size:0.8em; color:var(--text-muted); margin-top:4px;">${slot.unplaced_reason || ''}</div>` : ''}
-                </div>
-            `;
-        }).join('');
+                     data-json='${slotJson}'
+                     style="background:${bgLight}; border-left: 4px solid ${color};"
+                     title="Σύρε στο πρόγραμμα — απομένουν ${e.remaining} από ${e.total} ώρες">
+                    <div class="palette-card-title" style="color:${color};">${subject}</div>
+                    <div class="palette-card-sub">${sub}</div>
+                    <span class="palette-badge">×${e.remaining}</span>
+                </div>`;
+        }
+        if (e.missing > 0) {
+            return `
+                <div class="lesson-card palette-card palette-missing"
+                     data-lesson-id="${e.lesson_id}" ${filterAttrs}
+                     style="border-left: 4px solid ${color};"
+                     title="Η λύση δεν έχει slots για ${e.missing} ώρες αυτού του μαθήματος">
+                    <div class="palette-card-title">${subject}</div>
+                    <div class="palette-card-sub">${sub}</div>
+                    <button class="btn btn-secondary btn-sm palette-sync-btn"
+                            onclick="TimetableView.syncLessonSlots(${e.lesson_id})">
+                        ➕ Λείπουν ${e.missing} ώρες
+                    </button>
+                </div>`;
+        }
+        return `
+            <div class="lesson-card palette-card palette-done"
+                 data-lesson-id="${e.lesson_id}" ${filterAttrs}
+                 style="border-left: 4px solid ${color};"
+                 title="Όλες οι ώρες είναι στο πρόγραμμα">
+                <div class="palette-card-title">${subject}</div>
+                <div class="palette-card-sub">${sub}</div>
+                <span class="palette-badge palette-badge-done">✓ ${e.placed}/${e.total}</span>
+            </div>`;
+    },
+
+    /**
+     * Build the «Παλέτα Μαθημάτων» panel HTML. Pure: palette data (from
+     * buildLessonPalette) + ui state in, HTML string out. The view mounts
+     * it, wires the control events, and re-applies filters.
+     *
+     * ui: {collapsed, search, fClass, fTeacher, fSubject} — restored on
+     * re-render so a drop doesn't reset the user's filters.
+     */
+    buildLessonPaletteHtml(palette, ui = {}) {
+        const esc = TimetableHelpers.esc;
+        const { entries, totals } = palette;
+        if (!entries.length) return '';
+
+        const opt = (values, selected) => values.map(v =>
+            `<option value="${esc(v)}" ${v === selected ? 'selected' : ''}>${esc(v)}</option>`
+        ).join('');
+        const classes = [...new Set(entries.map(e => e.class_name).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'el'));
+        const teachers = [...new Set(entries.map(e => e.teacher_name).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'el'));
+        const subjects = [...new Set(entries.map(e => e.subject_name).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'el'));
+
+        const cards = entries.map(e => TimetableHelpers._paletteCardHtml(e)).join('');
+        const done = totals.hours_remaining === 0 && totals.hours_missing === 0;
 
         return `
-            <div class="card mt-lg parking-lot" style="border-left: 4px solid var(--warning, #F59E0B);">
-                <div class="card-header">
-                    <h2 class="card-title">🅿️ Parking Lot — ${unplaced.length}
-                        ${unplaced.length === 1 ? 'ώρα δεν τοποθετήθηκε' : 'ώρες δεν τοποθετήθηκαν'}
-                    </h2>
+            <div class="card mt-lg lesson-palette" style="border-left: 4px solid ${done ? 'var(--success, #10B981)' : 'var(--primary, #3B82F6)'};">
+                <div class="card-header" style="cursor:pointer;" onclick="TimetableView.togglePalette()">
+                    <h2 class="card-title">🎨 Παλέτα Μαθημάτων — ${totals.hours_placed}/${totals.hours_total} ώρες τοποθετημένες${done ? ' ✅' : ''}</h2>
+                    <button class="btn btn-secondary btn-sm" id="palette-toggle"
+                            onclick="event.stopPropagation(); TimetableView.togglePalette()">
+                        ${ui.collapsed ? '▸ Εμφάνιση' : '▾ Απόκρυψη'}
+                    </button>
                 </div>
-                <p class="text-muted" style="margin-bottom: 1rem;">
-                    Σύρε ένα μάθημα στο πρόγραμμα για να το τοποθετήσεις χειροκίνητα.
-                    Οι περιορισμοί επικυρώνονται κατά το drop — αν συγκρούεται με κάτι, θα δεις σφάλμα.
-                </p>
-                ${cards}
+                <div id="palette-body" style="${ui.collapsed ? 'display:none;' : ''}">
+                    <p class="text-muted" style="margin-bottom: 0.75rem;">
+                        Όλα τα μαθήματα του σεναρίου. Σύρε μια κάρτα στο πρόγραμμα για να τοποθετήσεις μία ώρα —
+                        οι έλεγχοι τρέχουν στο drop, και αν η αίθουσα είναι πιασμένη επιλέγεται αυτόματα άλλη ελεύθερη.
+                    </p>
+                    <div class="palette-controls">
+                        <input type="text" class="form-input" id="palette-search"
+                               placeholder="🔍 Αναζήτηση..." value="${esc(ui.search || '')}">
+                        <select class="form-select" id="palette-f-class">
+                            <option value="">Όλα τα τμήματα</option>${opt(classes, ui.fClass)}
+                        </select>
+                        <select class="form-select" id="palette-f-teacher">
+                            <option value="">Όλοι οι καθηγητές</option>${opt(teachers, ui.fTeacher)}
+                        </select>
+                        <select class="form-select" id="palette-f-subject">
+                            <option value="">Όλα τα μαθήματα</option>${opt(subjects, ui.fSubject)}
+                        </select>
+                    </div>
+                    <div class="palette-cards">${cards}</div>
+                    <p class="text-muted palette-empty-msg" style="display:none; margin-top:0.5rem;">
+                        Κανένα μάθημα δεν ταιριάζει στα φίλτρα.
+                    </p>
+                </div>
             </div>
         `;
     },

@@ -142,23 +142,105 @@ test('hexToRgba: parses #RRGGBB to rgba() with alpha (default 1)', () => {
     assert.equal(H.hexToRgba('#000000'), 'rgba(0, 0, 0, 1)');
 });
 
-test('buildParkingLotHtml: cards with subject + reason, pluralised header', () => {
-    const html = H.buildParkingLotHtml([
-        { id: 7, subject_name: 'Άλγεβρα', class_name: 'Β2', teacher_name: 'Νίκος',
-          subject_color: '#3366CC', unplaced_reason: 'no room' },
-        { id: 8, subject_name: 'Έκθεση', class_name: 'Α1' },
-    ]);
-    assert.match(html, /Parking Lot — 2/);
-    assert.match(html, /ώρες δεν τοποθετήθηκαν/);   // plural
-    assert.match(html, /Άλγεβρα/);
-    assert.match(html, /data-slot-id="7"/);
-    assert.match(html, /no room/);
+// ---------------------------------------------------------------------------
+// Παλέτα Μαθημάτων — grouping (buildLessonPalette) + HTML (buildLessonPaletteHtml)
+// ---------------------------------------------------------------------------
+
+const PALETTE_LESSONS = [
+    { id: 1, periods_per_week: 3, subject_name: 'Άλγεβρα', class_name: 'Β2', teacher_name: 'Νίκος' },
+    { id: 2, periods_per_week: 2, subject_name: 'Έκθεση', class_name: 'Α1', teacher_name: 'Μαρία' },
+    { id: 3, periods_per_week: 2, subject_name: 'Φυσική', class_name: 'Γ1', teacher_name: 'Κώστας' },
+];
+const PALETTE_SLOTS = [
+    // Lesson 1: 1 placed + 2 unplaced (drag_slot must be id 11 — first seen)
+    { id: 10, lesson_id: 1, is_unplaced: false, day_of_week: 0, period_id: 5,
+      subject_name: 'Άλγεβρα', subject_color: '#3366CC', class_name: 'Β2', teacher_name: 'Νίκος' },
+    { id: 11, lesson_id: 1, is_unplaced: true,
+      subject_name: 'Άλγεβρα', subject_color: '#3366CC', class_name: 'Β2', teacher_name: 'Νίκος' },
+    { id: 12, lesson_id: 1, is_unplaced: true,
+      subject_name: 'Άλγεβρα', subject_color: '#3366CC', class_name: 'Β2', teacher_name: 'Νίκος' },
+    // Lesson 2: fully placed (2/2)
+    { id: 20, lesson_id: 2, is_unplaced: false, day_of_week: 1, period_id: 5,
+      subject_name: 'Έκθεση', subject_color: '#CC3333', class_name: 'Α1', teacher_name: 'Μαρία' },
+    { id: 21, lesson_id: 2, is_unplaced: false, day_of_week: 2, period_id: 6,
+      subject_name: 'Έκθεση', subject_color: '#CC3333', class_name: 'Α1', teacher_name: 'Μαρία' },
+    // Lesson 3: no slots at all → 2 missing (comes only from the lessons list)
+];
+
+test('buildLessonPalette: placed/remaining/missing counts + first drag slot', () => {
+    const { entries, totals } = H.buildLessonPalette(PALETTE_SLOTS, PALETTE_LESSONS);
+    const byId = new Map(entries.map(e => [e.lesson_id, e]));
+
+    const l1 = byId.get(1);
+    assert.equal(l1.placed, 1);
+    assert.equal(l1.remaining, 2);
+    assert.equal(l1.missing, 0);
+    assert.equal(l1.drag_slot.id, 11);
+    assert.equal(l1.subject_color, '#3366CC');
+
+    const l2 = byId.get(2);
+    assert.equal(l2.placed, 2);
+    assert.equal(l2.remaining, 0);
+    assert.equal(l2.drag_slot, null);
+
+    const l3 = byId.get(3);
+    assert.equal(l3.placed, 0);
+    assert.equal(l3.missing, 2);
+    assert.equal(l3.subject_name, 'Φυσική');   // names came from lessons list
+
+    assert.deepEqual(totals, {
+        hours_total: 7, hours_placed: 3, hours_remaining: 2, hours_missing: 2,
+    });
 });
 
-test('buildParkingLotHtml: single slot uses the singular header', () => {
-    const html = H.buildParkingLotHtml([{ id: 1, subject_name: 'X', class_name: 'Y' }]);
-    assert.match(html, /Parking Lot — 1/);
-    assert.match(html, /ώρα δεν τοποθετήθηκε/);     // singular
+test('buildLessonPalette: sort = draggable, then missing, then done', () => {
+    const { entries } = H.buildLessonPalette(PALETTE_SLOTS, PALETTE_LESSONS);
+    assert.deepEqual(entries.map(e => e.lesson_id), [1, 3, 2]);
+});
+
+test('buildLessonPalette: slots of a deleted lesson still show (total from slots)', () => {
+    const { entries } = H.buildLessonPalette(
+        [{ id: 5, lesson_id: 9, is_unplaced: true, subject_name: 'Ορφανό' }], [],
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].total, 1);
+    assert.equal(entries[0].remaining, 1);
+    assert.equal(entries[0].missing, 0);
+});
+
+test('buildLessonPaletteHtml: draggable card with badge, done card inert, missing card with sync button', () => {
+    const palette = H.buildLessonPalette(PALETTE_SLOTS, PALETTE_LESSONS);
+    const html = H.buildLessonPaletteHtml(palette);
+
+    assert.match(html, /Παλέτα Μαθημάτων — 3\/7 ώρες/);
+    // Draggable: uses the first unplaced slot id, shows ×2 remaining
+    assert.match(html, /data-slot-id="11"[^>]*/);
+    assert.match(html, /draggable="true"/);
+    assert.match(html, /×2/);
+    // Done: ✓ 2/2 badge, and the done card is not draggable
+    assert.match(html, /✓ 2\/2/);
+    assert.doesNotMatch(html, /palette-done[^>]*draggable="true"/);
+    // Missing: sync button wired to the lesson id
+    assert.match(html, /syncLessonSlots\(3\)/);
+    assert.match(html, /Λείπουν 2 ώρες/);
+    // Filters carry the distinct values
+    assert.match(html, /Όλα τα τμήματα/);
+    assert.match(html, /<option value="Β2"/);
+});
+
+test('buildLessonPaletteHtml: restores ui state (collapsed + filters)', () => {
+    const palette = H.buildLessonPalette(PALETTE_SLOTS, PALETTE_LESSONS);
+    const html = H.buildLessonPaletteHtml(palette, {
+        collapsed: true, search: 'αλγ', fClass: 'Β2',
+    });
+    assert.match(html, /id="palette-body" style="display:none;"/);
+    assert.match(html, /value="αλγ"/);
+    assert.match(html, /<option value="Β2" selected/);
+    assert.match(html, /▸ Εμφάνιση/);
+});
+
+test('buildLessonPaletteHtml: empty palette renders nothing', () => {
+    assert.equal(H.buildLessonPaletteHtml({ entries: [], totals: {} }), '');
 });
 
 // ---------------------------------------------------------------------------

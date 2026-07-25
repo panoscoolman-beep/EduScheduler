@@ -29,10 +29,13 @@ const TimetableView = {
 
             // Pick solution (latest or specified)
             const solutionId = App._currentSolutionId || solutions[0].id;
-            const [solution, students] = await Promise.all([
+            const [solution, students, lessons] = await Promise.all([
                 API.solver.getSolution(solutionId),
                 API.students.list().catch(() => []),
+                // Τροφοδοτεί την Παλέτα Μαθημάτων (ppw + μαθήματα χωρίς slots).
+                API.lessons.list().catch(() => []),
             ]);
+            this._lessons = lessons;
 
             // Extract unique values for filters
             const classNames = TimetableHelpers.uniqueValues(solution.slots, 'class_name');
@@ -109,7 +112,7 @@ const TimetableView = {
             // Initial render
             const firstFilter = 'all';
             TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,'class', firstFilter, solutionId);
-            this._renderParkingLot('parking-lot-container', solution.slots, solutionId);
+            this._renderLessonPalette('parking-lot-container', solution.slots, solutionId);
 
             // Resolve the current view/filter to export query params, or
             // null when the selection isn't a single teacher/student.
@@ -380,18 +383,96 @@ const TimetableView = {
     },
 
     /**
-     * Render the parking-lot panel below the grid. Lists every slot with
-     * is_unplaced=true. Each card is draggable into any grid cell — the
-     * drop handler in TimetableGrid will flip is_unplaced to false on
-     * the backend and re-render.
+     * Render the «Παλέτα Μαθημάτων» below the grid: ΟΛΑ τα μαθήματα του
+     * σεναρίου ως compact κάρτες με μετρητή υπολειπόμενων ωρών, φίλτρα και
+     * αναζήτηση. Οι κάρτες με διαθέσιμες ώρες σέρνονται στο πλέγμα (ίδιο
+     * drop-flow με το παλιό parking lot — μία ώρα ανά drop).
      */
-    _renderParkingLot(containerId, allSlots, solutionId) {
+    _renderLessonPalette(containerId, allSlots, solutionId) {
         const container = document.getElementById(containerId);
         if (!container) return;
-        const unplaced = allSlots.filter(s => s.is_unplaced);
-        container.innerHTML = unplaced.length
-            ? TimetableHelpers.buildParkingLotHtml(unplaced)
-            : '';
+        this._paletteCtx = { containerId, slots: allSlots, solutionId };
+        const ui = this._paletteUi || (this._paletteUi = {
+            collapsed: localStorage.getItem('eds-palette-collapsed') === '1',
+            search: '', fClass: '', fTeacher: '', fSubject: '',
+        });
+        const palette = TimetableHelpers.buildLessonPalette(allSlots, this._lessons || []);
+        container.innerHTML = TimetableHelpers.buildLessonPaletteHtml(palette, ui);
+        if (!container.innerHTML.trim()) return;
+
+        const wire = (id, key, ev) => {
+            const el = container.querySelector('#' + id);
+            if (el) el.addEventListener(ev, () => {
+                ui[key] = el.value;
+                this.applyPaletteFilters();
+            });
+        };
+        wire('palette-search', 'search', 'input');
+        wire('palette-f-class', 'fClass', 'change');
+        wire('palette-f-teacher', 'fTeacher', 'change');
+        wire('palette-f-subject', 'fSubject', 'change');
+        this.applyPaletteFilters();
+    },
+
+    /** Show/hide palette cards to match the current search + filters. */
+    applyPaletteFilters() {
+        const ui = this._paletteUi || {};
+        const q = (ui.search || '').trim().toLowerCase();
+        let visible = 0;
+        document.querySelectorAll('.lesson-palette .palette-card').forEach(c => {
+            const ok = (!ui.fClass || c.dataset.fclass === ui.fClass)
+                && (!ui.fTeacher || c.dataset.fteacher === ui.fTeacher)
+                && (!ui.fSubject || c.dataset.fsubject === ui.fSubject)
+                && (!q || (c.dataset.search || '').includes(q));
+            c.style.display = ok ? '' : 'none';
+            if (ok) visible += 1;
+        });
+        const msg = document.querySelector('.lesson-palette .palette-empty-msg');
+        if (msg) msg.style.display = visible ? 'none' : '';
+    },
+
+    /** Collapse/expand the palette; remembered in localStorage. */
+    togglePalette() {
+        const ui = this._paletteUi;
+        if (!ui) return;
+        ui.collapsed = !ui.collapsed;
+        localStorage.setItem('eds-palette-collapsed', ui.collapsed ? '1' : '0');
+        const body = document.getElementById('palette-body');
+        const btn = document.getElementById('palette-toggle');
+        if (body) body.style.display = ui.collapsed ? 'none' : '';
+        if (btn) btn.textContent = ui.collapsed ? '▸ Εμφάνιση' : '▾ Απόκρυψη';
+    },
+
+    /**
+     * Re-render the palette from the (shared, in-place mutated) slots array.
+     * Called by TimetableGrid after a successful/failed parking-card drop so
+     * counters and the «next draggable slot» stay fresh — filters intact.
+     */
+    refreshPalette() {
+        const ctx = this._paletteCtx;
+        if (!ctx) return;
+        this._renderLessonPalette(ctx.containerId, ctx.slots, ctx.solutionId);
+    },
+
+    /**
+     * «Λείπουν N ώρες»: υλοποίησε τα slots που λείπουν από το μάθημα σε
+     * αυτή τη λύση (POST sync-slots) και φρεσκάρισε slots + παλέτα. Το
+     * shared slots array ενημερώνεται IN PLACE ώστε grid και παλέτα να
+     * βλέπουν την ίδια αλήθεια χωρίς πλήρες re-render του view.
+     */
+    async syncLessonSlots(lessonId) {
+        const ctx = this._paletteCtx;
+        if (!ctx) return;
+        try {
+            const res = await API.solver.syncLessonSlots(ctx.solutionId, lessonId);
+            const fresh = await API.solver.getSolution(ctx.solutionId);
+            ctx.slots.length = 0;
+            Array.prototype.push.apply(ctx.slots, fresh.slots);
+            Toast.success(res.message || 'Οι ώρες προστέθηκαν στην παλέτα');
+            this.refreshPalette();
+        } catch (err) {
+            Toast.error('Αποτυχία συμπλήρωσης ωρών: ' + err.message);
+        }
     },
 
     _esc(s) {

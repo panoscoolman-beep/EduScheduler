@@ -383,3 +383,56 @@ def test_does_not_touch_existing_placed_slots_for_other_lessons(db):
         .count()
     )
     assert new_unplaced == 2
+
+
+# ---------------------------------------------------------------------------
+# Term scoping — a lesson belongs to ONE scenario; only that scenario's
+# solutions may receive its slots. Regression for the cross-term leak.
+# ---------------------------------------------------------------------------
+
+def _make_lesson_in_term(db, term_id, periods_per_week=2):
+    lesson = Lesson(
+        subject_id=db.test_subject.id,
+        teacher_id=db.test_teacher.id,
+        class_id=db.test_class.id,
+        periods_per_week=periods_per_week,
+        duration=1,
+        term_id=term_id,
+    )
+    db.add(lesson)
+    db.commit()
+    db.refresh(lesson)
+    return lesson
+
+
+def test_add_skips_solutions_of_other_terms(db):
+    sol_term1 = _make_solution(db, "optimal")          # term_id=1 (default)
+    sol_term2 = TimetableSolution(name="s2", status="optimal", term_id=2)
+    db.add(sol_term2)
+    db.commit()
+    db.refresh(sol_term2)
+
+    lesson = _make_lesson_in_term(db, term_id=2, periods_per_week=3)
+    result = add_lesson_to_open_solutions(db, lesson.id)
+
+    touched = {e["solution_id"] for e in result["added_to"]}
+    assert touched == {sol_term2.id}
+    assert (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.solution_id == sol_term1.id)
+        .count()
+    ) == 0
+
+
+def test_sync_skips_solutions_of_other_terms(db):
+    sol_term1 = _make_solution(db, "optimal")          # term_id=1 (default)
+    lesson = _make_lesson_in_term(db, term_id=2, periods_per_week=4)
+
+    result = sync_lesson_slot_count(db, lesson.id)
+
+    assert result["synced"] == []
+    assert (
+        db.query(TimetableSlot)
+        .filter(TimetableSlot.solution_id == sol_term1.id)
+        .count()
+    ) == 0
