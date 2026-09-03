@@ -510,6 +510,9 @@ a:hover { color: var(--accent-blue-hover); }
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: var(--space-md);
 }
+/* Πεδίο που πιάνει όλο το πλάτος της φόρμας (π.χ. ο επιλογέας μαθητών). */
+.form-grid .col-span-3,
+.form-grid .col-span-full { grid-column: 1 / -1; }
 
 .form-row {
     display: flex;
