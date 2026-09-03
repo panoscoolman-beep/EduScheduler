@@ -570,9 +570,24 @@ const TimetableHelpers = {
                 </div>`;
         }).join('');
 
+        // Συγχώνευση διαδοχικών ωρών με την ΙΔΙΑ αιτία: «1η (08:00) – 8η (15:00)
+        // — Κώλυμα καθηγητή Χ» αντί για οκτώ ίδιες γραμμές.
+        const runsOf = (list) => {
+            const runs = [];
+            for (const c of list) {
+                const reason = c.reason || 'μη διαθέσιμο';
+                const last = runs[runs.length - 1];
+                if (last && last.reason === reason) last.cells.push(c);
+                else runs.push({ reason, cells: [c] });
+            }
+            return runs;
+        };
+        const runLabel = (run) => run.cells.length === 1
+            ? periodLabel(run.cells[0])
+            : `${periodLabel(run.cells[0])} – ${periodLabel(run.cells[run.cells.length - 1])}`;
         const blockedRows = groupByDay(blocked).map(([day, list]) => `
                     <li><strong>${dayName(day)}:</strong> ${
-                        list.map(c => `${periodLabel(c)} — ${esc(c.reason || 'μη διαθέσιμο')}`).join(' · ')
+                        runsOf(list).map(r => `${runLabel(r)} — ${esc(r.reason)}`).join(' · ')
                     }</li>`).join('');
         const blockedHtml = blocked.length ? `
             <details class="placement-blocked"${okCells.length ? '' : ' open'}>

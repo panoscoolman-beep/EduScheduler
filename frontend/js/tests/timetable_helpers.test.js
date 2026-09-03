@@ -497,3 +497,23 @@ test('palette card: title carries the solver «γιατί έμεινε εκτό�
         [{ ...slots[0], unplaced_reason: null }], lessons));
     assert.doesNotMatch(html2, /Γιατί έμεινε εκτός/);
 });
+
+test('buildPlacementChoicesHtml: consecutive blocked periods with the same reason collapse into a range', () => {
+    const periods = [
+        { id: 1, short_name: '1η', start_time: '08:00', sort_order: 1 },
+        { id: 2, short_name: '2η', start_time: '09:00', sort_order: 2 },
+        { id: 3, short_name: '3η', start_time: '10:00', sort_order: 3 },
+        { id: 4, short_name: '4η', start_time: '11:00', sort_order: 4 },
+    ];
+    const map = { slot_id: 5, cells: [
+        { day: 0, period_id: 1, ok: false, reason: 'Κώλυμα καθηγητή Χ' },
+        { day: 0, period_id: 2, ok: false, reason: 'Κώλυμα καθηγητή Χ' },
+        { day: 0, period_id: 3, ok: false, reason: 'Κώλυμα καθηγητή Χ' },
+        { day: 0, period_id: 4, ok: false, reason: 'Το τμήμα Α1 έχει ήδη Φυσική' },
+        { day: 1, period_id: 1, ok: true, reason: null },
+    ]};
+    const html = H.buildPlacementChoicesHtml(map, periods);
+    assert.match(html, /1η \(08:00\) – 3η \(10:00\) — Κώλυμα καθηγητή Χ · 4η \(11:00\) — Το τμήμα Α1 έχει ήδη Φυσική/);
+    assert.equal((html.match(/Κώλυμα καθηγητή Χ/g) || []).length, 1);
+    assert.match(html, /4 μπλοκαρισμένες θέσεις/);
+});
