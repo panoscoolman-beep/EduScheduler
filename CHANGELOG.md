@@ -5,6 +5,32 @@
 
 ## [Unreleased]
 
+### 2026-09-03 — Επιλογέας μαθητών σε τμήμα: αναζήτηση + checkboxes + chips (294 pytest + 61 JS, v=46)
+
+**Γιατί.** Η φόρμα Τμήματος είχε native `<select multiple>` με Ctrl+Click, χωρίς
+αναζήτηση· ένα λάθος κλικ άδειαζε την επιλογή και το PUT ξανάγραφε όλες τις
+εγγραφές (χανόταν το `enrolled_at`). Άγνωστο id → 500, `student_ids` απόν στο
+PUT → άδειαζε σιωπηλά το τμήμα. Από την καρτέλα Μαθητή δεν φαινόταν καν σε
+ποια τμήματα είναι.
+
+**Τι.**
+- `frontend/js/components/student_picker.js` (νέο, dual-mode): αναζήτηση
+  χωρίς τόνους/πεζά (κάθε λέξη πρέπει να ταιριάζει), checkbox ανά γραμμή,
+  chips επιλεγμένων με ✕, «μόνο επιλεγμένοι», Enter = επιλογή του μοναδικού
+  αποτελέσματος, badges «σε ποια ΑΛΛΑ τμήματα είναι ήδη». Γενικός (items +
+  labelOf + badgesOf) — δουλεύει και ανάποδα.
+- `classes.js`: ο επιλογέας στη φόρμα (φρέσκοι μαθητές/τμήματα σε κάθε
+  άνοιγμα), στήλη Μαθητές = πλήθος εγγραφών. `students.js`: στήλη «Τμήματα»
+  (badges) + κουμπί 🏫 που ανοίγει τον ίδιο επιλογέα με items = τμήματα και
+  γράφει μόνο τις διαφορές.
+- Backend `routers/classes.py`: `set_enrollments` γράφει μόνο διαφορές (κρατά
+  `enrolled_at`), dedup + έλεγχος ύπαρξης (400 «Άγνωστοι μαθητές: …»),
+  `student_count` πάντα από τις εγγραφές (αγνοείται στο body),
+  `SchoolClassUpdate.student_ids: None` = μην αγγίξεις τις εγγραφές. Νέα
+  idempotent endpoints `POST/DELETE /api/classes/{id}/students/{sid}` και
+  `GET /api/classes/{id}/students`.
+- Tests: `tests/test_class_enrollments.py` (10) + `student_picker.test.js` (11).
+
 ### 2026-09-03 — Ονομαστικά conflicts στο drag & drop (284 pytest + 50 JS, v=45)
 
 **Γιατί.** Σε απόρριψη τοποθέτησης ο enforcer απαντούσε γενικά («Ο καθηγητής

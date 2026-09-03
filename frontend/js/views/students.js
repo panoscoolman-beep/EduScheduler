@@ -2,11 +2,15 @@
  * Students View — CRUD for tutoring center students.
  */
 const StudentsView = {
+    _classesById: new Map(),
+
     async render(container) {
+        await this._loadClasses();
         const table = new DataTable({
             columns: [
                 { key: 'last_name', label: 'Επώνυμο' },
                 { key: 'first_name', label: 'Όνομα' },
+                { key: 'class_ids', label: 'Τμήματα', render: v => this._classBadgesHtml(v) },
                 { key: 'email', label: 'Email', render: v => v ? `${v}` : '—' },
                 { key: 'phone', label: 'Τηλέφωνο', render: v => v ? `${v}` : '—' },
                 { key: 'max_days_per_week', label: 'Max Ημέρες/Εβδ', render: v => v || '—' },
@@ -14,6 +18,12 @@ const StudentsView = {
             apiService: API.students,
             entityName: 'Μαθητές',
             customActions: [
+                {
+                    id: 'classes',
+                    title: 'Τμήματα του μαθητή',
+                    icon: '🏫',
+                    handler: (item) => this._openClassPicker(item, table)
+                },
                 {
                     id: 'availability',
                     title: 'Πρόγραμμα / Κωλύματα',
@@ -69,6 +79,67 @@ const StudentsView = {
         await table.render(document.getElementById('students-table'));
         document.getElementById('crm-import-btn').addEventListener('click', () =>
             this._openCrmImport(container));
+    },
+
+    async _loadClasses() {
+        try {
+            const classes = await API.classes.list();
+            this._classesById = new Map(classes.map(c => [c.id, c]));
+        } catch (err) {
+            this._classesById = new Map();
+        }
+    },
+
+    /** Badges τμημάτων στη λίστα μαθητών (από τα class_ids της απάντησης). */
+    _classBadgesHtml(classIds) {
+        const names = (classIds || [])
+            .map(id => this._classesById.get(id))
+            .filter(Boolean)
+            .map(c => `<span class="sp-badge" title="${StudentPicker.esc(c.name)}">${StudentPicker.esc(c.short_name)}</span>`);
+        return names.length ? `<span class="sp-badges">${names.join('')}</span>` : '—';
+    },
+
+    /**
+     * Αντίστροφη κατεύθυνση: Μαθητής → Τμήματα. Ίδιος επιλογέας, items =
+     * τμήματα· στην αποθήκευση γράφονται μόνο οι διαφορές μέσω των
+     * idempotent POST/DELETE /classes/{id}/students/{sid}.
+     */
+    async _openClassPicker(student, table) {
+        const name = StudentPicker.studentLabel(student);
+        Modal.open(`🏫 Τμήματα — ${name}`,
+            '<div id="f-classes-picker"><div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div></div>',
+            async () => {
+                const before = new Set(student.class_ids || []);
+                const after = new Set(StudentPicker.getSelected());
+                const added = [...after].filter(id => !before.has(id));
+                const removed = [...before].filter(id => !after.has(id));
+                if (!added.length && !removed.length) { Modal.close(); return; }
+                try {
+                    for (const cid of added) await API.classes.addStudent(cid, student.id);
+                    for (const cid of removed) await API.classes.removeStudent(cid, student.id);
+                    Toast.success(`${name}: +${added.length} / −${removed.length} τμήματα`);
+                    Modal.close();
+                    await this._loadClasses();
+                    await table.loadData();
+                } catch (err) {
+                    Toast.error('Αποτυχία ενημέρωσης τμημάτων: ' + err.message);
+                }
+            });
+        try {
+            const classes = await API.classes.list();
+            this._classesById = new Map(classes.map(c => [c.id, c]));
+            StudentPicker.mount('f-classes-picker', {
+                items: classes,
+                selectedIds: student.class_ids || [],
+                labelOf: c => `${c.short_name} — ${c.name}`,
+                badgesOf: c => [{ text: `${(c.student_ids || []).length} μαθ.`, title: 'Μαθητές στο τμήμα' }],
+                placeholder: '🔍 Αναζήτηση τμήματος…',
+                noun: 'τμήματα',
+            });
+        } catch (err) {
+            const el = document.getElementById('f-classes-picker');
+            if (el) el.innerHTML = `<div class="sp-empty">Σφάλμα φόρτωσης τμημάτων: ${StudentPicker.esc(err.message)}</div>`;
+        }
     },
 
     async _openCrmImport(container) {

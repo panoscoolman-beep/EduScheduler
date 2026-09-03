@@ -208,7 +208,8 @@ class SchoolClassCreate(SchoolClassBase):
 
 
 class SchoolClassUpdate(SchoolClassBase):
-    student_ids: list[int] = []
+    # None = μην αγγίξεις τις εγγραφές μαθητών (πριν: default [] άδειαζε το τμήμα).
+    student_ids: list[int] | None = None
 
 
 class SchoolClassResponse(SchoolClassBase):

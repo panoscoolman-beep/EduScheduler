@@ -1,17 +1,21 @@
 /**
  * Classes View — CRUD for school classes/sections.
+ *
+ * Η επιλογή μαθητών γίνεται με τον StudentPicker (αναζήτηση + checkboxes +
+ * chips) αντί για native <select multiple> με Ctrl+Click. Οι λίστες
+ * μαθητών/τμημάτων φορτώνονται ΦΡΕΣΚΕΣ κάθε φορά που ανοίγει η φόρμα, ώστε
+ * τα badges «σε ποια άλλα τμήματα είναι ήδη» να είναι σωστά.
  */
 const ClassesView = {
     async render(container) {
         const classrooms = await API.classrooms.list();
-        const students = await API.request('/students/');
 
         const table = new DataTable({
             columns: [
                 { key: 'name', label: 'Τάξη' },
                 { key: 'short_name', label: 'Συντομ.' },
                 { key: 'grade_level', label: 'Βαθμίδα', render: v => v ? `${v}` : '—' },
-                { key: 'student_count', label: 'Μαθητές' },
+                { key: 'student_ids', label: 'Μαθητές', render: v => (v || []).length },
             ],
             apiService: API.classes,
             entityName: 'Τάξεις',
@@ -39,33 +43,46 @@ const ClassesView = {
                         </select>
                     </div>
                     <div class="form-group col-span-3">
-                        <label class="form-label">Μαθητές Τμήματος (Επιλογή πολλών - Ctrl/Cmd+Click)</label>
-                        <select class="form-select" id="f-students" multiple style="height: 120px;">
-                            ${students.map(s => `
-                                <option value="${s.id}" ${(item?.student_ids || []).includes(s.id) ? 'selected' : ''}>
-                                    ${s.last_name} ${s.first_name}
-                                </option>
-                            `).join('')}
-                        </select>
-                        <div style="font-size: 0.8rem; color: #a0aec0; margin-top: 4px;">Επιλέξτε όσους μαθητές παρακολουθούν αυτό το τμήμα.</div>
+                        <label class="form-label">Μαθητές Τμήματος</label>
+                        <div id="f-students-picker">
+                            <div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση μαθητών...</p></div>
+                        </div>
+                        <div class="text-muted" style="font-size: 0.8rem; margin-top: 4px;">
+                            Τσέκαρε όσους παρακολουθούν αυτό το τμήμα. Τα badges δείχνουν σε ποια άλλα τμήματα είναι ήδη.
+                        </div>
                     </div>
                 </div>
             `,
-            formParser: () => {
-                const selectElement = document.getElementById('f-students');
-                const selectedStudentIds = Array.from(selectElement.selectedOptions).map(opt => parseInt(opt.value));
-                
-                return {
-                    name: document.getElementById('f-name').value.trim(),
-                    short_name: document.getElementById('f-short_name').value.trim(),
-                    grade_level: parseInt(document.getElementById('f-grade').value) || null,
-                    student_ids: selectedStudentIds,
-                    home_room_id: parseInt(document.getElementById('f-homeroom').value) || null,
-                };
-            },
+            onFormReady: (item) => this._mountStudentPicker(item),
+            formParser: () => ({
+                name: document.getElementById('f-name').value.trim(),
+                short_name: document.getElementById('f-short_name').value.trim(),
+                grade_level: parseInt(document.getElementById('f-grade').value) || null,
+                student_ids: StudentPicker.getSelected(),
+                home_room_id: parseInt(document.getElementById('f-homeroom').value) || null,
+            }),
         });
 
         container.innerHTML = '<div id="classes-table"></div>';
         await table.render(document.getElementById('classes-table'));
+    },
+
+    /** Φρέσκοι μαθητές + τμήματα, μετά mount του επιλογέα στη φόρμα. */
+    async _mountStudentPicker(item) {
+        try {
+            const [students, classes] = await Promise.all([API.students.list(), API.classes.list()]);
+            const classesById = new Map(classes.map(c => [c.id, c]));
+            const currentId = item ? item.id : null;
+            StudentPicker.mount('f-students-picker', {
+                items: students,
+                selectedIds: item ? (item.student_ids || []) : [],
+                badgesOf: s => StudentPicker.otherClassBadges(s, classesById, currentId),
+                placeholder: '🔍 Αναζήτηση μαθητή (επώνυμο ή όνομα)…',
+                noun: 'μαθητές',
+            });
+        } catch (err) {
+            const el = document.getElementById('f-students-picker');
+            if (el) el.innerHTML = `<div class="sp-empty">Σφάλμα φόρτωσης μαθητών: ${StudentPicker.esc(err.message)}</div>`;
+        }
     },
 };

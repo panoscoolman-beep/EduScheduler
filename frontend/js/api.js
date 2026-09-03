@@ -89,6 +89,10 @@ const API = {
         create: (data) => API.post('/classes/', data),
         update: (id, data) => API.put(`/classes/${id}`, data),
         delete: (id) => API.delete(`/classes/${id}`),
+        // Εγγραφές μαθητών: μεμονωμένα, idempotent (επιλογέας + καρτέλα Μαθητή).
+        students: (id) => API.get(`/classes/${id}/students`),
+        addStudent: (classId, studentId) => API.post(`/classes/${classId}/students/${studentId}`),
+        removeStudent: (classId, studentId) => API.delete(`/classes/${classId}/students/${studentId}`),
     },
     periods: {
         list: () => API.get('/periods/'),
