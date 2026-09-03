@@ -317,7 +317,7 @@ def test_placement_map_cells_carry_names_short_label_and_blocking_slot(env):
 
     c = by[(2, env.p1.id)]
     assert c["code"] == pc.TEACHER_UNAVAILABLE and "Νικολάου" in c["reason"]
-    assert c["short"] == "⛔ Νικολάου"
+    assert c["short"] == "⛔ Ν"  # συντομογραφία, όπως οι κάρτες
 
     c = by[(3, env.p1.id)]
     assert c["code"] == pc.STUDENT_UNAVAILABLE and "Ζήση Ελένη" in c["reason"]

@@ -386,12 +386,16 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
     )
 
     # Ονόματα για ονομαστικές αιτίες — 4 μικρά bulk queries, όχι per-cell.
-    teacher_names = {t.id: t.name for t in db.query(Teacher.id, Teacher.name).all()}
+    teacher_rows = db.query(Teacher.id, Teacher.name, Teacher.short_name).all()
+    teacher_names = {t.id: t.name for t in teacher_rows}
+    # Οι ετικέτες των κελιών χρησιμοποιούν τη συντομογραφία (όπως οι κάρτες).
+    teacher_shorts = {t.id: (t.short_name or t.name) for t in teacher_rows}
     class_names = {c.id: c.short_name for c in db.query(SchoolClass.id, SchoolClass.short_name).all()}
     subject_names = {x.id: x.name for x in db.query(Subject.id, Subject.name).all()}
     rooms = db.query(Classroom).all()
     room_names = {r.id: r.name for r in rooms}
     my_teacher = teacher_names.get(lesson.teacher_id, "")
+    my_teacher_short = teacher_shorts.get(lesson.teacher_id, "")
     my_class = class_names.get(lesson.class_id, "")
 
     # Όλα τα ΑΛΛΑ τοποθετημένα slots της λύσης, με ταυτότητα μαθήματος.
@@ -535,7 +539,7 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
             elif cell in teacher_unav:
                 code = pc.TEACHER_UNAVAILABLE
                 reason = f"Κώλυμα καθηγητή {my_teacher}"
-                short = f"⛔ {my_teacher}"
+                short = f"⛔ {my_teacher_short}"
             elif cell in student_unav:
                 code = pc.STUDENT_UNAVAILABLE
                 ids = student_unav[cell]
