@@ -350,6 +350,7 @@ class TimetableSolutionResponse(BaseModel):
     created_at: str | None = None
     status: str
     score: float | None = None
+    term_id: int | None = None  # σε ποιο σενάριο ανήκει (για επιλογή από το CRM/bot)
     slots: list[TimetableSlotResponse] = []
 
     class Config:

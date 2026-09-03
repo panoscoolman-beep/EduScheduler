@@ -4,7 +4,7 @@ Solver API — Generate timetables and check status.
 
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
@@ -297,11 +297,17 @@ def regenerate_with_locks(
 
 
 @router.get("/solutions", response_model=list[TimetableSolutionResponse])
-def list_solutions(db: Session = Depends(get_db)):
-    """List generated timetable solutions for the ACTIVE scenario."""
+def list_solutions(
+    term_id: int | None = Query(
+        None, description="Σενάριο· απόν = το ενεργό. Το CRM/bot το χρησιμοποιεί "
+                          "για να διαλέξει πρόγραμμα άλλου σεναρίου χωρίς να αλλάξει το ενεργό."),
+    db: Session = Depends(get_db),
+):
+    """List generated timetable solutions for a scenario (default: the ACTIVE one)."""
+    scope_term_id = term_id if term_id is not None else get_active_term_id(db)
     solutions = (
         db.query(TimetableSolution)
-        .filter(TimetableSolution.term_id == get_active_term_id(db))
+        .filter(TimetableSolution.term_id == scope_term_id)
         .order_by(TimetableSolution.created_at.desc())
         .all()
     )
@@ -312,6 +318,7 @@ def list_solutions(db: Session = Depends(get_db)):
             created_at=_iso_utc(s.created_at),
             status=s.status,
             score=s.score,
+            term_id=s.term_id,
         )
         for s in solutions
     ]
@@ -369,6 +376,7 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
         created_at=_iso_utc(solution.created_at),
         status=solution.status,
         score=solution.score,
+        term_id=solution.term_id,
         slots=enriched_slots,
     )
 
