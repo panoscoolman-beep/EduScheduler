@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.auth import BearerTokenMiddleware
+from backend.services.placement_conflicts import install_conflict_handler
 from backend.config import settings
 from backend.database import engine, Base
 from backend.routers import (
@@ -113,6 +114,9 @@ app.add_middleware(
 # Bearer auth — guards /api/* except same-origin browser calls and the
 # public paths in auth._PUBLIC_API_PATHS (fail-closed if token unset).
 app.add_middleware(BearerTokenMiddleware)
+
+# 400 conflicts του drag&drop: detail (string) + conflict (δομή για highlight).
+install_conflict_handler(app)
 
 
 @app.get("/api/healthz", tags=["Health"])

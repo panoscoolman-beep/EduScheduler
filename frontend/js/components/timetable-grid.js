@@ -454,6 +454,13 @@ const TimetableGrid = {
                 if (info && !info.ok) {
                     cell.classList.add('cell-blocked');
                     if (info.reason) cell.title = info.reason;
+                    // Ορατή ετικέτα ΜΕΣΑ στο κελί (το title δεν εμφανίζεται
+                    // όσο κρατάς την κάρτα): «👤 Β2», «⛔ Νικολάου», «🚪 πλήρες».
+                    const label = document.createElement('span');
+                    label.className = 'cell-blocked-label';
+                    label.textContent = info.short || '⛔';
+                    label.title = info.reason || '';
+                    cell.appendChild(label);
                 }
             });
         } catch (err) {
@@ -467,6 +474,37 @@ const TimetableGrid = {
             c.classList.remove('cell-blocked');
             c.removeAttribute('title');
         });
+        document.querySelectorAll('.cell-blocked-label').forEach(l => l.remove());
+    },
+
+    /**
+     * Ενιαία αναφορά αποτυχίας τοποθέτησης/ανταλλαγής: toast με το
+     * ονομαστικό μήνυμα του server («Ο Νικολάου διδάσκει ήδη Φυσική στο
+     * Β2 — Τρίτη 3η») και, αν ο server είπε ΠΟΙΑ κάρτα φταίει
+     * (conflict.blocking_slot_id — ή card_slot_id σε swap), αναβόσβημα +
+     * scroll σε αυτήν ώστε να φαίνεται στο πλέγμα τι ακριβώς μπλοκάρει.
+     */
+    reportConflict(prefix, err) {
+        const conflict = err && err.conflict;
+        const msg = (err && err.message) || 'Άγνωστο σφάλμα';
+        Toast.error(prefix + msg, conflict ? 9000 : 6000);
+        if (!conflict) return;
+        const target = conflict.blocking_slot_id != null
+            ? conflict.blocking_slot_id : conflict.card_slot_id;
+        if (target != null) this.flashCard(target);
+    },
+
+    /** Αναβόσβημα κάρτας για ~4s (+ scroll στο κέντρο). Ακίνδυνο αν λείπει. */
+    flashCard(slotId) {
+        const card = document.querySelector(`.lesson-card[data-slot-id="${slotId}"]`);
+        if (!card) return;
+        card.classList.remove('conflict-flash');
+        void card.offsetWidth;  // επανεκκίνηση animation
+        card.classList.add('conflict-flash');
+        if (typeof card.scrollIntoView === 'function') {
+            card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+        setTimeout(() => card.classList.remove('conflict-flash'), 4500);
     },
 
     handleDragOver(event) {
@@ -680,7 +718,7 @@ const TimetableGrid = {
                 this._notifyParkingLotChanged();
             }
             sourceCard.dataset.json = JSON.stringify(slotData);
-            Toast.error('Αποτυχία: ' + err.message);
+            this.reportConflict('Αποτυχία: ', err);
         }
     },
 
@@ -728,7 +766,7 @@ const TimetableGrid = {
             }
             this._notifyHistoryChanged();
         } catch (err) {
-            Toast.error('Αποτυχία ανταλλαγής: ' + err.message);
+            this.reportConflict('Αποτυχία ανταλλαγής: ', err);
         }
     },
 

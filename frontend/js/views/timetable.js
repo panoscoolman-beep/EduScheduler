@@ -525,7 +525,7 @@ const TimetableView = {
             const html = TimetableHelpers.buildPlacementChoicesHtml(map, ctx.periods);
             const title = `🎯 ${slot.subject_name || 'Μάθημα'} — ${slot.class_name || ''}`;
             if (!html) {
-                Toast.error('Καμία νόμιμη θέση δεν είναι ελεύθερη για αυτό το μάθημα αυτή τη στιγμή.');
+                Toast.error('Δεν βρέθηκαν διδακτικές ώρες στο πρόγραμμα.');
                 return;
             }
             Modal.open(title, html, () => Modal.close(),
@@ -565,7 +565,7 @@ const TimetableView = {
             if (this._rerenderGrid) this._rerenderGrid();
             if (this._refreshHistoryButtons) this._refreshHistoryButtons();
         } catch (err) {
-            Toast.error('Αποτυχία τοποθέτησης: ' + err.message);
+            TimetableGrid.reportConflict('Αποτυχία τοποθέτησης: ', err);
         }
     },
 

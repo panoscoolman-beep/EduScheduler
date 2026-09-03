@@ -514,59 +514,82 @@ const TimetableHelpers = {
     indexPlacementMap(cells) {
         const idx = new Map();
         for (const c of cells || []) {
-            idx.set(`${c.day}:${c.period_id}`, { ok: !!c.ok, reason: c.reason || null });
+            idx.set(`${c.day}:${c.period_id}`, {
+                ok: !!c.ok,
+                reason: c.reason || null,
+                short: c.short || null,
+                code: c.code || null,
+                blocking_slot_id: c.blocking_slot_id ?? null,
+            });
         }
         return idx;
     },
 
     /**
      * Build the «Βρες μου θέση» modal body: every OK cell of a placement
-     * map as clickable chips grouped by day, sorted by period order.
-     * Pure: map + periods in, HTML out ('' when nothing is legal).
+     * map as clickable chips grouped by day (sorted by period order) PLUS a
+     * collapsible «Γιατί όχι αλλού» list with the named reason of every
+     * blocked cell. Pure: map + periods in, HTML out ('' only when the map
+     * has no cells at all — with zero legal cells the reasons still show).
      */
     buildPlacementChoicesHtml(map, periods) {
         const DAY_NAMES = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
-        const okCells = ((map && map.cells) || []).filter(c => c.ok);
-        if (!okCells.length) return '';
+        const esc = TimetableHelpers.esc;
+        const cells = (map && map.cells) || [];
+        if (!cells.length) return '';
 
         const periodById = new Map((periods || []).map(p => [p.id, p]));
-        const byDay = new Map();
-        for (const c of okCells) {
-            if (!byDay.has(c.day)) byDay.set(c.day, []);
-            byDay.get(c.day).push(c);
-        }
+        const sortOrder = (c) => { const p = periodById.get(c.period_id); return p ? p.sort_order : 0; };
+        const periodLabel = (c) => {
+            const p = periodById.get(c.period_id);
+            return p ? `${esc(p.short_name)} (${esc(p.start_time)})` : `#${c.period_id}`;
+        };
+        const dayName = (day) => DAY_NAMES[day] || `Ημέρα ${day + 1}`;
+        const groupByDay = (list) => {
+            const byDay = new Map();
+            for (const c of list) {
+                if (!byDay.has(c.day)) byDay.set(c.day, []);
+                byDay.get(c.day).push(c);
+            }
+            return [...byDay.keys()].sort((a, b) => a - b)
+                .map(day => [day, byDay.get(day).slice().sort((a, b) => sortOrder(a) - sortOrder(b))]);
+        };
 
-        const rows = [...byDay.keys()].sort((a, b) => a - b).map(day => {
-            const chips = byDay.get(day)
-                .slice()
-                .sort((a, b) => {
-                    const pa = periodById.get(a.period_id);
-                    const pb = periodById.get(b.period_id);
-                    return (pa ? pa.sort_order : 0) - (pb ? pb.sort_order : 0);
-                })
-                .map(c => {
-                    const p = periodById.get(c.period_id);
-                    const label = p
-                        ? `${TimetableHelpers.esc(p.short_name)} (${TimetableHelpers.esc(p.start_time)})`
-                        : `#${c.period_id}`;
-                    return `<button class="btn btn-secondary btn-sm placement-chip"
+        const okCells = cells.filter(c => c.ok);
+        const blocked = cells.filter(c => !c.ok);
+
+        const rows = groupByDay(okCells).map(([day, list]) => {
+            const chips = list.map(c => `<button class="btn btn-secondary btn-sm placement-chip"
                                 onclick="TimetableView.placeAt(${map.slot_id}, ${c.day}, ${c.period_id})">
-                                ${label}
-                            </button>`;
-                }).join('');
+                                ${periodLabel(c)}
+                            </button>`).join('');
             return `
                 <div class="placement-day-row">
-                    <strong>${DAY_NAMES[day] || `Ημέρα ${day + 1}`}</strong>
+                    <strong>${dayName(day)}</strong>
                     <div class="placement-chips">${chips}</div>
                 </div>`;
         }).join('');
 
-        return `
-            <p class="text-muted" style="margin-bottom:0.75rem;">
+        const blockedRows = groupByDay(blocked).map(([day, list]) => `
+                    <li><strong>${dayName(day)}:</strong> ${
+                        list.map(c => `${periodLabel(c)} — ${esc(c.reason || 'μη διαθέσιμο')}`).join(' · ')
+                    }</li>`).join('');
+        const blockedHtml = blocked.length ? `
+            <details class="placement-blocked"${okCells.length ? '' : ' open'}>
+                <summary>⛔ Γιατί όχι αλλού — ${blocked.length} μπλοκαρισμένες θέσεις</summary>
+                <ul>${blockedRows}</ul>
+            </details>` : '';
+
+        const intro = okCells.length
+            ? `<p class="text-muted" style="margin-bottom:0.75rem;">
                 ${okCells.length} νόμιμες θέσεις — διάλεξε μία και η ώρα τοποθετείται
                 αμέσως (η αίθουσα επιλέγεται αυτόματα).
-            </p>
-            ${rows}`;
+            </p>`
+            : `<p class="text-muted" style="margin-bottom:0.75rem;">
+                <b>Καμία νόμιμη θέση</b> αυτή τη στιγμή — παρακάτω φαίνεται τι μπλοκάρει κάθε ώρα.
+            </p>`;
+
+        return intro + rows + blockedHtml;
     },
 
     /** One palette card. Split out of buildLessonPaletteHtml for readability. */
@@ -595,7 +618,10 @@ const TimetableHelpers = {
                      onclick="TimetableGrid.showDetails(this)"
                      data-json='${slotJson}'
                      style="background:${bgLight}; border-left: 4px solid ${color};"
-                     title="Σύρε στο πρόγραμμα — απομένουν ${e.remaining} από ${e.total} ώρες">
+                     title="Σύρε στο πρόγραμμα — απομένουν ${e.remaining} από ${e.total} ώρες${
+                         e.drag_slot.unplaced_reason
+                             ? ' · Γιατί έμεινε εκτός: ' + esc(e.drag_slot.unplaced_reason).replace(/"/g, '&quot;')
+                             : ''}">
                     <div class="palette-card-title" style="color:${color};">${subject}</div>
                     <div class="palette-card-sub">${sub}</div>
                     <span class="palette-badge">×${e.remaining}</span>

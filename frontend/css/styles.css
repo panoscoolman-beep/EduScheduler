@@ -1313,6 +1313,45 @@ a:hover { color: var(--accent-blue-hover); }
     opacity: 0.45;
     filter: grayscale(0.7);
 }
+/* Ονομαστική ετικέτα μέσα στο μπλοκαρισμένο κελί (το title δεν φαίνεται
+   όσο κρατάς την κάρτα): «👤 Β2» / «⛔ Νικολάου» / «🚪 πλήρες». */
+.droppable-cell { position: relative; }
+.cell-blocked-label {
+    position: absolute;
+    top: 2px;
+    right: 3px;
+    z-index: 2;
+    max-width: calc(100% - 6px);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(31, 41, 55, 0.85);
+    color: #fff;
+    font-size: 0.62rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+.timetable-grid.compact-grid .cell-blocked-label { font-size: 0.55rem; padding: 0 3px; }
+
+/* Αναβόσβημα της κάρτας που μπλοκάρει μια τοποθέτηση (reportConflict). */
+@keyframes conflict-flash {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    30%, 70% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.9); }
+}
+.lesson-card.conflict-flash {
+    animation: conflict-flash 0.9s ease-in-out 4;
+    outline: 2px solid #EF4444;
+    outline-offset: 1px;
+    opacity: 1 !important;
+    filter: none !important;
+    z-index: 3;
+}
+.placement-blocked { margin-top: 0.75rem; font-size: 0.85rem; }
+.placement-blocked summary { cursor: pointer; color: var(--text-secondary, #6B7280); }
+.placement-blocked ul { margin: 0.4rem 0 0 1rem; padding: 0; }
+.placement-blocked li { margin-bottom: 0.25rem; }
 
 /* ─── «Βρες μου θέση» (placement chips modal + κουμπί κάρτας) ───────── */
 .palette-find-btn {

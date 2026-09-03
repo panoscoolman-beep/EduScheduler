@@ -258,18 +258,28 @@ test('buildPlacementChoicesHtml: chips grouped by day, sorted by period order', 
     assert.match(html, /3 νόμιμες θέσεις/);
     assert.match(html, /Δευτέρα/);
     assert.match(html, /Τετάρτη/);
-    assert.doesNotMatch(html, /Τρίτη/);                       // blocked day absent
     assert.match(html, /placeAt\(42, 0, 5\)/);
     assert.match(html, /placeAt\(42, 2, 5\)/);
     assert.doesNotMatch(html, /placeAt\(42, 1, 5\)/);          // blocked cell no chip
+    // Το μπλοκαρισμένο κελί εμφανίζεται ΜΟΝΟ στη λίστα «Γιατί όχι αλλού»
+    const chipsPart = html.slice(0, html.indexOf('<details'));
+    assert.doesNotMatch(chipsPart, /Τρίτη/);
+    assert.match(html, /1 μπλοκαρισμένες θέσεις/);
+    assert.match(html, /<strong>Τρίτη:<\/strong> 1η \(16:00\) — Κώλυμα/);
+    assert.doesNotMatch(html, /<details class="placement-blocked" open>/); // υπάρχουν νόμιμες → κλειστό
     // Sort: 1η (16:00) chip appears before 2η (17:00) on Monday
     assert.ok(html.indexOf('1η (16:00)') < html.indexOf('2η (17:00)'));
 });
 
-test('buildPlacementChoicesHtml: empty when no legal cell', () => {
-    assert.equal(H.buildPlacementChoicesHtml(
-        { slot_id: 1, cells: [{ day: 0, period_id: 5, ok: false, reason: 'x' }] }, [],
-    ), '');
+test('buildPlacementChoicesHtml: no legal cell → reasons still shown (open), no chips', () => {
+    const html = H.buildPlacementChoicesHtml(
+        { slot_id: 1, cells: [{ day: 0, period_id: 5, ok: false, reason: 'Ο καθηγητής <Χ> διδάσκει ήδη' }] }, [],
+    );
+    assert.match(html, /Καμία νόμιμη θέση/);
+    assert.doesNotMatch(html, /placeAt\(/);
+    assert.match(html, /<details class="placement-blocked" open>/);
+    assert.match(html, /Ο καθηγητής &lt;Χ&gt; διδάσκει ήδη/);   // escaped
+    assert.equal(H.buildPlacementChoicesHtml({ slot_id: 1, cells: [] }, []), '');
     assert.equal(H.buildPlacementChoicesHtml(null, []), '');
 });
 
@@ -304,8 +314,10 @@ test('indexPlacementMap: keys day:period, normalises ok/reason', () => {
         { day: 0, period_id: 5, ok: true, reason: null },
         { day: 2, period_id: 7, ok: false, reason: 'Κώλυμα καθηγητή' },
     ]);
-    assert.deepEqual(idx.get('0:5'), { ok: true, reason: null });
-    assert.deepEqual(idx.get('2:7'), { ok: false, reason: 'Κώλυμα καθηγητή' });
+    assert.deepEqual(idx.get('0:5'),
+        { ok: true, reason: null, short: null, code: null, blocking_slot_id: null });
+    assert.deepEqual(idx.get('2:7'),
+        { ok: false, reason: 'Κώλυμα καθηγητή', short: null, code: null, blocking_slot_id: null });
     assert.equal(idx.get('1:5'), undefined);
     assert.equal(H.indexPlacementMap(null).size, 0);
 });
@@ -435,4 +447,53 @@ test('buildFeasibilityHtml: escapes error text', () => {
     });
     assert.ok(!html.includes('<script>x'));
     assert.match(html, /&lt;script&gt;/);
+});
+
+// ---------------------------------------------------------------------------
+// Ονομαστικά conflicts (2026-09): short labels, blocking slot, λόγος παλέτας
+// ---------------------------------------------------------------------------
+
+test('indexPlacementMap: carries short label, code and blocking_slot_id from the server', () => {
+    const idx = H.indexPlacementMap([
+        { day: 1, period_id: 5, ok: false, reason: 'Ο καθηγητής Νικολάου διδάσκει ήδη Φυσική στο Β2',
+          code: 'teacher_busy', short: '👤 Β2', blocking_slot_id: 77 },
+        { day: 1, period_id: 6, ok: false, reason: 'Κώλυμα καθηγητή Νικολάου',
+          code: 'teacher_unavailable', short: '⛔ Νικολάου', blocking_slot_id: null },
+    ]);
+    assert.equal(idx.get('1:5').short, '👤 Β2');
+    assert.equal(idx.get('1:5').code, 'teacher_busy');
+    assert.equal(idx.get('1:5').blocking_slot_id, 77);
+    assert.equal(idx.get('1:6').blocking_slot_id, null);
+});
+
+test('buildPlacementChoicesHtml: blocked reasons grouped by day and sorted by period', () => {
+    const periods = [
+        { id: 5, short_name: '1η', start_time: '16:00', sort_order: 1 },
+        { id: 7, short_name: '2η', start_time: '17:00', sort_order: 2 },
+    ];
+    const map = { slot_id: 9, cells: [
+        { day: 3, period_id: 7, ok: false, reason: 'Κώλυμα μαθητή: Ζήση Ελένη' },
+        { day: 3, period_id: 5, ok: false, reason: 'Το τμήμα Α1 έχει ήδη Φυσική με Παππά' },
+        { day: 0, period_id: 5, ok: true, reason: null },
+    ]};
+    const html = H.buildPlacementChoicesHtml(map, periods);
+    assert.match(html, /1 νόμιμες θέσεις/);
+    assert.match(html, /2 μπλοκαρισμένες θέσεις/);
+    const li = html.match(/<li><strong>Πέμπτη:<\/strong>([^<]*)<\/li>/);
+    assert.ok(li, 'Πέμπτη row present');
+    assert.ok(li[1].indexOf('1η (16:00) — Το τμήμα Α1') < li[1].indexOf('2η (17:00) — Κώλυμα μαθητή'));
+});
+
+test('palette card: title carries the solver «γιατί έμεινε εκτός» reason when present', () => {
+    const slots = [
+        { id: 31, lesson_id: 7, is_unplaced: true, unplaced_reason: 'Δεν βρέθηκε κατάλληλη θέση "με" εισαγωγικά',
+          subject_name: 'Χημεία', subject_color: '#3366CC', class_name: 'Γ2', teacher_name: 'Άννα' },
+    ];
+    const lessons = [{ id: 7, periods_per_week: 1, subject_name: 'Χημεία', class_name: 'Γ2', teacher_name: 'Άννα' }];
+    const html = H.buildLessonPaletteHtml(H.buildLessonPalette(slots, lessons));
+    assert.match(html, /Γιατί έμεινε εκτός: Δεν βρέθηκε κατάλληλη θέση &quot;με&quot; εισαγωγικά/);
+    // Χωρίς λόγο → χωρίς το επίθεμα
+    const html2 = H.buildLessonPaletteHtml(H.buildLessonPalette(
+        [{ ...slots[0], unplaced_reason: null }], lessons));
+    assert.doesNotMatch(html2, /Γιατί έμεινε εκτός/);
 });

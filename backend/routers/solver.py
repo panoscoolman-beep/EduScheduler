@@ -14,6 +14,8 @@ from backend.models import (
     utcnow_naive,
 )
 from backend.services import slot_history as slot_history_svc
+from backend.services import placement_conflicts as pc
+from backend.services.placement_conflicts import PlacementConflict
 from backend.services.slot_placement import (
     build_placement_map,
     resolve_and_validate_target_room,
@@ -528,12 +530,19 @@ def swap_slots(
     target_b = TimetableSlotUpdate(
         day_of_week=slot_a.day_of_week, period_id=slot_a.period_id
     )
-    room_a = resolve_and_validate_target_room(
-        db, slot_a, target_a, extra_exclude_slot_id=slot_b.id
-    )
-    room_b = resolve_and_validate_target_room(
-        db, slot_b, target_b, extra_exclude_slot_id=slot_a.id
-    )
+    # Σε αποτυχία πες ΠΟΙΑ από τις δύο κάρτες δεν χωράει στη θέση της άλλης.
+    def _validate(moving: TimetableSlot, target, other: TimetableSlot) -> int:
+        try:
+            return resolve_and_validate_target_room(
+                db, moving, target, extra_exclude_slot_id=other.id
+            )
+        except PlacementConflict as exc:
+            label = pc.lesson_phrase(pc.describe_slot(db, moving))
+            raise exc.prefixed(f"Η κάρτα «{label}» δεν χωράει στη θέση της άλλης: ",
+                               card_slot_id=moving.id)
+
+    room_a = _validate(slot_a, target_a, slot_b)
+    room_b = _validate(slot_b, target_b, slot_a)
 
     def _state(s: TimetableSlot) -> dict:
         return {

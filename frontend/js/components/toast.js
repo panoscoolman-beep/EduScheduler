@@ -32,7 +32,7 @@ const Toast = {
     },
 
     success(message) { this.show(message, 'success'); },
-    error(message) { this.show(message, 'error', 6000); },
+    error(message, duration = 6000) { this.show(message, 'error', duration); },
     warning(message) { this.show(message, 'warning'); },
     info(message) { this.show(message, 'info'); },
 };

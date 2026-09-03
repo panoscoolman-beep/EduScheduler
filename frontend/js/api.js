@@ -35,6 +35,8 @@ const API = {
             const err = new Error(message);
             err.status = response.status;
             err.detail = detail;  // raw — lets callers detect e.g. requires_force
+            // Ονομαστικό conflict του drag&drop (code, blocking_slot_id, ...) — null αλλού.
+            err.conflict = (data && data.conflict) || null;
             throw err;
         }
 
