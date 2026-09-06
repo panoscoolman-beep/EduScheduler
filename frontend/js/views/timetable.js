@@ -127,7 +127,9 @@ const TimetableView = {
             document.getElementById('tt-print').addEventListener('click', () => {
                 const params = exportParams();
                 if (params) {
-                    window.open(`/api/exports/print?${params}`, '_blank');
+                    const withLabel = TimetableHelpers.withPrintClassLabel(
+                        params, TimetableHelpers.printClassLabelPref());
+                    window.open(`/api/exports/print?${withLabel}`, '_blank');
                 } else {
                     window.print();
                 }

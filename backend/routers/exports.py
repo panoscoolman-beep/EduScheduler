@@ -144,18 +144,37 @@ def _days_for_school(db: Session) -> list[int]:
     return list(range(days_per_week))
 
 
-def _slot_cell_parts(slot: TimetableSlot, detail_kind: str) -> tuple[str, str, str]:
+# Πώς γράφεται το τμήμα στα προγράμματα καθηγητών. Στο φροντιστήριο το
+# ΠΛΗΡΕΣ όνομα τμήματος είναι τα ονόματα των παιδιών («ΑΔΑΜΑΝΤΙΑ ΒΟΥΡΤΖΟΥΜΗ
+# ΑΛ») και η συντομογραφία το μάθημα («ΑΛΓΕΒΡΑ-Κ-Γ») — ο καθηγητής θέλει να
+# βλέπει ποιους έχει. Default: full.
+CLASS_LABEL_MODES = ("full", "short", "both")
+
+
+def _class_label(school_class, mode: str) -> str:
+    if not school_class:
+        return ""
+    name = school_class.name or ""
+    short = school_class.short_name or ""
+    if mode == "short":
+        return short or name
+    if mode == "both" and short and short != name:
+        return f"{name} ({short})" if name else short
+    return name or short
+
+
+def _slot_cell_parts(
+    slot: TimetableSlot, detail_kind: str, class_label: str = "full"
+) -> tuple[str, str, str]:
     """(subject, detail, room) strings for one slot cell.
 
     detail_kind: τι δείχνουμε κάτω από το μάθημα — 'class' στα προγράμματα
-    καθηγητών, 'teacher' στα προγράμματα τμημάτων/μαθητών/αιθουσών."""
+    καθηγητών, 'teacher' στα προγράμματα τμημάτων/μαθητών/αιθουσών.
+    class_label: full|short|both — μορφή του τμήματος (βλ. CLASS_LABEL_MODES)."""
     lesson = slot.lesson
     subject = (lesson.subject.short_name or lesson.subject.name) if lesson.subject else "—"
     if detail_kind == "class":
-        detail = (
-            (lesson.school_class.short_name or lesson.school_class.name)
-            if lesson.school_class else ""
-        )
+        detail = _class_label(lesson.school_class, class_label)
     else:
         detail = (lesson.teacher.short_name or lesson.teacher.name) if lesson.teacher else ""
     room = slot.classroom.name if slot.classroom else ""
@@ -167,13 +186,14 @@ def _grid_table_html(
     teaching_periods: list[Period],
     days: list[int],
     detail_kind: str,
+    class_label: str = "full",
 ) -> str:
     """The weekly grid <table> used by both single and bulk print."""
     grid: dict[tuple[int, int], list[str]] = {}
     for slot in slots:
         if slot.day_of_week is None:
             continue
-        subject, detail, room = _slot_cell_parts(slot, detail_kind)
+        subject, detail, room = _slot_cell_parts(slot, detail_kind, class_label)
         cell = f"<b>{escape(subject)}</b>"
         if detail:
             cell += f"<br><small>{escape(detail)}</small>"
@@ -215,6 +235,34 @@ _PRINT_CSS = """
     .noprint { display: none; }
   }
 """
+
+
+def _class_label_toolbar(current: str, base_query: str) -> str:
+    """Επιλογή μορφής τμήματος ΜΕΣΑ στη σελίδα εκτύπωσης (δεν τυπώνεται).
+    Τα links ξαναφορτώνουν με άλλο class_label και θυμούνται την επιλογή
+    στο localStorage (ίδιο origin με την εφαρμογή)."""
+    labels = {"full": "Πλήρες όνομα (μαθητές)", "short": "Συντομογραφία", "both": "Και τα δύο"}
+    links = []
+    for mode, text in labels.items():
+        if mode == current:
+            links.append(f"<b>{escape(text)}</b>")
+        else:
+            links.append(
+                f"<a href=\"?{escape(base_query)}&class_label={mode}\" "
+                f"onclick=\"try{{localStorage.setItem('eds-print-class-label','{mode}')}}catch(e){{}}\">"
+                f"{escape(text)}</a>"
+            )
+    return ("<p class='noprint' style='font-size:12px;color:#666;margin-bottom:12px'>"
+            "Τμήμα ως: " + " · ".join(links) + "</p>")
+
+
+def _validate_class_label(value: str) -> str:
+    if value not in CLASS_LABEL_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail="Το class_label δέχεται: full, short ή both",
+        )
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +445,7 @@ def export_print(
     teacher_id: int | None = None,
     student_id: int | None = None,
     all: str | None = None,
+    class_label: str = "full",
     db: Session = Depends(get_db),
 ):
     """Printable weekly grid(s). Δύο λειτουργίες:
@@ -404,7 +453,10 @@ def export_print(
     - Ένα άτομο: ?teacher_id= ή ?student_id= (όπως πάντα).
     - Μαζικά: ?all=teachers|classes → ΟΛΑ τα προγράμματα σε ένα έγγραφο,
       ένα ανά σελίδα (page-break) — η ροή «μοίρασε προγράμματα» σε 1 κλικ.
+    - class_label=full|short|both: πώς γράφεται το τμήμα στα προγράμματα
+      καθηγητών (default full = τα ονόματα των παιδιών).
     """
+    class_label = _validate_class_label(class_label)
     if all is not None:
         if teacher_id is not None or student_id is not None:
             raise HTTPException(
@@ -424,7 +476,7 @@ def export_print(
 
         sections_html = []
         for label, entity_slots in _bulk_sections(db, solution_id, group_by):
-            table = _grid_table_html(entity_slots, teaching_periods, days, detail_kind)
+            table = _grid_table_html(entity_slots, teaching_periods, days, detail_kind, class_label)
             sections_html.append(
                 "<section class='entity'>"
                 f"<h1>📅 Εβδομαδιαίο Πρόγραμμα — {escape(label)}</h1>"
@@ -433,12 +485,16 @@ def export_print(
                 f"{table}</section>"
             )
         body = "".join(sections_html) or "<p>Καμία τοποθετημένη ώρα σε αυτή τη λύση.</p>"
+        toolbar = (
+            _class_label_toolbar(class_label, f"solution_id={solution_id}&all={all}")
+            if detail_kind == "class" else ""
+        )
         html = f"""<!DOCTYPE html>
 <html lang="el">
 <head><meta charset="utf-8"><title>{escape(title)}</title>
 <style>{_PRINT_CSS}</style></head>
 <body>
-{body}
+{toolbar}{body}
 <p class="noprint" style="margin-top:16px">
   <button onclick="window.print()" style="padding:8px 16px">🖨️ Εκτύπωση / Αποθήκευση PDF</button>
 </p>
@@ -451,7 +507,11 @@ def export_print(
     teaching_periods = [p for p in periods if not p.is_break]
     days = _days_for_school(db)
     detail_kind = "class" if teacher_id is not None else "teacher"
-    table = _grid_table_html(slots, teaching_periods, days, detail_kind)
+    table = _grid_table_html(slots, teaching_periods, days, detail_kind, class_label)
+    toolbar = (
+        _class_label_toolbar(class_label, f"solution_id={solution_id}&teacher_id={teacher_id}")
+        if teacher_id is not None else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="el">
@@ -461,7 +521,7 @@ def export_print(
 <style>{_PRINT_CSS}</style>
 </head>
 <body>
-<h1>📅 Εβδομαδιαίο Πρόγραμμα — {escape(label)}</h1>
+{toolbar}<h1>📅 Εβδομαδιαίο Πρόγραμμα — {escape(label)}</h1>
 <div class="sub">Λύση: {escape(solution.name or str(solution.id))} ·
 Εκτυπώθηκε {datetime.date.today().strftime('%d/%m/%Y')} · Φροντιστήριο ΚΟΡΥΦΗ</div>
 {table}

@@ -517,3 +517,22 @@ test('buildPlacementChoicesHtml: consecutive blocked periods with the same reaso
     assert.equal((html.match(/Κώλυμα καθηγητή Χ/g) || []).length, 1);
     assert.match(html, /4 μπλοκαρισμένες θέσεις/);
 });
+
+test('printClassLabelPref: reads localStorage, defaults to full, tolerates missing/throwing storage', () => {
+    const mem = (v) => ({ getItem: () => v });
+    assert.equal(H.printClassLabelPref(mem('short')), 'short');
+    assert.equal(H.printClassLabelPref(mem('both')), 'both');
+    assert.equal(H.printClassLabelPref(mem('nope')), 'full');
+    assert.equal(H.printClassLabelPref(null), 'full');
+    assert.equal(H.printClassLabelPref({ getItem: () => { throw new Error('x'); } }), 'full');
+});
+
+test('withPrintClassLabel: only teacher exports get the class_label param', () => {
+    assert.equal(H.withPrintClassLabel('solution_id=1&teacher_id=7', 'short'),
+        'solution_id=1&teacher_id=7&class_label=short');
+    assert.equal(H.withPrintClassLabel('solution_id=1&all=teachers', 'both'),
+        'solution_id=1&all=teachers&class_label=both');
+    assert.equal(H.withPrintClassLabel('solution_id=1&student_id=3', 'short'), 'solution_id=1&student_id=3');
+    assert.equal(H.withPrintClassLabel('solution_id=1&all=classes', 'short'), 'solution_id=1&all=classes');
+    assert.equal(H.withPrintClassLabel(null, 'short'), null);
+});

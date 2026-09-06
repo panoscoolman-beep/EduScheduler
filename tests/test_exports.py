@@ -267,3 +267,48 @@ def test_xlsx_sheet_titles_are_safe_and_unique(client):
 
     wb = _load_workbook(client.get(f"/api/exports/xlsx?solution_id={client.sol.id}&mode=teachers"))
     assert len(wb.sheetnames) == 3
+
+
+# ---------------------------------------------------------------------------
+# class_label: πώς γράφεται το τμήμα στα προγράμματα καθηγητών (2026-09-06)
+# ---------------------------------------------------------------------------
+
+def _teacher_print(client, **extra):
+    q = "&".join(f"{k}={v}" for k, v in extra.items())
+    return client.get(
+        f"/api/exports/print?solution_id={client.sol.id}&teacher_id={client.t1.id}"
+        + (f"&{q}" if q else "")
+    )
+
+
+def test_teacher_print_defaults_to_full_class_name(client):
+    res = _teacher_print(client)
+    assert res.status_code == 200
+    assert "Α1 Λυκείου" in res.text          # πλήρες όνομα (= ονόματα παιδιών)
+    assert "<small>Α1</small>" not in res.text  # όχι η συντομογραφία μόνη της
+    assert "Τμήμα ως:" in res.text and "class_label=short" in res.text
+
+
+def test_teacher_print_short_and_both(client):
+    short = _teacher_print(client, class_label="short").text
+    assert "<small>Α1</small>" in short and "Α1 Λυκείου" not in short
+    both = _teacher_print(client, class_label="both").text
+    assert "Α1 Λυκείου (Α1)" in both
+
+
+def test_class_label_rejects_unknown_value(client):
+    assert _teacher_print(client, class_label="nope").status_code == 400
+
+
+def test_bulk_teachers_print_respects_class_label(client):
+    base = f"/api/exports/print?solution_id={client.sol.id}&all=teachers"
+    assert "Α1 Λυκείου" in client.get(base).text                       # default full
+    assert "Α1 Λυκείου" not in client.get(base + "&class_label=short").text
+    assert "Τμήμα ως:" in client.get(base).text
+
+
+def test_student_and_class_prints_have_no_class_label_toolbar(client):
+    res = client.get(f"/api/exports/print?solution_id={client.sol.id}&student_id={client.student.id}")
+    assert res.status_code == 200 and "Τμήμα ως:" not in res.text
+    res = client.get(f"/api/exports/print?solution_id={client.sol.id}&all=classes")
+    assert res.status_code == 200 and "Τμήμα ως:" not in res.text

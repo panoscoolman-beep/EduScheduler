@@ -79,7 +79,9 @@ const InsightsModal = {
                     Toast.info('Η εκτύπωση υποστηρίζει Καθηγητές ή Τμήματα — για αίθουσες διάλεξε Excel.');
                     return;  // μείνε ανοιχτό για να αλλάξει επιλογή
                 }
-                window.open(`/api/exports/print?solution_id=${solutionId}&all=${mode}`, '_blank');
+                const params = TimetableHelpers.withPrintClassLabel(
+                    `solution_id=${solutionId}&all=${mode}`, TimetableHelpers.printClassLabelPref());
+                window.open(`/api/exports/print?${params}`, '_blank');
             } else {
                 window.open(`/api/exports/xlsx?solution_id=${solutionId}&mode=${mode}`, '_blank');
             }

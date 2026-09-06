@@ -61,6 +61,25 @@ const TimetableHelpers = {
         return null;
     },
 
+    /**
+     * Προτίμηση «Τμήμα ως» για τις εκτυπώσεις καθηγητών (full|short|both),
+     * όπως τη θυμάται η σελίδα εκτύπωσης στο localStorage. Pure — το storage
+     * περνιέται ως όρισμα (default το window.localStorage αν υπάρχει).
+     */
+    printClassLabelPref(storage) {
+        const st = storage !== undefined ? storage
+            : (typeof localStorage !== 'undefined' ? localStorage : null);
+        let v = null;
+        try { v = st && st.getItem('eds-print-class-label'); } catch (e) { v = null; }
+        return ['full', 'short', 'both'].includes(v) ? v : 'full';
+    },
+
+    /** Πρόσθεσε class_label στα params εκτύπωσης (μόνο για καθηγητές). Pure. */
+    withPrintClassLabel(params, pref) {
+        if (!params || !/(^|&)(teacher_id=|all=teachers)/.test(params)) return params;
+        return `${params}&class_label=${pref}`;
+    },
+
     /** Number of placed (non-parking-lot) slots the user has locked. */
     countLockedSlots(slots) {
         return (slots || []).filter(s => s.is_locked && !s.is_unplaced).length;
