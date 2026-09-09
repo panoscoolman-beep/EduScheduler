@@ -7,6 +7,8 @@ Endpoints (mounted under /api/exports):
         ένα έγγραφο, ένα ανά σελίδα (page-break) — «μοίρασε προγράμματα» με 1 κλικ
     GET /xlsx?solution_id=&mode=teachers|classes|rooms → Excel workbook με
         ένα φύλλο ανά καθηγητή/τμήμα/αίθουσα
+    GET /students?format=xlsx|csv                   → κατάλογος μαθητών με
+        στοιχεία επικοινωνίας, ΤΑΞΗ και τα τμήματά τους
 
 The frontend opens them with window.open (same-origin auth flow) and the
 browser handles the print dialog / download.
@@ -25,6 +27,7 @@ from backend.database import get_db
 from backend.models import (
     Lesson,
     Period,
+    SchoolClass,
     SchoolSettings,
     Student,
     StudentClassEnrollment,
@@ -645,4 +648,112 @@ def export_xlsx(
                 f'attachment; filename="timetable_{solution.id}_{mode}.xlsx"'
             )
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Κατάλογος μαθητών (Excel / CSV)
+# ---------------------------------------------------------------------------
+
+_STUDENT_COLUMNS = [
+    "Επώνυμο", "Όνομα", "Τάξη", "Email", "Τηλέφωνο",
+    "Μέγιστες ημέρες/εβδ.", "Πλήθος τμημάτων", "Τμήματα",
+]
+
+
+def _csv_safe(value) -> str:
+    """Formula-injection guard: κελί που ξεκινά με = + - @ γίνεται κείμενο.
+    Ίδια λογική με το xlsx export — ανοίγει σε Excel χωρίς εκτέλεση."""
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
+
+def _student_rows(db: Session) -> list[list]:
+    """Μία γραμμή ανά μαθητή: στοιχεία + τάξη + τα τμήματά του (ονόματα).
+
+    Τα τμήματα φορτώνονται μαζικά (2 queries συνολικά) — όχι ένα query ανά
+    μαθητή."""
+    students = (
+        db.query(Student).order_by(Student.last_name, Student.first_name).all()
+    )
+    rows = (
+        db.query(StudentClassEnrollment.student_id, SchoolClass.name, SchoolClass.short_name)
+        .join(SchoolClass, SchoolClass.id == StudentClassEnrollment.class_id)
+        .all()
+    )
+    by_student: dict[int, list[str]] = {}
+    for student_id, name, short_name in rows:
+        by_student.setdefault(student_id, []).append(name or short_name or "")
+    out = []
+    for st in students:
+        classes = sorted(by_student.get(st.id, []))
+        out.append([
+            st.last_name or "",
+            st.first_name or "",
+            st.grade or "",
+            st.email or "",
+            st.phone or "",
+            st.max_days_per_week if st.max_days_per_week is not None else "",
+            len(classes),
+            ", ".join(classes),
+        ])
+    return out
+
+
+@router.get("/students")
+def export_students(format: str = "xlsx", db: Session = Depends(get_db)):
+    """Κατάλογος μαθητών με στοιχεία, ΤΑΞΗ και τμήματα.
+
+    format=xlsx (default) ή csv. Το CSV γράφεται με UTF-8 BOM ώστε τα
+    ελληνικά να ανοίγουν σωστά με διπλό κλικ στο Excel."""
+    if format not in ("xlsx", "csv"):
+        raise HTTPException(status_code=400, detail="Το format δέχεται: xlsx ή csv")
+
+    rows = _student_rows(db)
+    today = datetime.date.today().strftime("%Y-%m-%d")
+
+    if format == "csv":
+        import csv as _csv
+        import io as _io
+
+        buf = _io.StringIO()
+        writer = _csv.writer(buf, delimiter=";", lineterminator="\r\n")
+        writer.writerow(_STUDENT_COLUMNS)
+        for row in rows:
+            writer.writerow([_csv_safe(v) for v in row])
+        # BOM: χωρίς αυτό το Excel δείχνει «ÎœÎ±ÏÎ¯Î±» στα ελληνικά.
+        content = "\ufeff" + buf.getvalue()
+        return Response(
+            content=content.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="students_{today}.csv"'},
+        )
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Μαθητές"
+    ws.append(_STUDENT_COLUMNS)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for row in rows:
+        ws.append([_csv_safe(v) if isinstance(v, str) else v for v in row])
+
+    widths = [18, 16, 18, 26, 14, 12, 10, 60]
+    for i, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(_STUDENT_COLUMNS))}{ws.max_row}"
+
+    import io as _io
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="students_{today}.xlsx"'},
     )

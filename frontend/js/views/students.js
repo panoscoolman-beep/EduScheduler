@@ -10,6 +10,7 @@ const StudentsView = {
             columns: [
                 { key: 'last_name', label: 'Επώνυμο' },
                 { key: 'first_name', label: 'Όνομα' },
+                { key: 'grade', label: 'Τάξη', render: v => v ? StudentPicker.esc(v) : '—' },
                 { key: 'class_ids', label: 'Τμήματα', render: v => this._classBadgesHtml(v) },
                 { key: 'email', label: 'Email', render: v => v ? `${v}` : '—' },
                 { key: 'phone', label: 'Τηλέφωνο', render: v => v ? `${v}` : '—' },
@@ -54,6 +55,14 @@ const StudentsView = {
                 </div>
                 <div class="form-grid">
                     <div class="form-group">
+                        <label class="form-label">Τάξη</label>
+                        <input class="form-input" id="f-grade" list="grade-options" maxlength="60"
+                               value="${StudentPicker.esc(item?.grade || '')}" placeholder="π.χ. Α΄ Λυκείου">
+                        <datalist id="grade-options">
+                            ${this._gradeOptions().map(g => `<option value="${StudentPicker.esc(g)}"></option>`).join('')}
+                        </datalist>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">Max Ημέρες / Εβδομάδα</label>
                         <input class="form-input" id="f-max_days" type="number" min="1" max="7" value="${item?.max_days_per_week || ''}">
                     </div>
@@ -64,12 +73,21 @@ const StudentsView = {
                 first_name: document.getElementById('f-first_name').value.trim(),
                 email: document.getElementById('f-email').value.trim() || null,
                 phone: document.getElementById('f-phone').value.trim() || null,
+                grade: document.getElementById('f-grade').value.trim() || null,
                 max_days_per_week: parseInt(document.getElementById('f-max_days').value) || null,
             }),
         });
 
         container.innerHTML = `
-            <div style="display:flex; justify-content:flex-end; margin-bottom:0.5rem">
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-bottom:0.5rem">
+                <button class="btn btn-secondary" id="students-export-xlsx"
+                        title="Κατέβασε όλους τους μαθητές με στοιχεία, τάξη και τμήματα (Excel)">
+                    ⬇️ Εξαγωγή Excel
+                </button>
+                <button class="btn btn-secondary" id="students-export-csv"
+                        title="Ίδια στοιχεία σε CSV (ανοίγει σε Excel/Google Sheets)">
+                    ⬇️ CSV
+                </button>
                 <button class="btn btn-secondary" id="crm-import-btn"
                         title="Τράβα τους μαθητές από το Korifi CRM — τέλος η διπλή καταχώρηση">
                     ⬇️ Εισαγωγή από CRM
@@ -77,8 +95,25 @@ const StudentsView = {
             </div>
             <div id="students-table"></div>`;
         await table.render(document.getElementById('students-table'));
+        // Οι τάξεις που ήδη χρησιμοποιούνται τροφοδοτούν τις προτάσεις της φόρμας.
+        this._gradesInUse = [...new Set((table.data || [])
+            .map(s => s.grade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'el'));
+        document.getElementById('students-export-xlsx').addEventListener('click', () =>
+            window.open('/api/exports/students?format=xlsx', '_blank'));
+        document.getElementById('students-export-csv').addEventListener('click', () =>
+            window.open('/api/exports/students?format=csv', '_blank'));
         document.getElementById('crm-import-btn').addEventListener('click', () =>
             this._openCrmImport(container));
+    },
+
+    /** Προτεινόμενες τάξεις: οι συνηθισμένες + όσες χρησιμοποιούνται ήδη. */
+    _gradeOptions() {
+        const common = [
+            'Α΄ Γυμνασίου', 'Β΄ Γυμνασίου', 'Γ΄ Γυμνασίου',
+            'Α΄ Λυκείου', 'Β΄ Λυκείου', 'Γ΄ Λυκείου',
+            'Α΄ ΕΠΑΛ', 'Β΄ ΕΠΑΛ', 'Γ΄ ΕΠΑΛ',
+        ];
+        return [...new Set([...(this._gradesInUse || []), ...common])];
     },
 
     async _loadClasses() {

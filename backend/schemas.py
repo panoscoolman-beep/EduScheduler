@@ -178,6 +178,7 @@ class StudentBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     email: str | None = None
     phone: str | None = None
+    grade: str | None = Field(None, max_length=60, examples=["Α΄ Λυκείου"])
     max_days_per_week: int | None = Field(None, ge=1, le=7)
 
 

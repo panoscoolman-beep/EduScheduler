@@ -167,6 +167,9 @@ class Student(Base):
     last_name = Column(String(100), nullable=False)
     email = Column(String(200))
     phone = Column(String(30))
+    # Τάξη φοίτησης («Α΄ Λυκείου», «Β΄ Γυμνασίου», «ΕΠΑΛ – Οικονομίας»).
+    # Ελεύθερο κείμενο: τα `classes` εδώ είναι ΤΜΗΜΑΤΑ, όχι τάξεις.
+    grade = Column(String(60))
     max_days_per_week = Column(Integer)
     
     # Relationships

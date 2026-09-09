@@ -312,3 +312,92 @@ def test_student_and_class_prints_have_no_class_label_toolbar(client):
     assert res.status_code == 200 and "Τμήμα ως:" not in res.text
     res = client.get(f"/api/exports/print?solution_id={client.sol.id}&all=classes")
     assert res.status_code == 200 and "Τμήμα ως:" not in res.text
+
+
+# ---------------------------------------------------------------------------
+# Κατάλογος μαθητών με τάξη + τμήματα (2026-09-09)
+# ---------------------------------------------------------------------------
+
+def _seed_students_for_export(client):
+    from backend.models import Student, StudentClassEnrollment
+
+    s = client.session
+    a = Student(first_name="Νίκος", last_name="Παπαδόπουλος", grade="Α΄ Λυκείου",
+                email="n@example.com", phone="6900000001", max_days_per_week=3)
+    b = Student(first_name="Μαρία", last_name="Αλεξίου", grade="Γ΄ Λυκείου")
+    c = Student(first_name="=cmd", last_name="Ζήσης")   # formula-injection προσπάθεια
+    s.add_all([a, b, c])
+    s.commit()
+    for st in (a, b, c):
+        s.refresh(st)
+    s.add_all([
+        StudentClassEnrollment(student_id=a.id, class_id=client.c1.id),
+        StudentClassEnrollment(student_id=a.id, class_id=client.c2.id),
+        StudentClassEnrollment(student_id=b.id, class_id=client.c2.id),
+    ])
+    s.commit()
+    return a, b, c
+
+
+def test_students_csv_has_grade_contact_and_classes(client):
+    a, b, c = _seed_students_for_export(client)
+    res = client.get("/api/exports/students?format=csv")
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    assert "students_" in res.headers["content-disposition"]
+
+    body = res.content.decode("utf-8")
+    assert body.startswith("\ufeff")                     # BOM για το Excel
+    lines = [ln for ln in body.replace("\ufeff", "").split("\r\n") if ln]
+    assert lines[0].split(";") == [
+        "Επώνυμο", "Όνομα", "Τάξη", "Email", "Τηλέφωνο",
+        "Μέγιστες ημέρες/εβδ.", "Πλήθος τμημάτων", "Τμήματα",
+    ]
+    # Ταξινόμηση κατά επώνυμο (μαζί με τον μαθητή του fixture, «Κοντού»).
+    assert [ln.split(";")[0] for ln in lines[1:]] == [
+        "Αλεξίου", "Ζήσης", "Κοντού", "Παπαδόπουλος",
+    ]
+
+    papad = next(ln for ln in lines if ln.startswith("Παπαδόπουλος"))
+    cols = papad.split(";")
+    assert cols[2] == "Α΄ Λυκείου"
+    assert cols[3] == "n@example.com" and cols[4] == "6900000001"
+    assert cols[5] == "3" and cols[6] == "2"
+    assert "Α1 Λυκείου" in cols[7] and "Β1 Λυκείου" in cols[7]
+
+    # Μαθητής χωρίς τμήματα/στοιχεία: κενά, όχι σφάλμα
+    zisis = next(ln for ln in lines if ln.startswith("Ζήσης"))
+    assert zisis.split(";")[6] == "0"
+    # Formula injection: το «=cmd» φεύγει ως κείμενο
+    assert "'=cmd" in zisis
+
+
+def test_students_xlsx_sheet_with_header_and_rows(client):
+    _seed_students_for_export(client)
+    res = client.get("/api/exports/students")          # default = xlsx
+    assert res.status_code == 200
+    assert "spreadsheetml" in res.headers["content-type"]
+
+    import io
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(res.content))
+    ws = wb["Μαθητές"]
+    assert [c.value for c in ws[1]][:3] == ["Επώνυμο", "Όνομα", "Τάξη"]
+    assert ws["A2"].value == "Αλεξίου" and ws["C2"].value == "Γ΄ Λυκείου"
+    assert ws.max_row == 5                              # 4 μαθητές + κεφαλίδα
+    assert ws.freeze_panes == "A2"
+
+
+def test_students_export_rejects_unknown_format(client):
+    assert client.get("/api/exports/students?format=pdf").status_code == 400
+
+
+def test_students_export_without_grade_leaves_the_column_empty(client):
+    """Ο μαθητής του fixture δεν έχει τάξη ούτε στοιχεία επικοινωνίας — τα
+    κελιά μένουν κενά, το τμήμα του όμως εμφανίζεται κανονικά."""
+    res = client.get("/api/exports/students?format=csv")
+    assert res.status_code == 200
+    lines = [ln for ln in res.content.decode("utf-8").replace("\ufeff", "").split("\r\n") if ln]
+    assert lines[0].startswith("Επώνυμο;Όνομα;Τάξη")
+    assert lines[1] == "Κοντού;Νίκη;;;;;1;Α1 Λυκείου"
