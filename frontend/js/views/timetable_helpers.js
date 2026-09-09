@@ -231,35 +231,64 @@ const TimetableHelpers = {
               .fr-time { white-space: nowrap; }
               .fr-count { font-weight: 700; margin-bottom: 2px; }
               td.fr-none { opacity: 0.55; }
+              td.fr-free { background: rgba(16, 185, 129, 0.14); }
+              td.fr-busy { background: rgba(239, 68, 68, 0.10); }
+              .fr-free-mark { font-weight: 700; color: #059669; }
+              .fr-busy-what { font-size: 0.78rem; opacity: 0.85; }
+              .fr-summary { margin: 0 0 0.5rem; font-size: 0.9rem; }
             </style>`;
     },
 
     /**
-     * «Ελεύθερες Αίθουσες»: grid Ώρα × Ημέρα όπου κάθε κελί δείχνει ποιες
-     * αίθουσες ΔΕΝ έχουν μάθημα εκείνη τη στιγμή. Pure: slots της λύσης +
-     * περίοδοι + ΟΛΕΣ οι αίθουσες μέσα, HTML string έξω.
+     * «Ελεύθερες Αίθουσες»: grid Ώρα × Ημέρα.
+     *
+     * Χωρίς φίλτρο (roomFilter κενό/'all'): κάθε κελί δείχνει ΠΟΙΕΣ αίθουσες
+     * δεν έχουν μάθημα εκείνη τη στιγμή (μετρητής ελεύθερες/σύνολο).
+     * Με φίλτρο αίθουσας: κάθε κελί λέει αν ΑΥΤΗ η αίθουσα είναι ελεύθερη
+     * («✅ Ελεύθερη») ή ποιο μάθημα την κρατά («❌ ΑΛΓΕΒΡΑ · Β2 · Νικολάου»),
+     * με σύνοψη ελεύθερων ωρών από πάνω.
+     *
+     * Pure: slots της λύσης + περίοδοι + ΟΛΕΣ οι αίθουσες μέσα, HTML έξω.
      */
-    buildFreeRoomsHtml(slots, periods, daysCount, allRooms) {
+    buildFreeRoomsHtml(slots, periods, daysCount, allRooms, roomFilter) {
         const esc = this.esc.bind(this);
         const dayNames = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
         const days = [...Array(Math.min(daysCount, 7)).keys()];
         const teaching = periods.filter(p => !p.is_break);
-        const roomNames = allRooms.map(r => r.name);
+        const roomNames = (allRooms || []).map(r => r.name);
+        const single = roomFilter && roomFilter !== 'all' && roomNames.includes(roomFilter)
+            ? roomFilter : null;
 
-        // (day, period_id) → Set κατειλημμένων αιθουσών
+        // (day, period_id) → Set κατειλημμένων αιθουσών· και ποιο μάθημα
+        // κρατά κάθε αίθουσα (για το φίλτρο μίας αίθουσας).
         const busy = new Map();
-        for (const s of slots) {
+        const occupant = new Map();
+        for (const s of slots || []) {
             if (s.is_unplaced || s.day_of_week === null || s.day_of_week === undefined) continue;
             if (!s.classroom_name) continue;
             const key = `${s.day_of_week}|${s.period_id}`;
             if (!busy.has(key)) busy.set(key, new Set());
             busy.get(key).add(s.classroom_name);
+            occupant.set(`${key}|${s.classroom_name}`, s);
         }
 
         const header = days.map(d => `<th>${dayNames[d]}</th>`).join('');
+        let freeCount = 0;
         const rows = teaching.map(p => {
             const cells = days.map(d => {
-                const taken = busy.get(`${d}|${p.id}`) || new Set();
+                const key = `${d}|${p.id}`;
+                const taken = busy.get(key) || new Set();
+                if (single) {
+                    const isFree = !taken.has(single);
+                    if (isFree) freeCount += 1;
+                    if (isFree) {
+                        return '<td class="fr-free"><span class="fr-free-mark">✅ Ελεύθερη</span></td>';
+                    }
+                    const s = occupant.get(`${key}|${single}`) || {};
+                    const what = [s.subject_name, s.class_name, s.teacher_name]
+                        .filter(Boolean).map(esc).join(' · ');
+                    return `<td class="fr-busy">❌<div class="fr-busy-what">${what || 'κατειλημμένη'}</div></td>`;
+                }
                 const free = roomNames.filter(n => !taken.has(n));
                 const badgeClass = free.length === 0 ? 'fr-none' : 'fr-some';
                 const list = free.length
@@ -270,8 +299,14 @@ const TimetableHelpers = {
             return `<tr><th class="fr-time">${esc(p.start_time)}–${esc(p.end_time)}</th>${cells}</tr>`;
         }).join('');
 
+        const total = teaching.length * days.length;
+        const summary = single
+            ? `<p class="fr-summary">🏫 <b>${esc(single)}</b> — ελεύθερη <b>${freeCount}</b> από ${total} ώρες της εβδομάδας.</p>`
+            : '';
+
         return `
             ${this._tableCss()}
+            ${summary}
             <table class="fr-table">
               <thead><tr><th class="fr-time">Ώρα</th>${header}</tr></thead>
               <tbody>${rows}</tbody>

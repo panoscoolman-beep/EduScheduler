@@ -536,3 +536,40 @@ test('withPrintClassLabel: only teacher exports get the class_label param', () =
     assert.equal(H.withPrintClassLabel('solution_id=1&all=classes', 'short'), 'solution_id=1&all=classes');
     assert.equal(H.withPrintClassLabel(null, 'short'), null);
 });
+
+test('buildFreeRoomsHtml: room filter marks free vs occupied cells with the occupying lesson', () => {
+    const slots = [
+        { day_of_week: 0, period_id: 11, classroom_name: 'Αίθουσα 1', is_unplaced: false,
+          subject_name: 'ΑΛΓΕΒΡΑ', class_name: 'Β2', teacher_name: 'Νικολάου' },
+        { day_of_week: 1, period_id: 12, classroom_name: 'Αίθουσα 2', is_unplaced: false,
+          subject_name: 'ΦΥΣΙΚΗ', class_name: 'Γ1', teacher_name: 'Παππά' },
+    ];
+    const rooms = [{ name: 'Αίθουσα 1' }, { name: 'Αίθουσα 2' }];
+    const html = H.buildFreeRoomsHtml(slots, FR_PERIODS, 5, rooms, 'Αίθουσα 1');
+    // Σύνοψη: 2 ώρες × 5 μέρες = 10 κελιά, το ένα πιασμένο → 9 ελεύθερες.
+    assert.match(html, /ελεύθερη <b>9<\/b> από 10 ώρες/);
+    assert.match(html, /Αίθουσα 1/);
+    assert.equal((html.match(/✅ Ελεύθερη/g) || []).length, 9);
+    assert.equal((html.match(/<td class="fr-busy">/g) || []).length, 1);
+    assert.match(html, /ΑΛΓΕΒΡΑ · Β2 · Νικολάου/);
+    // Το μάθημα της ΑΛΛΗΣ αίθουσας δεν επηρεάζει αυτό το φίλτρο.
+    assert.doesNotMatch(html, /ΦΥΣΙΚΗ/);
+});
+
+test('buildFreeRoomsHtml: unknown or "all" filter falls back to the per-cell room list', () => {
+    const rooms = [{ name: 'Α1' }, { name: 'Α2' }];
+    for (const f of ['all', '', undefined, 'Δεν υπάρχει']) {
+        const html = H.buildFreeRoomsHtml([], FR_PERIODS, 5, rooms, f);
+        assert.match(html, /2\/2/);
+        assert.doesNotMatch(html, /✅ Ελεύθερη/);
+        assert.ok(!html.includes('<p class="fr-summary">'));   // η CSS κλάση μένει, η σύνοψη όχι
+    }
+});
+
+test('buildFreeRoomsHtml: filtered cells escape the occupying lesson text', () => {
+    const slots = [{ day_of_week: 0, period_id: 11, classroom_name: 'Α1', is_unplaced: false,
+                     subject_name: '<b>Χ</b>', class_name: 'Β2', teacher_name: null }];
+    const html = H.buildFreeRoomsHtml(slots, FR_PERIODS, 5, [{ name: 'Α1' }], 'Α1');
+    assert.doesNotMatch(html, /<b>Χ<\/b>/);
+    assert.match(html, /&lt;b&gt;Χ&lt;\/b&gt; · Β2/);
+});

@@ -244,8 +244,18 @@ const TimetableView = {
                     API.classrooms.list()
                         .then(rooms => {
                             if (document.getElementById('tt-view-type')?.value !== 'free_rooms') return;
+                            // Γέμισε το φίλτρο με τις αίθουσες (μία φορά ανά
+                            // φόρτωση) ώστε να μπορεί να διαλέξει συγκεκριμένη.
+                            const sel = document.getElementById('tt-filter');
+                            if (sel && sel.dataset.mode !== 'rooms') {
+                                sel.dataset.mode = 'rooms';
+                                sel.innerHTML = '<option value="all">Όλες οι αίθουσες</option>'
+                                    + rooms.map(r => `<option value="${TimetableHelpers.esc(r.name)}">${TimetableHelpers.esc(r.name)}</option>`).join('');
+                                sel.value = filterValue || 'all';
+                            }
                             mount.innerHTML = TimetableHelpers.buildFreeRoomsHtml(
                                 solution.slots, periods, daysCount, rooms,
+                                filterValue || (sel ? sel.value : 'all'),
                             );
                         })
                         .catch(err => Toast.error(`Αδύνατη η φόρτωση αιθουσών: ${err.message}`));
@@ -271,7 +281,7 @@ const TimetableView = {
             this._rerenderGrid = () => {
                 const vt = document.getElementById('tt-view-type')?.value || 'class';
                 const fv = document.getElementById('tt-filter')?.value || 'all';
-                renderGrid(vt, (vt.startsWith('overview') || vt === 'free_rooms') ? null : fv);
+                renderGrid(vt, vt.startsWith('overview') ? null : fv);
             };
 
             // Event: View type change
@@ -283,13 +293,23 @@ const TimetableView = {
                 App._ttViewType = vt;  // persist across full re-renders
 
                 const parkingLot = document.getElementById('parking-lot-container');
-                if (vt.startsWith('overview') || vt === 'free_rooms') {
+                if (vt.startsWith('overview')) {
                     // Overview shows every day at once → no entity filter needed.
                     // Hide the parking lot too: dropping an unplaced (entity-less)
                     // card into an overview row would land it in the wrong row.
                     if (filterGroup) filterGroup.style.display = 'none';
                     if (parkingLot) parkingLot.style.display = 'none';
                     renderGrid(vt, null);
+                    return;
+                }
+                if (vt === 'free_rooms') {
+                    // Το φίλτρο εδώ είναι ΑΙΘΟΥΣΑ («πότε είναι ελεύθερη η Χ;»)
+                    // — γεμίζει από τον renderer που φέρνει τις αίθουσες.
+                    if (filterGroup) filterGroup.style.display = '';
+                    if (filterLabel) filterLabel.textContent = 'Αίθουσα';
+                    if (parkingLot) parkingLot.style.display = 'none';
+                    filterSelect.dataset.mode = '';       // force refill
+                    renderGrid(vt, 'all');
                     return;
                 }
 
@@ -415,7 +435,7 @@ const TimetableView = {
             periods: periods || (this._paletteCtx ? this._paletteCtx.periods : []),
         };
         const ui = this._paletteUi || (this._paletteUi = {
-            collapsed: localStorage.getItem('eds-palette-collapsed') === '1',
+            collapsed: this._readPref('eds-palette-collapsed') === '1',
             search: '', fClass: '', fTeacher: '', fSubject: '',
         });
         const palette = TimetableHelpers.buildLessonPalette(allSlots, this._lessons || []);
@@ -486,12 +506,25 @@ const TimetableView = {
         if (msg) msg.style.display = visible ? 'none' : '';
     },
 
+    /**
+     * localStorage με ασπίδα: σε private mode ή με μπλοκαρισμένα site data
+     * το `localStorage` ΠΕΤΑΕΙ — πριν, αυτό έριχνε ΟΛΟ το Ωρολόγιο σε
+     * «Σφάλμα». Η προτίμηση είναι απλή ευκολία, όχι δεδομένα.
+     */
+    _readPref(key) {
+        try { return localStorage.getItem(key); } catch (e) { return null; }
+    },
+
+    _writePref(key, value) {
+        try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+    },
+
     /** Collapse/expand the palette; remembered in localStorage. */
     togglePalette() {
         const ui = this._paletteUi;
         if (!ui) return;
         ui.collapsed = !ui.collapsed;
-        localStorage.setItem('eds-palette-collapsed', ui.collapsed ? '1' : '0');
+        this._writePref('eds-palette-collapsed', ui.collapsed ? '1' : '0');
         const body = document.getElementById('palette-body');
         const btn = document.getElementById('palette-toggle');
         if (body) body.style.display = ui.collapsed ? 'none' : '';
