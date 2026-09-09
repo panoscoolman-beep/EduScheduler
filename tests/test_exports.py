@@ -324,7 +324,8 @@ def _seed_students_for_export(client):
     s = client.session
     a = Student(first_name="Νίκος", last_name="Παπαδόπουλος", grade="Α΄ Λυκείου",
                 email="n@example.com", phone="6900000001", max_days_per_week=3)
-    b = Student(first_name="Μαρία", last_name="Αλεξίου", grade="Γ΄ Λυκείου")
+    b = Student(first_name="Μαρία", last_name="Αλεξίου", grade="Γ΄ Λυκείου",
+                track="Θετικών Σπουδών (2ο πεδίο)")
     c = Student(first_name="=cmd", last_name="Ζήσης")   # formula-injection προσπάθεια
     s.add_all([a, b, c])
     s.commit()
@@ -350,7 +351,7 @@ def test_students_csv_has_grade_contact_and_classes(client):
     assert body.startswith("\ufeff")                     # BOM για το Excel
     lines = [ln for ln in body.replace("\ufeff", "").split("\r\n") if ln]
     assert lines[0].split(";") == [
-        "Επώνυμο", "Όνομα", "Τάξη", "Email", "Τηλέφωνο",
+        "Επώνυμο", "Όνομα", "Τάξη", "Κατεύθυνση / Τομέας", "Email", "Τηλέφωνο",
         "Μέγιστες ημέρες/εβδ.", "Πλήθος τμημάτων", "Τμήματα",
     ]
     # Ταξινόμηση κατά επώνυμο (μαζί με τον μαθητή του fixture, «Κοντού»).
@@ -360,14 +361,18 @@ def test_students_csv_has_grade_contact_and_classes(client):
 
     papad = next(ln for ln in lines if ln.startswith("Παπαδόπουλος"))
     cols = papad.split(";")
-    assert cols[2] == "Α΄ Λυκείου"
-    assert cols[3] == "n@example.com" and cols[4] == "6900000001"
-    assert cols[5] == "3" and cols[6] == "2"
-    assert "Α1 Λυκείου" in cols[7] and "Β1 Λυκείου" in cols[7]
+    assert cols[2] == "Α΄ Λυκείου" and cols[3] == ""      # Α΄ Λυκείου: χωρίς κατεύθυνση
+    assert cols[4] == "n@example.com" and cols[5] == "6900000001"
+    assert cols[6] == "3" and cols[7] == "2"
+    assert "Α1 Λυκείου" in cols[8] and "Β1 Λυκείου" in cols[8]
+
+    # Γ΄ Λυκείου με κατεύθυνση: γράφεται στη δική της στήλη.
+    alex = next(ln for ln in lines if ln.startswith("Αλεξίου")).split(";")
+    assert alex[2] == "Γ΄ Λυκείου" and alex[3] == "Θετικών Σπουδών (2ο πεδίο)"
 
     # Μαθητής χωρίς τμήματα/στοιχεία: κενά, όχι σφάλμα
     zisis = next(ln for ln in lines if ln.startswith("Ζήσης"))
-    assert zisis.split(";")[6] == "0"
+    assert zisis.split(";")[7] == "0"
     # Formula injection: το «=cmd» φεύγει ως κείμενο
     assert "'=cmd" in zisis
 
@@ -386,6 +391,7 @@ def test_students_xlsx_sheet_with_header_and_rows(client):
     assert [c.value for c in ws[1]][:3] == ["Επώνυμο", "Όνομα", "Τάξη"]
     assert ws["A2"].value == "Αλεξίου" and ws["C2"].value == "Γ΄ Λυκείου"
     assert ws.max_row == 5                              # 4 μαθητές + κεφαλίδα
+    assert ws["D2"].value == "Θετικών Σπουδών (2ο πεδίο)"   # Αλεξίου, Γ΄ Λυκείου
     assert ws.freeze_panes == "A2"
 
 
@@ -400,4 +406,4 @@ def test_students_export_without_grade_leaves_the_column_empty(client):
     assert res.status_code == 200
     lines = [ln for ln in res.content.decode("utf-8").replace("\ufeff", "").split("\r\n") if ln]
     assert lines[0].startswith("Επώνυμο;Όνομα;Τάξη")
-    assert lines[1] == "Κοντού;Νίκη;;;;;1;Α1 Λυκείου"
+    assert lines[1] == "Κοντού;Νίκη;;;;;;1;Α1 Λυκείου"

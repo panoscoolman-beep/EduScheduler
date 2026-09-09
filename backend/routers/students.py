@@ -14,6 +14,18 @@ from backend.services.term_context import get_active_term_id
 router = APIRouter()
 
 
+@router.get("/grade-options")
+def grade_options():
+    """Ο κατάλογος τάξεων + κατευθύνσεων/τομέων για τα dropdown της φόρμας.
+
+    ΜΙΑ πηγή αλήθειας (backend/services/grade_catalog.py): το frontend δεν
+    κρατά αντίγραφο. Μπαίνει ΠΡΙΝ το /{student_id} ώστε να μην το «φάει»
+    το path parameter."""
+    from backend.services.grade_catalog import catalog
+
+    return catalog()
+
+
 @router.get("/", response_model=list[StudentResponse])
 def get_students(db: Session = Depends(get_db)):
     return db.query(Student).all()

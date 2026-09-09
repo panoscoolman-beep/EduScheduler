@@ -72,6 +72,7 @@ const API = {
         update: (id, data) => API.put(`/students/${id}`, data),
         delete: (id) => API.delete(`/students/${id}`),
         getAvailability: (id) => API.get(`/students/${id}/availability`),
+        gradeOptions: () => API.get('/students/grade-options'),
         crmPreview: () => API.get('/integration/crm/students/preview'),
         crmImport: (students) => API.post('/integration/crm/students/import', { students }),
         updateAvailability: (id, data) => API.put(`/students/${id}/availability`, data),

@@ -5,12 +5,13 @@ const StudentsView = {
     _classesById: new Map(),
 
     async render(container) {
-        await this._loadClasses();
+        await Promise.all([this._loadClasses(), this._loadGradeCatalog()]);
         const table = new DataTable({
             columns: [
                 { key: 'last_name', label: 'Επώνυμο' },
                 { key: 'first_name', label: 'Όνομα' },
                 { key: 'grade', label: 'Τάξη', render: v => v ? StudentPicker.esc(v) : '—' },
+                { key: 'track', label: 'Κατεύθυνση / Τομέας', render: v => v ? StudentPicker.esc(v) : '—' },
                 { key: 'class_ids', label: 'Τμήματα', render: v => this._classBadgesHtml(v) },
                 { key: 'email', label: 'Email', render: v => v ? `${v}` : '—' },
                 { key: 'phone', label: 'Τηλέφωνο', render: v => v ? `${v}` : '—' },
@@ -18,6 +19,7 @@ const StudentsView = {
             ],
             apiService: API.students,
             entityName: 'Μαθητές',
+            onFormReady: (item) => this._onStudentFormReady(item),
             customActions: [
                 {
                     id: 'classes',
@@ -56,11 +58,13 @@ const StudentsView = {
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Τάξη</label>
-                        <input class="form-input" id="f-grade" list="grade-options" maxlength="60"
-                               value="${StudentPicker.esc(item?.grade || '')}" placeholder="π.χ. Α΄ Λυκείου">
-                        <datalist id="grade-options">
-                            ${this._gradeOptions().map(g => `<option value="${StudentPicker.esc(g)}"></option>`).join('')}
-                        </datalist>
+                        <select class="form-select" id="f-grade">
+                            ${this._gradeSelectOptions(item?.grade)}
+                        </select>
+                    </div>
+                    <div class="form-group" id="f-track-group">
+                        <label class="form-label" id="f-track-label">Κατεύθυνση / Τομέας</label>
+                        <select class="form-select" id="f-track"></select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Max Ημέρες / Εβδομάδα</label>
@@ -74,6 +78,7 @@ const StudentsView = {
                 email: document.getElementById('f-email').value.trim() || null,
                 phone: document.getElementById('f-phone').value.trim() || null,
                 grade: document.getElementById('f-grade').value.trim() || null,
+                track: (document.getElementById('f-track')?.value || '').trim() || null,
                 max_days_per_week: parseInt(document.getElementById('f-max_days').value) || null,
             }),
         });
@@ -95,9 +100,6 @@ const StudentsView = {
             </div>
             <div id="students-table"></div>`;
         await table.render(document.getElementById('students-table'));
-        // Οι τάξεις που ήδη χρησιμοποιούνται τροφοδοτούν τις προτάσεις της φόρμας.
-        this._gradesInUse = [...new Set((table.data || [])
-            .map(s => s.grade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'el'));
         document.getElementById('students-export-xlsx').addEventListener('click', () =>
             window.open('/api/exports/students?format=xlsx', '_blank'));
         document.getElementById('students-export-csv').addEventListener('click', () =>
@@ -106,14 +108,80 @@ const StudentsView = {
             this._openCrmImport(container));
     },
 
-    /** Προτεινόμενες τάξεις: οι συνηθισμένες + όσες χρησιμοποιούνται ήδη. */
-    _gradeOptions() {
-        const common = [
-            'Α΄ Γυμνασίου', 'Β΄ Γυμνασίου', 'Γ΄ Γυμνασίου',
-            'Α΄ Λυκείου', 'Β΄ Λυκείου', 'Γ΄ Λυκείου',
-            'Α΄ ΕΠΑΛ', 'Β΄ ΕΠΑΛ', 'Γ΄ ΕΠΑΛ',
-        ];
-        return [...new Set([...(this._gradesInUse || []), ...common])];
+    /**
+     * Options της «Τάξης». Ο κατάλογος έρχεται από το backend (μία πηγή
+     * αλήθειας)· αν ο μαθητής έχει παλιά τιμή εκτός καταλόγου, μπαίνει κι
+     * αυτή ώστε να μη χαθεί σιωπηλά σε ένα save.
+     */
+    _gradeSelectOptions(current) {
+        const esc = StudentPicker.esc;
+        const grades = (this._catalog?.grades || []).slice();
+        if (current && !grades.includes(current)) grades.unshift(current);
+        return ['<option value="">— Χωρίς τάξη —</option>']
+            .concat(grades.map(g =>
+                `<option value="${esc(g)}"${g === current ? ' selected' : ''}>${esc(g)}</option>`))
+            .join('');
+    },
+
+    /**
+     * Γέμισε/κρύψε το δεύτερο dropdown ανάλογα με την τάξη: κατεύθυνση για
+     * Β΄/Γ΄ Λυκείου, τομέας για Β΄/Γ΄ ΕΠΑΛ, τίποτα αλλού.
+     */
+    _syncTrackField(current, allowUnknown = false) {
+        const esc = StudentPicker.esc;
+        const grade = document.getElementById('f-grade')?.value || '';
+        const group = document.getElementById('f-track-group');
+        const select = document.getElementById('f-track');
+        const label = document.getElementById('f-track-label');
+        if (!group || !select) return;
+        const tracks = (this._catalog?.tracks || {})[grade] || [];
+        if (!tracks.length) {
+            group.style.display = 'none';
+            select.innerHTML = '';
+            return;
+        }
+        group.style.display = '';
+        if (label) {
+            label.textContent = (this._catalog?.track_labels || {})[grade]
+                || this._catalog?.default_track_label || 'Κατεύθυνση / Τομέας';
+        }
+        // `allowUnknown` ΜΟΝΟ στο άνοιγμα της φόρμας: κρατά μια αποθηκευμένη
+        // τιμή εκτός καταλόγου (π.χ. ειδικότητα ΕΠΑΛ γραμμένη με το χέρι).
+        // Σε ΑΛΛΑΓΗ τάξης δεν ισχύει — αλλιώς η «Σπουδών Υγείας» θα κουβαλιόταν
+        // στο Β΄ ΕΠΑΛ ως δήθεν τομέας.
+        const list = tracks.slice();
+        const keep = current && (list.includes(current) || allowUnknown) ? current : '';
+        if (keep && !list.includes(keep)) list.unshift(keep);
+        select.innerHTML = ['<option value="">— Χωρίς επιλογή —</option>']
+            .concat(list.map(t =>
+                `<option value="${esc(t)}"${t === keep ? ' selected' : ''}>${esc(t)}</option>`))
+            .join('');
+    },
+
+    /** Collapse/expand helper: wiring της φόρμας μετά το άνοιγμα του modal. */
+    _onStudentFormReady(item) {
+        this._syncTrackField(item?.track || '', true);
+        const gradeSelect = document.getElementById('f-grade');
+        if (gradeSelect && !gradeSelect.dataset.wired) {
+            gradeSelect.dataset.wired = '1';
+            // Αλλαγή τάξης → νέες επιλογές κατεύθυνσης (η προηγούμενη κρατιέται
+            // μόνο αν εξακολουθεί να ισχύει για τη νέα τάξη).
+            gradeSelect.addEventListener('change', () => {
+                const keep = document.getElementById('f-track')?.value || '';
+                this._syncTrackField(keep);
+            });
+        }
+    },
+
+    /** Κατάλογος τάξεων/κατευθύνσεων από το backend (μία φορά ανά render). */
+    async _loadGradeCatalog() {
+        try {
+            this._catalog = await API.students.gradeOptions();
+        } catch (err) {
+            // Χωρίς κατάλογο η φόρμα δείχνει μόνο την υπάρχουσα τιμή —
+            // καλύτερα από το να μη ανοίγει καθόλου.
+            this._catalog = { grades: [], tracks: {}, track_labels: {} };
+        }
     },
 
     async _loadClasses() {

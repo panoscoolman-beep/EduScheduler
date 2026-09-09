@@ -656,7 +656,7 @@ def export_xlsx(
 # ---------------------------------------------------------------------------
 
 _STUDENT_COLUMNS = [
-    "Επώνυμο", "Όνομα", "Τάξη", "Email", "Τηλέφωνο",
+    "Επώνυμο", "Όνομα", "Τάξη", "Κατεύθυνση / Τομέας", "Email", "Τηλέφωνο",
     "Μέγιστες ημέρες/εβδ.", "Πλήθος τμημάτων", "Τμήματα",
 ]
 
@@ -691,6 +691,7 @@ def _student_rows(db: Session) -> list[list]:
             st.last_name or "",
             st.first_name or "",
             st.grade or "",
+            st.track or "",
             st.email or "",
             st.phone or "",
             st.max_days_per_week if st.max_days_per_week is not None else "",
@@ -742,7 +743,7 @@ def export_students(format: str = "xlsx", db: Session = Depends(get_db)):
     for row in rows:
         ws.append([_csv_safe(v) if isinstance(v, str) else v for v in row])
 
-    widths = [18, 16, 18, 26, 14, 12, 10, 60]
+    widths = [18, 16, 18, 34, 26, 14, 12, 10, 60]
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
     ws.freeze_panes = "A2"

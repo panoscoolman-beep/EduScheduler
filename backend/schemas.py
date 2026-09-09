@@ -4,7 +4,7 @@ Pydantic schemas for request/response validation.
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ─── Term (Σενάριο / Scenario) ──────────────────────────
@@ -179,7 +179,17 @@ class StudentBase(BaseModel):
     email: str | None = None
     phone: str | None = None
     grade: str | None = Field(None, max_length=60, examples=["Α΄ Λυκείου"])
+    track: str | None = Field(None, max_length=120, examples=["Θετικών Σπουδών (Θετική)"])
     max_days_per_week: int | None = Field(None, ge=1, le=7)
+
+    @model_validator(mode="after")
+    def _drop_track_without_grade_tracks(self):
+        """Τάξη χωρίς κατευθύνσεις (π.χ. Α΄ Λυκείου) δεν κρατά track — αλλιώς
+        μια αλλαγή τάξης θα άφηνε ορφανή «Θετική» πίσω της."""
+        from backend.services.grade_catalog import clean_track
+
+        object.__setattr__(self, "track", clean_track(self.grade, self.track))
+        return self
 
 
 class StudentCreate(StudentBase):

@@ -170,6 +170,9 @@ class Student(Base):
     # Τάξη φοίτησης («Α΄ Λυκείου», «Β΄ Γυμνασίου», «ΕΠΑΛ – Οικονομίας»).
     # Ελεύθερο κείμενο: τα `classes` εδώ είναι ΤΜΗΜΑΤΑ, όχι τάξεις.
     grade = Column(String(60))
+    # Κατεύθυνση (ΓΕΛ) ή τομέας (ΕΠΑΛ) — έχει νόημα μόνο σε Β΄/Γ΄ Λυκείου
+    # και Β΄/Γ΄ ΕΠΑΛ· βλ. backend/services/grade_catalog.py.
+    track = Column(String(120))
     max_days_per_week = Column(Integer)
     
     # Relationships
