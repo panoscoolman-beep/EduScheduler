@@ -85,6 +85,10 @@ const StudentsView = {
 
         container.innerHTML = `
             <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-bottom:0.5rem">
+                <button class="btn btn-secondary" id="students-print"
+                        title="Εκτυπώσιμος κατάλογος μαθητών (αλφαβητικά ή ανά τάξη)">
+                    🖨️ Εκτύπωση
+                </button>
                 <button class="btn btn-secondary" id="students-export-xlsx"
                         title="Κατέβασε όλους τους μαθητές με στοιχεία, τάξη και τμήματα (Excel)">
                     ⬇️ Εξαγωγή Excel
@@ -100,6 +104,8 @@ const StudentsView = {
             </div>
             <div id="students-table"></div>`;
         await table.render(document.getElementById('students-table'));
+        document.getElementById('students-print').addEventListener('click', () =>
+            window.open('/api/exports/students/print', '_blank'));
         document.getElementById('students-export-xlsx').addEventListener('click', () =>
             window.open('/api/exports/students?format=xlsx', '_blank'));
         document.getElementById('students-export-csv').addEventListener('click', () =>

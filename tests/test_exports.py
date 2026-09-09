@@ -407,3 +407,54 @@ def test_students_export_without_grade_leaves_the_column_empty(client):
     lines = [ln for ln in res.content.decode("utf-8").replace("\ufeff", "").split("\r\n") if ln]
     assert lines[0].startswith("Επώνυμο;Όνομα;Τάξη")
     assert lines[1] == "Κοντού;Νίκη;;;;;;1;Α1 Λυκείου"
+
+
+def test_students_print_lists_everyone_alphabetically(client):
+    _seed_students_for_export(client)
+    res = client.get("/api/exports/students/print")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+    body = res.text
+
+    assert "Κατάλογος Μαθητών" in body and "4 μαθητές" in body
+    for col in ("Α/Α", "Επώνυμο", "Τάξη", "Κατεύθυνση / Τομέας", "Τηλέφωνο", "Τμήματα"):
+        assert f"<th>{col}</th>" in body
+    # Αλφαβητικά: Αλεξίου πριν από Παπαδόπουλος
+    assert body.index("Αλεξίου") < body.index("Παπαδόπουλος")
+    # Στοιχεία + τμήματα του μαθητή
+    assert "Α΄ Λυκείου" in body and "6900000001" in body
+    assert "Α1 Λυκείου" in body and "Β1 Λυκείου" in body
+    # Ένας ενιαίος πίνακας — χωρίς επικεφαλίδες τάξεων
+    assert "<h2>" not in body
+    assert "window.print()" in body
+
+
+def test_students_print_grouped_by_grade_puts_ungraded_last(client):
+    _seed_students_for_export(client)
+    body = client.get("/api/exports/students/print?sort=grade").text
+
+    # Επικεφαλίδες με μετρητή, στη σειρά του καταλόγου (Α΄ πριν Γ΄ Λυκείου)
+    assert "<h2>Α΄ Λυκείου <small>(1)</small></h2>" in body
+    assert "<h2>Γ΄ Λυκείου <small>(1)</small></h2>" in body
+    assert body.index("Α΄ Λυκείου <small>") < body.index("Γ΄ Λυκείου <small>")
+    # Οι αβαθμολόγητοι (fixture + «Ζήσης») στο τέλος, μαζί
+    assert "<h2>Χωρίς τάξη <small>(2)</small></h2>" in body
+    assert body.index("Χωρίς τάξη") > body.index("Γ΄ Λυκείου <small>")
+    # Η κατεύθυνση φαίνεται στη γραμμή του μαθητή
+    assert "Θετικών Σπουδών (2ο πεδίο)" in body
+
+
+def test_students_print_toolbar_switches_sorting_and_is_not_printed(client):
+    body = client.get("/api/exports/students/print").text
+    assert 'class=\'noprint\'' in body or 'class="noprint"' in body
+    assert "?sort=grade" in body
+    grouped = client.get("/api/exports/students/print?sort=grade").text
+    assert "?sort=name" in grouped
+
+
+def test_students_print_rejects_unknown_sort_and_survives_empty_school(client):
+    assert client.get("/api/exports/students/print?sort=nope").status_code == 400
+    client.session.query(Student).delete()
+    client.session.commit()
+    body = client.get("/api/exports/students/print").text
+    assert "0 μαθητές" in body and "Δεν υπάρχουν μαθητές" in body

@@ -9,6 +9,8 @@ Endpoints (mounted under /api/exports):
         ένα φύλλο ανά καθηγητή/τμήμα/αίθουσα
     GET /students?format=xlsx|csv                   → κατάλογος μαθητών με
         στοιχεία επικοινωνίας, ΤΑΞΗ και τα τμήματά τους
+    GET /students/print?sort=name|grade              → ο ίδιος κατάλογος ως
+        εκτυπώσιμη σελίδα (με ομαδοποίηση ανά τάξη στο sort=grade)
 
 The frontend opens them with window.open (same-origin auth flow) and the
 browser handles the print dialog / download.
@@ -661,6 +663,22 @@ _STUDENT_COLUMNS = [
 ]
 
 
+_PRINT_STUDENT_COLUMNS = [
+    "Α/Α", "Επώνυμο", "Όνομα", "Τάξη", "Κατεύθυνση / Τομέας",
+    "Τηλέφωνο", "Email", "Τμήματα",
+]
+
+# Ο κατάλογος είναι πυκνός πίνακας — αριστερή στοίχιση και μικρότερα
+# γράμματα, ώστε τα ονόματα τμημάτων να χωράνε σε A4.
+_PRINT_STUDENTS_CSS = """
+  h2 { font-size: 15px; margin: 18px 0 6px; page-break-after: avoid; }
+  h2 small { color: #666; font-weight: normal; }
+  td { text-align: left; font-size: 11px; }
+  thead th { text-align: left; font-size: 11px; }
+  tbody tr:nth-child(even) { background: #f6f8fa; }
+"""
+
+
 def _csv_safe(value) -> str:
     """Formula-injection guard: κελί που ξεκινά με = + - @ γίνεται κείμενο.
     Ίδια λογική με το xlsx export — ανοίγει σε Excel χωρίς εκτέλεση."""
@@ -758,3 +776,75 @@ def export_students(format: str = "xlsx", db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="students_{today}.xlsx"'},
     )
+
+
+@router.get("/students/print", response_class=HTMLResponse)
+def export_students_print(sort: str = "name", db: Session = Depends(get_db)):
+    """Εκτυπώσιμος κατάλογος μαθητών.
+
+    sort=name (default): αλφαβητικά κατά επώνυμο, ένας ενιαίος πίνακας.
+    sort=grade: ομαδοποίηση ανά τάξη με επικεφαλίδα και μετρητή — οι μαθητές
+    χωρίς τάξη πάνε στο τέλος. Η γραμμή επιλογής δεν τυπώνεται (.noprint)."""
+    if sort not in ("name", "grade"):
+        raise HTTPException(status_code=400, detail="Το sort δέχεται: name ή grade")
+
+    rows = _student_rows(db)          # ήδη ταξινομημένες κατά επώνυμο/όνομα
+    today = datetime.date.today().strftime("%d/%m/%Y")
+
+    def table(section_rows: list[list]) -> str:
+        head = "".join(f"<th>{escape(c)}</th>" for c in _PRINT_STUDENT_COLUMNS)
+        body = []
+        for i, r in enumerate(section_rows, start=1):
+            # r: Επώνυμο, Όνομα, Τάξη, Κατεύθυνση, Email, Τηλέφωνο, MaxΗμέρες, #Τμημάτων, Τμήματα
+            cells = [str(i), r[0], r[1], r[2], r[3], r[5], r[4], r[8]]
+            body.append(
+                "<tr>" + "".join(f"<td>{escape(str(c))}</td>" for c in cells) + "</tr>"
+            )
+        return (
+            "<table><thead><tr>" + head + "</tr></thead>"
+            "<tbody>" + "".join(body) + "</tbody></table>"
+        )
+
+    if sort == "grade":
+        groups: dict[str, list[list]] = {}
+        for r in rows:
+            groups.setdefault(r[2] or "", []).append(r)
+        # Σειρά καταλόγου· ό,τι δεν είναι στον κατάλογο μπαίνει μετά, και
+        # τελευταίοι οι μαθητές χωρίς τάξη.
+        from backend.services.grade_catalog import GRADES
+
+        known = [g for g in GRADES if g in groups]
+        extra = sorted(g for g in groups if g and g not in GRADES)
+        order = known + extra + ([""] if "" in groups else [])
+        sections = "".join(
+            f"<h2>{escape(grade or 'Χωρίς τάξη')} "
+            f"<small>({len(groups[grade])})</small></h2>{table(groups[grade])}"
+            for grade in order
+        )
+        body_html = sections or "<p>Δεν υπάρχουν μαθητές.</p>"
+    else:
+        body_html = table(rows) if rows else "<p>Δεν υπάρχουν μαθητές.</p>"
+
+    other = "grade" if sort == "name" else "name"
+    other_text = "ανά τάξη" if sort == "name" else "αλφαβητικά"
+    toolbar = (
+        "<p class='noprint' style='font-size:12px;color:#666;margin-bottom:12px'>"
+        f"Ταξινόμηση: <b>{'αλφαβητικά' if sort == 'name' else 'ανά τάξη'}</b> · "
+        f"<a href=\"?sort={other}\">{other_text}</a></p>"
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="el">
+<head><meta charset="utf-8"><title>Κατάλογος Μαθητών</title>
+<style>{_PRINT_CSS}{_PRINT_STUDENTS_CSS}</style></head>
+<body>
+{toolbar}
+<h1>👥 Κατάλογος Μαθητών</h1>
+<div class="sub">{len(rows)} μαθητές · Εκτυπώθηκε {today} · Φροντιστήριο ΚΟΡΥΦΗ</div>
+{body_html}
+<p class="noprint" style="margin-top:16px">
+  <button onclick="window.print()" style="padding:8px 16px">🖨️ Εκτύπωση / Αποθήκευση PDF</button>
+</p>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
