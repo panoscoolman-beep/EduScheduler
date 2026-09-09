@@ -351,7 +351,10 @@ test('buildFreeRoomsHtml: free rooms per cell, occupied excluded, breaks skipped
 });
 
 test('buildFreeRoomsHtml: escapes room names', () => {
-    const html = H.buildFreeRoomsHtml([], FR_PERIODS, 5, [{ name: '<b>Κακό</b>' }]);
+    // Χρειάζεται πιασμένη αίθουσα στο κελί, αλλιώς το κελί συμπτύσσεται σε
+    // «Όλες ελεύθερες» και δεν τυπώνονται ονόματα.
+    const slots = [{ day_of_week: 0, period_id: 11, classroom_name: 'Α2', is_unplaced: false }];
+    const html = H.buildFreeRoomsHtml(slots, FR_PERIODS, 5, [{ name: '<b>Κακό</b>' }, { name: 'Α2' }]);
     assert.ok(!html.includes('<b>Κακό</b>'));
     assert.match(html, /&lt;b&gt;Κακό&lt;\/b&gt;/);
 });
@@ -572,4 +575,88 @@ test('buildFreeRoomsHtml: filtered cells escape the occupying lesson text', () =
     const html = H.buildFreeRoomsHtml(slots, FR_PERIODS, 5, [{ name: 'Α1' }], 'Α1');
     assert.doesNotMatch(html, /<b>Χ<\/b>/);
     assert.match(html, /&lt;b&gt;Χ&lt;\/b&gt; · Β2/);
+});
+
+// ---------------------------------------------------------------------------
+// Χρονικό παράθυρο «Ελεύθερων Αιθουσών» (2026-09-09)
+// ---------------------------------------------------------------------------
+
+const DAY_PERIODS = [
+    { id: 1, start_time: '08:00', end_time: '09:00', is_break: false },
+    { id: 6, start_time: '13:00', end_time: '14:00', is_break: false },
+    { id: 9, start_time: '14:00', end_time: '15:00', is_break: false },
+    { id: 16, start_time: '21:00', end_time: '22:00', is_break: false },
+    { id: 20, start_time: '22:00', end_time: '23:00', is_break: false },
+    { id: 30, start_time: '13:50', end_time: '14:00', is_break: true },
+];
+
+test('timeToMinutes: parses HH:MM, tolerates junk', () => {
+    assert.equal(H.timeToMinutes('14:00'), 840);
+    assert.equal(H.timeToMinutes('8:05'), 485);
+    assert.equal(H.timeToMinutes('21:00:00'), 1260);
+    assert.equal(H.timeToMinutes(''), null);
+    assert.equal(H.timeToMinutes(null), null);
+    assert.equal(H.timeToMinutes('αργότερα'), null);
+});
+
+test('filterPeriodsByWindow: keeps only teaching periods fully inside the window', () => {
+    const ids = (ps) => ps.map(p => p.id);
+    assert.deepEqual(ids(H.filterPeriodsByWindow(DAY_PERIODS, '14:00', '22:00')), [9, 16]);
+    assert.deepEqual(ids(H.filterPeriodsByWindow(DAY_PERIODS, '', '')), [1, 6, 9, 16, 20]);  // breaks out
+    assert.deepEqual(ids(H.filterPeriodsByWindow(DAY_PERIODS, '14:00', '')), [9, 16, 20]);
+    assert.deepEqual(ids(H.filterPeriodsByWindow(DAY_PERIODS, '', '14:00')), [1, 6]);
+    assert.deepEqual(ids(H.filterPeriodsByWindow(DAY_PERIODS, '23:30', '23:59')), []);
+    // Ώρα χωρίς έγκυρο χρόνο δεν κρύβεται σιωπηλά.
+    assert.deepEqual(ids(H.filterPeriodsByWindow(
+        [{ id: 99, start_time: null, end_time: null, is_break: false }], '14:00', '22:00')), [99]);
+});
+
+test('buildFreeRoomsHtml: window trims the rows and controls preselect it', () => {
+    const rooms = [{ name: 'Α1' }, { name: 'Α2' }];
+    const html = H.buildFreeRoomsHtml([], DAY_PERIODS, 5, rooms, 'all', { from: '14:00', to: '22:00' });
+    assert.match(html, /14:00–15:00/);
+    assert.match(html, /21:00–22:00/);
+    assert.doesNotMatch(html, /08:00–09:00/);      // πρωινή ώρα εκτός παραθύρου
+    assert.doesNotMatch(html, /22:00–23:00/);
+    assert.match(html, /<option value="14:00" selected>/);
+    assert.match(html, /<option value="22:00" selected>/);
+    assert.match(html, /Όλες οι ώρες/);            // κουμπί καθαρισμού
+});
+
+test('buildFreeRoomsHtml: empty cells collapse to «Όλες ελεύθερες» instead of listing every room', () => {
+    const rooms = [{ name: 'Α1' }, { name: 'Α2' }, { name: 'Α3' }];
+    const slots = [{ day_of_week: 0, period_id: 9, classroom_name: 'Α1', is_unplaced: false,
+                     subject_name: 'ΑΛΓ', class_name: 'Β2' }];
+    const html = H.buildFreeRoomsHtml(slots, DAY_PERIODS, 5, rooms, 'all', { from: '14:00', to: '22:00' });
+    // Δευτέρα 14:00: 2/3 ελεύθερες → ονομαστικά, ΧΩΡΙΣ την πιασμένη Α1.
+    assert.match(html, /2\/3/);
+    assert.match(html, />Α2<br>Α3</);
+    // Τα υπόλοιπα κελιά είναι εντελώς ελεύθερα → σύντομη ένδειξη.
+    assert.match(html, /Όλες ελεύθερες/);
+    assert.equal((html.match(/3\/3/g) || []).length, 9);   // 2 ώρες × 5 μέρες − 1 κελί
+});
+
+test('buildFreeRoomsHtml: window shows in the single-room summary and empty windows are explained', () => {
+    const rooms = [{ name: 'Α1' }];
+    const one = H.buildFreeRoomsHtml([], DAY_PERIODS, 5, rooms, 'Α1', { from: '14:00', to: '22:00' });
+    assert.match(one, /ελεύθερη <b>10<\/b> από 10 ώρες \(14:00–22:00\)/);
+    const none = H.buildFreeRoomsHtml([], DAY_PERIODS, 5, rooms, 'all', { from: '23:30', to: '23:59' });
+    assert.match(none, /Καμία διδακτική ώρα σε αυτό το χρονικό παράθυρο/);
+});
+
+test('buildFreeRoomsControlsHtml: options are period boundaries, sorted, and always include the active window', () => {
+    const html = H.buildFreeRoomsControlsHtml(DAY_PERIODS, '14:00', '22:00');
+    assert.match(html, /<option value="14:00" selected>/);
+    assert.match(html, /<option value="22:00" selected>/);
+    assert.ok(html.indexOf('value="08:00"') < html.indexOf('value="13:00"'));  // ταξινομημένα
+
+    // Παράθυρο που ΔΕΝ πέφτει σε όριο ώρας: μπαίνει κι αυτό στη λίστα.
+    const odd = H.buildFreeRoomsControlsHtml(
+        [{ id: 1, start_time: '16:00', end_time: '17:00', is_break: false }], '14:00', '22:00');
+    assert.match(odd, /<option value="14:00" selected>/);
+    assert.match(odd, /<option value="22:00" selected>/);
+    assert.match(odd, /value="16:00"/);
+
+    // Χωρίς παράθυρο: κανένα option δεν είναι selected.
+    assert.doesNotMatch(H.buildFreeRoomsControlsHtml(DAY_PERIODS, '', ''), / selected>/);
 });

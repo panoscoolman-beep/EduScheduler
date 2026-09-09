@@ -256,6 +256,7 @@ const TimetableView = {
                             mount.innerHTML = TimetableHelpers.buildFreeRoomsHtml(
                                 solution.slots, periods, daysCount, rooms,
                                 filterValue || (sel ? sel.value : 'all'),
+                                TimetableView.freeRoomsWindow(),
                             );
                         })
                         .catch(err => Toast.error(`Αδύνατη η φόρτωση αιθουσών: ${err.message}`));
@@ -504,6 +505,30 @@ const TimetableView = {
         });
         const msg = document.querySelector('.lesson-palette .palette-empty-msg');
         if (msg) msg.style.display = visible ? 'none' : '';
+    },
+
+    /**
+     * Χρονικό παράθυρο των «Ελεύθερων Αιθουσών». Default 14:00–22:00 (οι ώρες
+     * λειτουργίας του φροντιστηρίου) ώστε να μη γεμίζει το πλέγμα με πρωινά
+     * κελιά όπου δεν γίνεται μάθημα και «όλες οι αίθουσες» είναι ελεύθερες.
+     * Ο χρήστης το αλλάζει από τους επιλογείς πάνω από το grid.
+     */
+    FREE_ROOMS_DEFAULT_WINDOW: { from: '14:00', to: '22:00' },
+
+    freeRoomsWindow() {
+        const saved = this._readPref('eds-free-rooms-window');
+        if (saved === 'all') return { from: '', to: '' };
+        if (saved) {
+            const [from, to] = saved.split('|');
+            if (from || to) return { from: from || '', to: to || '' };
+        }
+        return { ...this.FREE_ROOMS_DEFAULT_WINDOW };
+    },
+
+    /** Επιλογή ωρών από τους selects — αποθήκευση + επανασχεδίαση. */
+    setFreeRoomsWindow(from, to) {
+        this._writePref('eds-free-rooms-window', (from || to) ? `${from || ''}|${to || ''}` : 'all');
+        if (this._rerenderGrid) this._rerenderGrid();
     },
 
     /**

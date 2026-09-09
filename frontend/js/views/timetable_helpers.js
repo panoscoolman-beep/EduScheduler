@@ -236,7 +236,67 @@ const TimetableHelpers = {
               .fr-free-mark { font-weight: 700; color: #059669; }
               .fr-busy-what { font-size: 0.78rem; opacity: 0.85; }
               .fr-summary { margin: 0 0 0.5rem; font-size: 0.9rem; }
+              .fr-controls { display: flex; align-items: center; gap: 6px;
+                  flex-wrap: wrap; margin-bottom: 0.5rem; font-size: 0.85rem; }
+              .fr-controls select { padding: 2px 6px; }
+              .fr-all-free { color: #059669; font-weight: 600; }
             </style>`;
+    },
+
+    /** "HH:MM" → λεπτά από τα μεσάνυχτα, ή null. Pure. */
+    timeToMinutes(hhmm) {
+        const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm ?? '').trim());
+        if (!m) return null;
+        return Number(m[1]) * 60 + Number(m[2]);
+    },
+
+    /**
+     * Οι διδακτικές ώρες που πέφτουν μέσα στο παράθυρο [from, to] ("HH:MM").
+     * Κρατά μια ώρα όταν ΞΕΚΙΝΑ >= from ΚΑΙ ΤΕΛΕΙΩΝΕΙ <= to. Κενό/άκυρο
+     * παράθυρο = όλες οι διδακτικές ώρες. Pure.
+     */
+    filterPeriodsByWindow(periods, from, to) {
+        const teaching = (periods || []).filter(p => !p.is_break);
+        const lo = this.timeToMinutes(from);
+        const hi = this.timeToMinutes(to);
+        if (lo === null && hi === null) return teaching;
+        return teaching.filter(p => {
+            const start = this.timeToMinutes(p.start_time);
+            const end = this.timeToMinutes(p.end_time);
+            if (start === null || end === null) return true;   // άγνωστη ώρα: μη την κρύψεις
+            if (lo !== null && start < lo) return false;
+            if (hi !== null && end > hi) return false;
+            return true;
+        });
+    },
+
+    /** Οι δύο επιλογείς «Ώρες: Από – Έως» πάνω από το grid. Pure. */
+    buildFreeRoomsControlsHtml(periods, from, to) {
+        const esc = this.esc.bind(this);
+        const teaching = (periods || []).filter(p => !p.is_break);
+        // Οι επιλογές είναι τα πραγματικά όρια των διδακτικών ωρών· αν το
+        // τρέχον παράθυρο δεν πέφτει πάνω σε όριο (π.χ. αποθηκευμένο 14:00
+        // ενώ οι ώρες ξεκινούν 13:00/16:00), πρόσθεσέ το ΩΣΤΕ ο επιλογέας
+        // να δείχνει την αλήθεια αντί για το πρώτο option.
+        const sorted = (values) => [...new Set(values.filter(Boolean))]
+            .sort((a, b) => (this.timeToMinutes(a) ?? 0) - (this.timeToMinutes(b) ?? 0));
+        const starts = sorted([...teaching.map(p => p.start_time), from]);
+        const ends = sorted([...teaching.map(p => p.end_time), to]);
+        const opts = (values, current) => values
+            .map(v => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`)
+            .join('');
+        return `
+            <div class="fr-controls">
+              <span>🕒 Ώρες:</span>
+              <select id="fr-from" onchange="TimetableView.setFreeRoomsWindow(this.value, document.getElementById('fr-to').value)">
+                ${opts(starts, from)}
+              </select>
+              <span>–</span>
+              <select id="fr-to" onchange="TimetableView.setFreeRoomsWindow(document.getElementById('fr-from').value, this.value)">
+                ${opts(ends, to)}
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="TimetableView.setFreeRoomsWindow('', '')">Όλες οι ώρες</button>
+            </div>`;
     },
 
     /**
@@ -250,11 +310,12 @@ const TimetableHelpers = {
      *
      * Pure: slots της λύσης + περίοδοι + ΟΛΕΣ οι αίθουσες μέσα, HTML έξω.
      */
-    buildFreeRoomsHtml(slots, periods, daysCount, allRooms, roomFilter) {
+    buildFreeRoomsHtml(slots, periods, daysCount, allRooms, roomFilter, timeWindow) {
         const esc = this.esc.bind(this);
         const dayNames = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
         const days = [...Array(Math.min(daysCount, 7)).keys()];
-        const teaching = periods.filter(p => !p.is_break);
+        const win = timeWindow || {};
+        const teaching = this.filterPeriodsByWindow(periods, win.from, win.to);
         const roomNames = (allRooms || []).map(r => r.name);
         const single = roomFilter && roomFilter !== 'all' && roomNames.includes(roomFilter)
             ? roomFilter : null;
@@ -291,9 +352,15 @@ const TimetableHelpers = {
                 }
                 const free = roomNames.filter(n => !taken.has(n));
                 const badgeClass = free.length === 0 ? 'fr-none' : 'fr-some';
-                const list = free.length
-                    ? free.map(esc).join('<br>')
-                    : '<em>Καμία ελεύθερη</em>';
+                let list;
+                if (!free.length) {
+                    list = '<em>Καμία ελεύθερη</em>';
+                } else if (taken.size === 0) {
+                    // Κανένα μάθημα εκείνη την ώρα — μην τυπώνεις όλη τη λίστα.
+                    list = `<span class="fr-all-free">Όλες ελεύθερες</span>`;
+                } else {
+                    list = free.map(esc).join('<br>');
+                }
                 return `<td class="${badgeClass}"><div class="fr-count">${free.length}/${roomNames.length}</div>${list}</td>`;
             }).join('');
             return `<tr><th class="fr-time">${esc(p.start_time)}–${esc(p.end_time)}</th>${cells}</tr>`;
@@ -301,12 +368,19 @@ const TimetableHelpers = {
 
         const total = teaching.length * days.length;
         const summary = single
-            ? `<p class="fr-summary">🏫 <b>${esc(single)}</b> — ελεύθερη <b>${freeCount}</b> από ${total} ώρες της εβδομάδας.</p>`
+            ? `<p class="fr-summary">🏫 <b>${esc(single)}</b> — ελεύθερη <b>${freeCount}</b> από ${total} ώρες${
+                win.from || win.to ? ` (${esc(win.from || '…')}–${esc(win.to || '…')})` : ' της εβδομάδας'}.</p>`
             : '';
+        const controls = this.buildFreeRoomsControlsHtml(periods, win.from, win.to);
+        const empty = teaching.length
+            ? ''
+            : '<p class="fr-summary">Καμία διδακτική ώρα σε αυτό το χρονικό παράθυρο.</p>';
 
         return `
             ${this._tableCss()}
+            ${controls}
             ${summary}
+            ${empty}
             <table class="fr-table">
               <thead><tr><th class="fr-time">Ώρα</th>${header}</tr></thead>
               <tbody>${rows}</tbody>
