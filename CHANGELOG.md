@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### 2026-09-10 — Τεκμηρίωση: διορθώσεις στο CLAUDE.md (μόνο docs)
+
+Καμία αλλαγή σε κώδικα/συμπεριφορά. Το `CLAUDE.md` περιγράφει πλέον σωστά:
+- **Database:** το schema αλλάζει μόνο με νέα Alembic revision (additive +
+  idempotent, πρότυπο `c3d4e5f6a7b8`)· το entrypoint τρέχει `alembic upgrade head`
+  σε κάθε deploy. Αφαιρέθηκε η λάθος αναφορά σε `create_all`/manual ALTER TABLE.
+- **Tables:** `students.grade`/`track` + κατάλογος `grade_catalog.py`
+  (`GET /api/students/grade-options`)· τα `periods` είναι διδακτικές ώρες της
+  ημέρας, όχι ακαδημαϊκές περίοδοι.
+- **Προειδοποίηση:** η διαγραφή ώρας (`periods`) σβήνει slots και διαθεσιμότητες
+  σε ΟΛΑ τα προγράμματα (φραγμένη με 409 + `?force=true`).
+- **CI/CD:** ο runner τρέχει ως systemd unit με auto-restart (όχι «failed»)·
+  καταγραφή των gates pytest → `npm ci` + `node --test` → rsync + compose → healthz.
+- **Common operations:** υπενθύμιση για το cache-buster `?v=N` στο `index.html`.
+
 ### 2026-09-10 — Μετονομασία προγράμματος (324 pytest + 73 JS, v=55)
 
 **Τι.** `PATCH /api/solver/solutions/{id}` με `{"name": ...}`: αλλάζει ΜΟΝΟ το

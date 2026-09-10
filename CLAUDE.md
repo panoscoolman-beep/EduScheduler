@@ -71,22 +71,36 @@ hard/soft constraints με βαρύτητα).
 
 ## Database
 
-Postgres 16 με auto-create-tables στο startup (`Base.metadata.create_all`),
-δηλαδή το schema ορίζεται ΟΛΟ από τα SQLAlchemy models (`backend/models/`).
-**Δεν υπάρχουν versioned migrations** — αν αλλάξει το schema, χρειάζεται
-manual ALTER TABLE.
+Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν το schema,
+αλλά η βάση αλλάζει **μόνο μέσω Alembic** (`alembic/versions/`). Το
+`entrypoint.sh` τρέχει `alembic upgrade head` πριν ξεκινήσει το uvicorn, οπότε
+κάθε deploy εφαρμόζει αυτόματα όσες revisions λείπουν. Το
+`Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
+(βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
+`lifespan` στο `backend/main.py`). Head στις 2026-09-10:
+`d4e5f6a7b8c9_student_track.py`.
+
+**Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
+
+1. Άλλαξε το model στο `backend/models/`.
+2. Νέο αρχείο στο `alembic/versions/` με `down_revision` = το τρέχον head
+   (έλεγχος: `docker exec edscheduler-backend alembic heads`).
+3. Pattern **additive + idempotent** με raw SQL: `ADD COLUMN IF NOT EXISTS`
+   στο `upgrade()`, `DROP COLUMN IF EXISTS` στο `downgrade()`. Πρότυπο:
+   `c3d4e5f6a7b8_student_grade.py`.
+4. Push σε `master` → CI → το entrypoint κάνει `alembic upgrade head`.
 
 ### Tables
 
 | Table | Σκοπός |
 |---|---|
-| `students` | Μαθητές (id, first_name, last_name, email, phone, max_days_per_week) |
+| `students` | Μαθητές (id, first_name, last_name, email, phone, grade, track, max_days_per_week). `grade` VARCHAR(60) = τάξη, `track` VARCHAR(120) = κατεύθυνση (ΓΕΛ) ή τομέας (ΕΠΑΛ). Ελεύθερο κείμενο στη βάση· ο κατάλογος επιλογών ζει στο `backend/services/grade_catalog.py` και σερβίρεται από το `GET /api/students/grade-options` |
 | `teachers` | Καθηγητές (id, name, short_name, email, phone, max_periods_per_*, color) |
 | `classes` | Τμήματα (όχι ακαδημαϊκές περίοδοι — μάθημα + ομάδα μαθητών) |
 | `subjects` | Μαθήματα/κωδικοί (Άλγεβρα, Έκθεση κτλ) |
 | `classrooms` | Αίθουσες με capacity & type |
 | `lessons` | Διδακτικές ενότητες (συσχετίζει class με teacher με subject) |
-| `periods` | Ακαδημαϊκές περίοδοι (Σεπτ-Ιούν) |
+| `periods` | Διδακτικές ώρες της ημέρας (1η Ώρα 08:00–09:00, 2η Ώρα…): name, short_name, start_time, end_time, is_break, sort_order. **Όχι** ακαδημαϊκές περίοδοι (αυτές στο EDS είναι τα `terms`/σενάρια) |
 | `constraints` | Hard/soft constraints με βαρύτητες |
 | `student_class_enrollments` | M:N — ποιοι μαθητές σε ποιο τμήμα |
 | `student_availability` | Πότε ένας μαθητής **δεν** μπορεί |
@@ -95,6 +109,16 @@ manual ALTER TABLE.
 | `timetable_solutions` | Solver runs — multiple "what-if" λύσεις |
 | `school_settings` | Global ρυθμίσεις (έναρξη/λήξη ημέρας, διάρκεια διδακτικής ώρας...) |
 | `terms` | Σενάρια ωραρίου — scope για lessons/availability/solutions (term_id NOT NULL παντού), προαιρετικά start/end dates για ICS |
+
+> ⚠️ **Η διαγραφή γραμμής στο `periods` είναι καταστροφική.** Τα FK προς
+> `periods` είναι `ON DELETE CASCADE`, οπότε σβήνονται ΟΡΙΣΤΙΚΑ όλες οι
+> τοποθετήσεις (`timetable_slots`) και οι δηλώσεις διαθεσιμότητας
+> καθηγητών/μαθητών σε εκείνη την ώρα, σε **ΟΛΑ** τα προγράμματα (solutions)
+> και σενάρια — ο πίνακας `periods` είναι κοινός για όλα. Το
+> `DELETE /api/periods/{id}` επιστρέφει **409** (`period_in_use`,
+> `requires_force`) όταν η ώρα χρησιμοποιείται, και προχωρά μόνο με
+> `?force=true` (το frontend ζητά πρώτα επιβεβαίωση). Πριν από τέτοια
+> διαγραφή έλεγξε ότι υπάρχει πρόσφατο backup στο `~/backups/edscheduler`.
 
 ## Solver (`backend/solver/engine.py`)
 
@@ -117,12 +141,29 @@ Output: `timetable_slots` rows + `timetable_solutions` row με metadata
 
 ## CI/CD
 
-`.github/workflows/deploy.yml` (self-hosted runner — ο ίδιος που έχει το
-korifi-crm). Σε push σε `master`: rsync → docker compose up -d --build.
+`.github/workflows/deploy.yml`, self-hosted runner στον ίδιο Debian server.
+Ο runner τρέχει ως systemd unit
+`actions.runner.panoscoolman-beep-EduScheduler.debian-edscheduler.service`
+με auto-restart (`Restart=on-failure`, drop-in `override.conf`). Το παλιό
+πρόβλημα «failed από 17 Μαρτίου 2026» έχει λυθεί.
 
-⚠️ **Σημαντικό**: ο runner είναι **failed από 17 Μαρτίου 2026** (ίδιο όπως
-το korifi-crm — μοιράζονται το ίδιο service). Δες
-`korifi-crm-v2/CLAUDE.md` για instructions επανεκκίνησης.
+Σε push σε `master` τα βήματα τρέχουν με αυτή τη σειρά, και κάθε αποτυχία
+σταματά το deploy:
+
+1. **pytest** μέσα στο image `eduscheduler-backend-citest` (CI-only tag, ώστε
+   ένα κόκκινο run να μην αγγίζει ποτέ το production image).
+2. **Frontend JS tests:** `npm ci` και μετά `node --test frontend/js/tests/*.test.js`
+   (Node built-in runner + jsdom).
+3. **Deploy:** rsync στο `/home/coolman/EduScheduler` (χωρίς `.git`,
+   `.github`, `.env`) και `docker compose up -d --build`.
+4. **Healthcheck:** `curl http://localhost:8082/api/healthz`, έως 3 προσπάθειες.
+
+Τα ίδια gates τοπικά, πριν από push:
+
+```bash
+docker build -t eduscheduler-backend-citest . && docker run --rm -v "$PWD":/work:ro -v /dev/null:/work/.env -w /work -e PYTHONPATH=/work eduscheduler-backend-citest python -m pytest tests/ -q -p no:cacheprovider
+npm ci && node --test frontend/js/tests/*.test.js
+```
 
 ## Common operations
 
@@ -147,6 +188,16 @@ curl -X POST http://localhost:8082/api/solver/generate \
   -d '{"max_time_seconds": 30}'
 
 # Swagger UI: ΔΕΝ εκτίθεται σε production (404) — μόνο τοπικά με dev run
+```
+
+**Cache-buster frontend (`?v=N`).** Όλα τα CSS/JS στο `frontend/index.html`
+φορτώνονται με `?v=N` (π.χ. `js/api.js?v=55`). Σε **κάθε** αλλαγή JS/CSS
+ανέβασε το `N` σε όλες τις εμφανίσεις μαζί, αλλιώς οι browsers σερβίρουν την
+παλιά cached έκδοση:
+
+```bash
+grep -o '?v=[0-9]*' frontend/index.html | sort | uniq -c   # τρέχουσα τιμή, πρέπει να είναι μία
+sed -i 's/?v=55"/?v=56"/g' frontend/index.html
 ```
 
 ## Known issues
