@@ -145,6 +145,8 @@ const API = {
         listSolutions: () => API.get('/solver/solutions'),
         getSolution: (id) => API.get(`/solver/solutions/${id}`),
         deleteSolution: (id) => API.delete(`/solver/solutions/${id}`),
+        renameSolution: (id, name) =>
+            API.request(`/solver/solutions/${id}`, { method: 'PATCH', body: { name } }),
         updateSlot: (solutionId, slotId, data) => API.put(`/solver/solutions/${solutionId}/slots/${slotId}`, data),
         compare: (ids) => API.get(`/solver/compare?ids=${ids.join(',')}`),
         feasibilityCheck: () => API.get('/solver/feasibility-check'),

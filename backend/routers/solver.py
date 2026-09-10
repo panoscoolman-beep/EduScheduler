@@ -28,6 +28,7 @@ from backend.services.solver_jobs import (
 )
 from backend.services.substitute_finder import find_substitutes
 from backend.schemas import (
+    SolutionRename,
     FeasibilityReportResponse,
     SlotSwapRequest,
     SolverRequest,
@@ -399,6 +400,42 @@ def compare_solutions(ids: str, db: Session = Depends(get_db)):
         raise HTTPException(400, detail="At least one solution_id is required")
 
     return svc_compare(id_list, db)
+
+
+@router.patch("/solutions/{solution_id}", response_model=TimetableSolutionResponse)
+def rename_solution(solution_id: int, data: SolutionRename, db: Session = Depends(get_db)):
+    """Μετονομασία προγράμματος. ΜΟΝΟ το όνομα αλλάζει — slots, κλειδώματα,
+    ιστορικό undo και σενάριο μένουν ανέγγιχτα. Διπλό όνομα μέσα στο ίδιο
+    σενάριο απορρίπτεται (409): στο dropdown και στο /senario του bot δύο
+    ίδια ονόματα δεν ξεχωρίζουν."""
+    solution = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    clash = (
+        db.query(TimetableSolution.id)
+        .filter(
+            TimetableSolution.term_id == solution.term_id,
+            TimetableSolution.id != solution_id,
+            TimetableSolution.name == data.name,
+        )
+        .first()
+    )
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Υπάρχει ήδη πρόγραμμα με όνομα «{data.name}» σε αυτό το σενάριο.",
+        )
+    solution.name = data.name
+    db.commit()
+    db.refresh(solution)
+    return TimetableSolutionResponse(
+        id=solution.id,
+        name=solution.name,
+        created_at=_iso_utc(solution.created_at),
+        status=solution.status,
+        score=solution.score,
+        term_id=solution.term_id,
+    )
 
 
 @router.delete("/solutions/{solution_id}", status_code=204)

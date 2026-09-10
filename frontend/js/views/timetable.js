@@ -97,9 +97,13 @@ const TimetableView = {
                         </div>
                         <div class="form-group" style="margin:0; min-width: 150px;">
                             <label class="form-label">Πρόγραμμα</label>
-                            <select class="form-select" id="tt-solution">
-                                ${solutions.map(s => `<option value="${s.id}" ${s.id === solutionId ? 'selected' : ''}>${s.name}</option>`).join('')}
-                            </select>
+                            <div style="display:flex; gap:4px; align-items:center;">
+                                <select class="form-select" id="tt-solution">
+                                    ${solutions.map(s => `<option value="${s.id}" ${s.id === solutionId ? 'selected' : ''}>${this._esc(s.name)}</option>`).join('')}
+                                </select>
+                                <button class="btn btn-secondary btn-sm" id="tt-rename"
+                                        title="Μετονομασία προγράμματος">✏️</button>
+                            </div>
                         </div>
                     </div>
 
@@ -351,6 +355,10 @@ const TimetableView = {
                 await this.render(container);
             });
 
+            // Event: ✏️ rename the selected programme (name only)
+            document.getElementById('tt-rename').addEventListener('click', () =>
+                this._openRenameSolution(solutionId));
+
             // Undo / Redo wiring
             const undoBtn = document.getElementById('tt-undo');
             const redoBtn = document.getElementById('tt-redo');
@@ -505,6 +513,41 @@ const TimetableView = {
         });
         const msg = document.querySelector('.lesson-palette .palette-empty-msg');
         if (msg) msg.style.display = visible ? 'none' : '';
+    },
+
+    /**
+     * ✏️ Μετονομασία του τρέχοντος προγράμματος. Αλλάζει ΜΟΝΟ το όνομα (ώρες,
+     * κλειδώματα, ιστορικό μένουν ίδια)· ενημερώνει το dropdown επί τόπου,
+     * χωρίς πλήρες re-render. Η τιμή μπαίνει στο input μέσω DOM (όχι μέσα σε
+     * attribute) ώστε εισαγωγικά στο όνομα να μη σπάνε το HTML.
+     */
+    _openRenameSolution(solutionId) {
+        const select = document.getElementById('tt-solution');
+        const option = select ? [...select.options].find(o => Number(o.value) === solutionId) : null;
+        const current = option ? option.textContent.trim() : '';
+        Modal.open('✏️ Μετονομασία προγράμματος', `
+            <div class="form-group">
+                <label class="form-label">Νέο όνομα</label>
+                <input class="form-input" id="f-solution-name" maxlength="200">
+            </div>
+            <p class="text-muted" style="font-size:0.85rem; margin-top:0.5rem">
+                Αλλάζει μόνο το όνομα — οι ώρες, τα κλειδώματα και το ιστορικό μένουν ίδια.
+            </p>`,
+        async () => {
+            const name = document.getElementById('f-solution-name').value.trim();
+            if (!name) { Toast.error('Το όνομα δεν μπορεί να είναι κενό.'); return; }
+            if (name === current) { Modal.close(); return; }
+            try {
+                const res = await API.solver.renameSolution(solutionId, name);
+                if (option) option.textContent = res.name;
+                Toast.success(`Το πρόγραμμα μετονομάστηκε σε «${this._esc(res.name)}»`);
+                Modal.close();
+            } catch (err) {
+                Toast.error('Αποτυχία μετονομασίας: ' + this._esc(err.message));
+            }
+        }, { saveText: 'Αποθήκευση' });
+        const input = document.getElementById('f-solution-name');
+        if (input) { input.value = current; input.select && input.select(); }
     },
 
     /**

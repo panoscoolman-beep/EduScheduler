@@ -4,7 +4,7 @@ Pydantic schemas for request/response validation.
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 
 
 # ─── Term (Σενάριο / Scenario) ──────────────────────────
@@ -353,6 +353,19 @@ class SlotSwapRequest(BaseModel):
     """Ανταλλαγή δύο τοποθετημένων slots (drag κάρτας πάνω σε κάρτα)."""
     slot_a_id: int
     slot_b_id: int
+
+
+class SolutionRename(BaseModel):
+    """Μετονομασία προγράμματος (λύσης) — αλλάζει ΜΟΝΟ το όνομα."""
+    name: str = Field(..., max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = (value or "").strip()
+        if not value:
+            raise ValueError("Το όνομα δεν μπορεί να είναι κενό")
+        return value
 
 
 class TimetableSolutionResponse(BaseModel):
