@@ -11,6 +11,8 @@ Endpoints (mounted under /api/exports):
         στοιχεία επικοινωνίας, ΤΑΞΗ και τα τμήματά τους
     GET /students/print?sort=name|grade              → ο ίδιος κατάλογος ως
         εκτυπώσιμη σελίδα (με ομαδοποίηση ανά τάξη στο sort=grade)
+        Και τα δύο δέχονται τα φίλτρα της οθόνης Μαθητών:
+        &grade=…(επαναλαμβανόμενο, κενό = χωρίς τάξη)&track=…&q=…
 
 The frontend opens them with window.open (same-origin auth flow) and the
 browser handles the print dialog / download.
@@ -21,7 +23,9 @@ from __future__ import annotations
 import datetime
 from html import escape
 
-from fastapi import APIRouter, Depends, HTTPException
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
@@ -39,6 +43,7 @@ from backend.models import (
     TimetableSolution,
 )
 from backend.services import greek_holidays
+from backend.services.student_filters import StudentFilter
 
 router = APIRouter()
 
@@ -686,14 +691,25 @@ def _csv_safe(value) -> str:
     return "'" + text if text[:1] in ("=", "+", "-", "@") else text
 
 
-def _student_rows(db: Session) -> list[list]:
+def _student_filter(
+    grade: list[str] = Query(default=[]),
+    track: list[str] = Query(default=[]),
+    q: str = "",
+) -> StudentFilter:
+    """Τα φίλτρα της οθόνης Μαθητών ως dependency (κοινά για export/print)."""
+    return StudentFilter.from_query(grade, track, q)
+
+
+def _student_rows(db: Session, filters: StudentFilter | None = None) -> list[list]:
     """Μία γραμμή ανά μαθητή: στοιχεία + τάξη + τα τμήματά του (ονόματα).
 
     Τα τμήματα φορτώνονται μαζικά (2 queries συνολικά) — όχι ένα query ανά
-    μαθητή."""
+    μαθητή. `filters` κρατά μόνο όσους βλέπει ο χρήστης στην οθόνη."""
     students = (
         db.query(Student).order_by(Student.last_name, Student.first_name).all()
     )
+    if filters is not None:
+        students = filters.apply(students)
     rows = (
         db.query(StudentClassEnrollment.student_id, SchoolClass.name, SchoolClass.short_name)
         .join(SchoolClass, SchoolClass.id == StudentClassEnrollment.class_id)
@@ -720,15 +736,20 @@ def _student_rows(db: Session) -> list[list]:
 
 
 @router.get("/students")
-def export_students(format: str = "xlsx", db: Session = Depends(get_db)):
+def export_students(
+    format: str = "xlsx",
+    filters: StudentFilter = Depends(_student_filter),
+    db: Session = Depends(get_db),
+):
     """Κατάλογος μαθητών με στοιχεία, ΤΑΞΗ και τμήματα.
 
     format=xlsx (default) ή csv. Το CSV γράφεται με UTF-8 BOM ώστε τα
-    ελληνικά να ανοίγουν σωστά με διπλό κλικ στο Excel."""
+    ελληνικά να ανοίγουν σωστά με διπλό κλικ στο Excel. Τα grade/track/q
+    περιορίζουν τη λίστα όπως τα φίλτρα της οθόνης."""
     if format not in ("xlsx", "csv"):
         raise HTTPException(status_code=400, detail="Το format δέχεται: xlsx ή csv")
 
-    rows = _student_rows(db)
+    rows = _student_rows(db, filters)
     today = datetime.date.today().strftime("%Y-%m-%d")
 
     if format == "csv":
@@ -779,16 +800,25 @@ def export_students(format: str = "xlsx", db: Session = Depends(get_db)):
 
 
 @router.get("/students/print", response_class=HTMLResponse)
-def export_students_print(sort: str = "name", db: Session = Depends(get_db)):
+def export_students_print(
+    sort: str = "name",
+    filters: StudentFilter = Depends(_student_filter),
+    db: Session = Depends(get_db),
+):
     """Εκτυπώσιμος κατάλογος μαθητών.
 
     sort=name (default): αλφαβητικά κατά επώνυμο, ένας ενιαίος πίνακας.
     sort=grade: ομαδοποίηση ανά τάξη με επικεφαλίδα και μετρητή — οι μαθητές
-    χωρίς τάξη πάνε στο τέλος. Η γραμμή επιλογής δεν τυπώνεται (.noprint)."""
+    χωρίς τάξη πάνε στο τέλος. Η γραμμή επιλογής δεν τυπώνεται (.noprint).
+    Με grade/track/q τυπώνονται μόνο οι φιλτραρισμένοι και το φίλτρο
+    γράφεται στην κεφαλίδα."""
     if sort not in ("name", "grade"):
         raise HTTPException(status_code=400, detail="Το sort δέχεται: name ή grade")
 
-    rows = _student_rows(db)          # ήδη ταξινομημένες κατά επώνυμο/όνομα
+    rows = _student_rows(db, filters)  # ήδη ταξινομημένες κατά επώνυμο/όνομα
+    empty_text = (
+        "Κανένας μαθητής με αυτά τα φίλτρα." if filters.is_active() else "Δεν υπάρχουν μαθητές."
+    )
     today = datetime.date.today().strftime("%d/%m/%Y")
 
     def table(section_rows: list[list]) -> str:
@@ -821,17 +851,21 @@ def export_students_print(sort: str = "name", db: Session = Depends(get_db)):
             f"<small>({len(groups[grade])})</small></h2>{table(groups[grade])}"
             for grade in order
         )
-        body_html = sections or "<p>Δεν υπάρχουν μαθητές.</p>"
+        body_html = sections or f"<p>{empty_text}</p>"
     else:
-        body_html = table(rows) if rows else "<p>Δεν υπάρχουν μαθητές.</p>"
+        body_html = table(rows) if rows else f"<p>{empty_text}</p>"
 
     other = "grade" if sort == "name" else "name"
     other_text = "ανά τάξη" if sort == "name" else "αλφαβητικά"
+    # Η αλλαγή ταξινόμησης κρατά τα ίδια φίλτρα.
+    other_href = escape("?" + urlencode([("sort", other)] + filters.query_params()))
     toolbar = (
         "<p class='noprint' style='font-size:12px;color:#666;margin-bottom:12px'>"
         f"Ταξινόμηση: <b>{'αλφαβητικά' if sort == 'name' else 'ανά τάξη'}</b> · "
-        f"<a href=\"?sort={other}\">{other_text}</a></p>"
+        f"<a href=\"{other_href}\">{other_text}</a></p>"
     )
+    summary = filters.summary()
+    filter_note = f'<div class="sub">Φίλτρο: {escape(summary)}</div>' if summary else ""
 
     html = f"""<!DOCTYPE html>
 <html lang="el">
@@ -841,6 +875,7 @@ def export_students_print(sort: str = "name", db: Session = Depends(get_db)):
 {toolbar}
 <h1>👥 Κατάλογος Μαθητών</h1>
 <div class="sub">{len(rows)} μαθητές · Εκτυπώθηκε {today} · Φροντιστήριο ΚΟΡΥΦΗ</div>
+{filter_note}
 {body_html}
 <p class="noprint" style="margin-top:16px">
   <button onclick="window.print()" style="padding:8px 16px">🖨️ Εκτύπωση / Αποθήκευση PDF</button>

@@ -452,6 +452,44 @@ def test_students_print_toolbar_switches_sorting_and_is_not_printed(client):
     assert "?sort=name" in grouped
 
 
+def _csv_names(client, params) -> list[str]:
+    res = client.get("/api/exports/students", params=[("format", "csv")] + params)
+    assert res.status_code == 200
+    lines = [ln for ln in res.content.decode("utf-8").replace("﻿", "").split("\r\n") if ln]
+    return [ln.split(";")[0] for ln in lines[1:]]
+
+
+def test_students_export_respects_grade_track_and_search_filters(client):
+    _seed_students_for_export(client)
+    assert _csv_names(client, [("grade", "Γ΄ Λυκείου")]) == ["Αλεξίου"]
+    assert _csv_names(client, [("grade", "Α΄ Λυκείου"), ("grade", "Γ΄ Λυκείου")]) == [
+        "Αλεξίου", "Παπαδόπουλος"]
+    # Κενή τάξη = «Χωρίς τάξη» (ο «Ζήσης» + ο μαθητής του fixture)
+    assert _csv_names(client, [("grade", "")]) == ["Ζήσης", "Κοντού"]
+    assert _csv_names(client, [("track", "Θετικών Σπουδών (2ο πεδίο)")]) == ["Αλεξίου"]
+    assert _csv_names(client, [("q", "παπαδοπουλος")]) == ["Παπαδόπουλος"]
+    # «ΚΑΙ» ανάμεσα σε τάξη και κατεύθυνση
+    assert _csv_names(client, [("grade", "Α΄ Λυκείου"),
+                               ("track", "Θετικών Σπουδών (2ο πεδίο)")]) == []
+    # Χωρίς φίλτρα: όλοι, όπως πριν
+    assert _csv_names(client, []) == ["Αλεξίου", "Ζήσης", "Κοντού", "Παπαδόπουλος"]
+
+
+def test_students_print_with_filter_names_it_and_keeps_it_when_switching_sort(client):
+    _seed_students_for_export(client)
+    body = client.get("/api/exports/students/print", params=[("grade", "Γ΄ Λυκείου")]).text
+    assert "1 μαθητές" in body
+    assert "Αλεξίου" in body and "Παπαδόπουλος" not in body
+    assert "Φίλτρο: Τάξη: Γ΄ Λυκείου" in body
+    assert "?sort=grade&amp;grade=" in body              # το link ταξινόμησης κρατά το φίλτρο
+
+    none = client.get("/api/exports/students/print", params=[("q", "zzz")]).text
+    assert "Κανένας μαθητής με αυτά τα φίλτρα" in none
+
+    xss = client.get("/api/exports/students/print", params=[("q", "<script>x</script>")]).text
+    assert "<script>" not in xss and "&lt;script&gt;" in xss
+
+
 def test_students_print_rejects_unknown_sort_and_survives_empty_school(client):
     assert client.get("/api/exports/students/print?sort=nope").status_code == 400
     client.session.query(Student).delete()

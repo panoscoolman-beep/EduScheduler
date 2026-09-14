@@ -3,8 +3,12 @@
  */
 const StudentsView = {
     _classesById: new Map(),
+    // Φίλτρο λίστας· μένει στη μνήμη όσο είναι ανοιχτή η σελίδα, ώστε η
+    // επιστροφή στην καρτέλα να βρίσκει την ίδια επιλογή (reload = καθαρό).
+    _filter: null,
 
     async render(container) {
+        this._filter = this._filter || StudentsHelpers.emptyFilter();
         await Promise.all([this._loadClasses(), this._loadGradeCatalog()]);
         const table = new DataTable({
             columns: [
@@ -19,6 +23,8 @@ const StudentsView = {
             ],
             apiService: API.students,
             entityName: 'Μαθητές',
+            rowFilter: (data) => this._visibleStudents(data),
+            onRendered: (all, visible) => this._renderFilterBar(all, visible),
             onFormReady: (item) => this._onStudentFormReady(item),
             customActions: [
                 {
@@ -86,15 +92,15 @@ const StudentsView = {
         container.innerHTML = `
             <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-bottom:0.5rem">
                 <button class="btn btn-secondary" id="students-print"
-                        title="Εκτυπώσιμος κατάλογος μαθητών (αλφαβητικά ή ανά τάξη)">
+                        title="Εκτυπώσιμος κατάλογος (αλφαβητικά ή ανά τάξη) — μόνο όσοι φαίνονται με τα τρέχοντα φίλτρα">
                     🖨️ Εκτύπωση
                 </button>
                 <button class="btn btn-secondary" id="students-export-xlsx"
-                        title="Κατέβασε όλους τους μαθητές με στοιχεία, τάξη και τμήματα (Excel)">
+                        title="Κατέβασε τους μαθητές που φαίνονται (με τα φίλτρα) με στοιχεία, τάξη και τμήματα (Excel)">
                     ⬇️ Εξαγωγή Excel
                 </button>
                 <button class="btn btn-secondary" id="students-export-csv"
-                        title="Ίδια στοιχεία σε CSV (ανοίγει σε Excel/Google Sheets)">
+                        title="Ίδια στοιχεία σε CSV (ανοίγει σε Excel/Google Sheets) — με τα τρέχοντα φίλτρα">
                     ⬇️ CSV
                 </button>
                 <button class="btn btn-secondary" id="crm-import-btn"
@@ -102,16 +108,77 @@ const StudentsView = {
                     ⬇️ Εισαγωγή από CRM
                 </button>
             </div>
+            <div class="card sf-card">
+                <div class="sf-toolbar">
+                    <input class="form-input sf-search" id="sf-search" type="search"
+                           placeholder="🔍 Αναζήτηση ονόματος, email ή τηλεφώνου…"
+                           value="${StudentsHelpers.esc(this._filter.search)}">
+                    <span class="sf-count" id="sf-count"></span>
+                    <button class="btn btn-sm btn-secondary" id="sf-clear" style="display:none">
+                        ✖ Καθαρισμός φίλτρων
+                    </button>
+                </div>
+                <div id="sf-chips"></div>
+            </div>
             <div id="students-table"></div>`;
+        this._wireFilters(table);
         await table.render(document.getElementById('students-table'));
+        const withFilter = (url) => StudentsHelpers.withFilter(url, this._filter);
         document.getElementById('students-print').addEventListener('click', () =>
-            window.open('/api/exports/students/print', '_blank'));
+            window.open(withFilter('/api/exports/students/print'), '_blank'));
         document.getElementById('students-export-xlsx').addEventListener('click', () =>
-            window.open('/api/exports/students?format=xlsx', '_blank'));
+            window.open(withFilter('/api/exports/students?format=xlsx'), '_blank'));
         document.getElementById('students-export-csv').addEventListener('click', () =>
-            window.open('/api/exports/students?format=csv', '_blank'));
+            window.open(withFilter('/api/exports/students?format=csv'), '_blank'));
         document.getElementById('crm-import-btn').addEventListener('click', () =>
             this._openCrmImport(container));
+    },
+
+    /**
+     * Ό,τι δείχνει ο πίνακας: φιλτραρισμένοι + αλφαβητικά κατά επώνυμο. Εδώ
+     * «καθαρίζει» και το φίλτρο από επιλογές που δεν ισχύουν πια (π.χ. μετά
+     * από διαγραφή του τελευταίου μαθητή μιας τάξης).
+     */
+    _visibleStudents(data) {
+        this._filter = StudentsHelpers.prune(this._filter, data);
+        return StudentsHelpers.applyFilter(data, this._filter);
+    },
+
+    /** Αναζήτηση + chips + καθαρισμός: listeners μία φορά ανά render. */
+    _wireFilters(table) {
+        document.getElementById('sf-search').addEventListener('input', (e) =>
+            this._setFilter({ ...this._filter, search: e.target.value }, table));
+        document.getElementById('sf-chips').addEventListener('click', (e) => {
+            const chip = e.target.closest('.sf-chip');
+            if (!chip) return;
+            this._setFilter(
+                StudentsHelpers.toggle(this._filter, chip.dataset.kind, chip.dataset.value), table);
+        });
+        document.getElementById('sf-clear').addEventListener('click', () => {
+            document.getElementById('sf-search').value = '';
+            this._setFilter(StudentsHelpers.emptyFilter(), table);
+        });
+    },
+
+    /** Νέο φίλτρο → ξανασχεδίαση από τα ήδη φορτωμένα δεδομένα (χωρίς fetch). */
+    _setFilter(filter, table) {
+        this._filter = filter;
+        table.renderTable();
+    },
+
+    /** Καλείται από το DataTable μετά από κάθε σχεδίαση (και μετά από αποθήκευση). */
+    _renderFilterBar(all, visible) {
+        const chips = document.getElementById('sf-chips');
+        if (!chips) return;
+        chips.innerHTML = StudentsHelpers.buildChipsHtml({
+            gradeOpts: StudentsHelpers.gradeOptions(all, this._catalog?.grades),
+            trackOpts: StudentsHelpers.trackOptions(all, this._filter),
+            filter: this._filter,
+        });
+        document.getElementById('sf-count').textContent =
+            StudentsHelpers.countText(visible.length, all.length);
+        document.getElementById('sf-clear').style.display =
+            StudentsHelpers.isActive(this._filter) ? '' : 'none';
     },
 
     /**

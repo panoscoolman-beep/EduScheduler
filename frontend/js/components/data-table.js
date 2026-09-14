@@ -2,7 +2,8 @@
  * DataTable Component — Reusable CRUD table with add/edit/delete.
  */
 class DataTable {
-    constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady }) {
+    constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady,
+                  rowFilter, onRendered }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -12,6 +13,11 @@ class DataTable {
         this.formParser = formParser;
         this.onFormReady = onFormReady;  // optional: fired after form DOM is ready
         this.customActions = customActions || [];
+        // Προαιρετικά: rowFilter(data) → οι γραμμές που φαίνονται (φίλτρο +
+        // σειρά)· onRendered(all, visible) μετά από κάθε σχεδίαση. Τα
+        // this.data μένουν ολόκληρα ώστε edit/delete να βρίσκουν κάθε εγγραφή.
+        this.rowFilter = rowFilter;
+        this.onRendered = onRendered;
         this.data = [];
     }
 
@@ -58,12 +64,25 @@ class DataTable {
                 </div>
             `;
             tableContainer.querySelector('#dt-empty-add')?.addEventListener('click', () => this.openForm());
+            this._notifyRendered([]);
+            return;
+        }
+
+        const visible = this.rowFilter ? this.rowFilter(this.data) : this.data;
+        if (visible.length === 0) {
+            tableContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔎</div>
+                    <p class="empty-state-text">Καμία εγγραφή με αυτά τα φίλτρα</p>
+                </div>
+            `;
+            this._notifyRendered(visible);
             return;
         }
 
         const headerCells = this.columns.map(c => `<th>${c.label}</th>`).join('');
 
-        const rows = this.data.map(item => {
+        const rows = visible.map(item => {
             const cells = this.columns.map(col => {
                 let value = item[col.key];
                 if (col.render) value = col.render(value, item);
@@ -111,6 +130,11 @@ class DataTable {
                 }
             });
         });
+        this._notifyRendered(visible);
+    }
+
+    _notifyRendered(visible) {
+        if (typeof this.onRendered === 'function') this.onRendered(this.data || [], visible);
     }
 
     openForm(editId = null) {
@@ -192,4 +216,8 @@ class DataTable {
             { saveText: 'Ναι, διαγραφή όλων', saveClass: 'btn-danger' },
         );
     }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = DataTable;
 }

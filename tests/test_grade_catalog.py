@@ -97,6 +97,18 @@ def test_grade_options_endpoint_serves_the_catalog(client):
     assert body["default_track_label"] == gc.DEFAULT_TRACK_LABEL
 
 
+def test_students_list_is_alphabetical_by_surname_then_first_name(client):
+    for last, first in (("Παπαδόπουλος", "Νίκος"), ("Αλεξίου", "Μαρία"),
+                        ("Ζήσης", "Κώστας"), ("Αλεξίου", "Άννα")):
+        client.session.add(Student(first_name=first, last_name=last))
+    client.session.commit()
+    res = client.get("/api/students/")
+    assert res.status_code == 200
+    assert [(s["last_name"], s["first_name"]) for s in res.json()] == [
+        ("Αλεξίου", "Άννα"), ("Αλεξίου", "Μαρία"), ("Ζήσης", "Κώστας"), ("Παπαδόπουλος", "Νίκος"),
+    ]
+
+
 def test_grade_options_is_not_shadowed_by_the_student_id_route(client):
     """Το /grade-options δηλώνεται ΠΡΙΝ το /{student_id} — αλλιώς θα έπεφτε
     στο path parameter και θα γύριζε 422."""

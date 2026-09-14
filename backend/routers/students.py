@@ -28,7 +28,9 @@ def grade_options():
 
 @router.get("/", response_model=list[StudentResponse])
 def get_students(db: Session = Depends(get_db)):
-    return db.query(Student).all()
+    # Αλφαβητικά κατά επώνυμο· το frontend ξαναταξινομεί με ελληνικό collator,
+    # αλλά κάθε άλλος καταναλωτής παίρνει επίσης σταθερή σειρά.
+    return db.query(Student).order_by(Student.last_name, Student.first_name, Student.id).all()
 
 
 @router.get("/{student_id}", response_model=StudentResponse)
