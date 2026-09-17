@@ -77,7 +77,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 κάθε deploy εφαρμόζει αυτόματα όσες revisions λείπουν. Το
 `Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
 (βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
-`lifespan` στο `backend/main.py`). Head στις 2026-09-10:
+`lifespan` στο `backend/main.py`). Head στις 2026-09-18:
 `e1f2a3b4c5d6_solution_archived_at.py`.
 
 **Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
