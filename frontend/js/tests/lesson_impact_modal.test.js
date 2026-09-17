@@ -57,9 +57,25 @@ test('actionState: καθάρισμα ενεργό μόνο όταν περισ�
 
     const nothing = M.actionState(clone({
         trim: { can_trim: false, trim_to: 4, would_remove: 0, blocked_reason: 'nothing_to_trim' },
+        solutions: [{ solution_id: 1, solution_name: 'Πρόγραμμα Α', placed: 4, unplaced: 0, missing: 0 }],
+        totals: { solutions: 1, placed: 4, unplaced: 0, max_placed: 4 },
     }));
     assert.equal(nothing.trimEnabled, false);
     assert.match(nothing.trimHint, /Όλες οι ώρες είναι τοποθετημένες/);
+
+    // Το ΠΑΛΙΟ πρόγραμμα κρατά τις ώρες ενώ στο τρέχον περιμένουν στην Παλέτα.
+    const held = M.actionState(clone({
+        trim: { can_trim: false, trim_to: 3, would_remove: 0, blocked_reason: 'nothing_to_trim' },
+        lesson: { ...DATA.lesson, periods_per_week: 3 },
+        solutions: [
+            { solution_id: 2, solution_name: 'ΧΕΙΜΕΡΙΝΟ', placed: 0, unplaced: 3, missing: 0 },
+            { solution_id: 1, solution_name: 'Παλιό 8/5', placed: 3, unplaced: 0, missing: 0 },
+        ],
+        totals: { solutions: 2, placed: 3, unplaced: 3, max_placed: 3 },
+    }));
+    assert.match(held.trimHint, /Οι 3 ώρες της Παλέτας δεν κόβονται: στο «Παλιό 8\/5»/);
+    assert.match(held.trimHint, /διάγραψε ολόκληρο το μάθημα/);
+    assert.deepEqual(M.blockingSolutions(DATA), ['Πρόγραμμα Α']);
 
     const none = M.actionState(clone({
         trim: { can_trim: false, trim_to: 4, would_remove: 0, blocked_reason: 'no_placed_hours' },

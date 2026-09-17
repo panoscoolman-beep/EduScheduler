@@ -76,6 +76,19 @@ const LessonImpactModal = {
             </table>`;
     },
 
+    /**
+     * Ποια προγράμματα «κρατούν» τις ώρες: αυτά με τις περισσότερες
+     * τοποθετημένες. Είναι ο λόγος που μπλοκάρεται το καθάρισμα όταν η
+     * Παλέτα του τρέχοντος προγράμματος έχει ώρες — συχνά φταίει ένα ΠΑΛΙΟ
+     * πρόγραμμα του ίδιου σεναρίου.
+     */
+    blockingSolutions(data) {
+        const max = ((data && data.totals) || {}).max_placed || 0;
+        return ((data && data.solutions) || [])
+            .filter(r => max > 0 && r.placed === max)
+            .map(r => r.solution_name);
+    },
+
     /** Κείμενα/κατάσταση των δύο κουμπιών — pure, ώστε να ελέγχονται. */
     actionState(data) {
         const trim = (data && data.trim) || {};
@@ -98,7 +111,13 @@ const LessonImpactModal = {
             state.trimHint = 'Καμία ώρα δεν είναι τοποθετημένη, οπότε δεν υπάρχει τίποτα να κρατηθεί. '
                 + 'Αν δεν το χρειάζεσαι, διάγραψε ολόκληρο το μάθημα.';
         } else {
-            state.trimHint = 'Όλες οι ώρες είναι τοποθετημένες — δεν υπάρχει τίποτα στην Παλέτα.';
+            const totals = (data && data.totals) || {};
+            const holders = LessonImpactModal.blockingSolutions(data);
+            state.trimHint = (totals.unplaced || 0) > 0 && holders.length
+                ? `Οι ${totals.unplaced} ώρες της Παλέτας δεν κόβονται: στο «${holders.join('», «')}» `
+                  + `είναι τοποθετημένες και οι ${l.periods_per_week}. Σβήσε τις πρώτα από εκείνο το `
+                  + 'πρόγραμμα, ή διάγραψε ολόκληρο το μάθημα αν δεν το χρειάζεσαι πουθενά.'
+                : 'Όλες οι ώρες είναι τοποθετημένες — δεν υπάρχει τίποτα στην Παλέτα.';
         }
         if (del.requires_force) {
             state.confirmLabel = `Ναι, κατάλαβα ότι θα σβηστούν και ${del.placed_total} τοποθετημένες ώρες `
