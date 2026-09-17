@@ -78,7 +78,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 `Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
 (βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
 `lifespan` στο `backend/main.py`). Head στις 2026-09-10:
-`d4e5f6a7b8c9_student_track.py`.
+`e1f2a3b4c5d6_solution_archived_at.py`.
 
 **Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
 
@@ -106,7 +106,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 | `student_availability` | Πότε ένας μαθητής **δεν** μπορεί |
 | `teacher_availability` | Πότε ένας καθηγητής **δεν** μπορεί |
 | `timetable_slots` | Το παραγόμενο πρόγραμμα — ποια ώρα/μέρα/αίθουσα τι μάθημα |
-| `timetable_solutions` | Solver runs — multiple "what-if" λύσεις |
+| `timetable_solutions` | Solver runs — multiple "what-if" λύσεις. `archived_at` = αρχειοθετημένο πρόγραμμα: μένει ακέραιο αλλά βγαίνει από τη λίστα, από τον parking-lot sync και από τον έλεγχο «🔍 Τι επηρεάζει;» (POST /solver/solutions/{id}/archive\|unarchive) |
 | `school_settings` | Global ρυθμίσεις (έναρξη/λήξη ημέρας, διάρκεια διδακτικής ώρας...) |
 | `terms` | Σενάρια ωραρίου — scope για lessons/availability/solutions (term_id NOT NULL παντού), προαιρετικά start/end dates για ICS |
 
