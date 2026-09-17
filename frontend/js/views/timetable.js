@@ -678,6 +678,39 @@ const TimetableView = {
      * shared slots array ενημερώνεται IN PLACE ώστε grid και παλέτα να
      * βλέπουν την ίδια αλήθεια χωρίς πλήρες re-render του view.
      */
+    /**
+     * «🔍 Τι επηρεάζει;» για μια κάρτα της Παλέτας: δείχνει πού χρησιμοποιείται
+     * το μάθημα ΠΡΙΝ ο χρήστης σβήσει ώρες, και προσφέρει τις δύο ασφαλείς
+     * ενέργειες (καθάρισμα Παλέτας / διαγραφή μαθήματος με επιβεβαίωση).
+     */
+    inspectLesson(lessonId) {
+        LessonImpactModal.open(lessonId, () => this.reloadAfterLessonChange());
+    },
+
+    /**
+     * Ξαναφόρτωσε πρόγραμμα + μαθήματα μετά από αλλαγή ωρών ή διαγραφή. Δεν
+     * αρκεί το refreshPalette: η διαγραφή μαθήματος αφαιρεί και τοποθετημένες
+     * ώρες, άρα αλλάζει και το πλέγμα.
+     */
+    async reloadAfterLessonChange() {
+        const ctx = this._paletteCtx;
+        if (!ctx) return;
+        try {
+            const [fresh, lessons] = await Promise.all([
+                API.solver.getSolution(ctx.solutionId),
+                API.lessons.list().catch(() => this._lessons || []),
+            ]);
+            this._lessons = lessons;
+            // Ίδιος πίνακας με αυτόν που κρατά το πλέγμα — ενημέρωση στη θέση του.
+            ctx.slots.length = 0;
+            Array.prototype.push.apply(ctx.slots, fresh.slots);
+            if (this._rerenderGrid) this._rerenderGrid();
+            this.refreshPalette();
+        } catch (err) {
+            Toast.error('Η ανανέωση απέτυχε: ' + err.message);
+        }
+    },
+
     async syncLessonSlots(lessonId) {
         const ctx = this._paletteCtx;
         if (!ctx) return;

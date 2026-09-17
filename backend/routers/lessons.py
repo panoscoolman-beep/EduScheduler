@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
+from backend.services.lesson_impact import lesson_impact
 from backend.schemas import (
     LessonCreate,
     LessonResponse,
@@ -180,11 +181,75 @@ def update_lesson(lesson_id: int, data: LessonCreate, db: Session = Depends(get_
     return _enrich_lesson(lesson)
 
 
+@router.get("/{lesson_id}/impact")
+def lesson_impact_report(lesson_id: int, db: Session = Depends(get_db)):
+    """Τι επηρεάζει αυτό το μάθημα-κάρτα: πού είναι τοποθετημένο, τι περιμένει
+    στην Παλέτα και τι θα χαθεί σε καθάρισμα ή διαγραφή. Read-only."""
+    report = lesson_impact(db, lesson_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+    return report
+
+
+@router.post("/{lesson_id}/trim-unplaced")
+def trim_unplaced_hours(lesson_id: int, db: Session = Depends(get_db)):
+    """Κράτα μόνο τις ώρες που χρησιμοποιούνται: οι ώρες/εβδομάδα πέφτουν στις
+    τοποθετημένες και σβήνονται ΜΟΝΟ ώρες της Παλέτας (ποτέ τοποθετημένη)."""
+    report = lesson_impact(db, lesson_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+
+    trim = report["trim"]
+    if not trim["can_trim"]:
+        messages = {
+            "no_placed_hours": ("Καμία ώρα αυτού του μαθήματος δεν είναι τοποθετημένη. "
+                                "Αν δεν το χρειάζεσαι, διάγραψε ολόκληρο το μάθημα."),
+            "nothing_to_trim": "Δεν υπάρχουν ώρες στην Παλέτα για αυτό το μάθημα.",
+        }
+        raise HTTPException(status_code=409, detail={
+            "code": trim["blocked_reason"],
+            "message": messages.get(trim["blocked_reason"], "Δεν υπάρχει τίποτα να αφαιρεθεί."),
+            "impact": report,
+        })
+
+    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    lesson.periods_per_week = trim["trim_to"]
+    db.commit()
+    sync = sync_lesson_slot_count(db, lesson_id)
+    removed = sum(int(s.get("removed", 0)) for s in sync.get("synced", []))
+    return {
+        "lesson_id": lesson_id,
+        "periods_per_week": trim["trim_to"],
+        "removed": removed,
+        "message": (f"Οι ώρες/εβδομάδα έγιναν {trim['trim_to']}. Αφαιρέθηκαν {removed} ώρες "
+                    "από την Παλέτα — καμία τοποθετημένη ώρα δεν πειράχτηκε."),
+    }
+
+
 @router.delete("/{lesson_id}", status_code=204)
-def delete_lesson(lesson_id: int, db: Session = Depends(get_db)):
+def delete_lesson(lesson_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """Διαγραφή μαθήματος-κάρτας.
+
+    ⚠️ Σβήνει ΚΑΙ τις τοποθετημένες ώρες του σε ΟΛΑ τα προγράμματα του
+    σεναρίου (FK cascade). Γι' αυτό, όταν υπάρχουν τοποθετημένες ώρες,
+    επιστρέφεται 409 με τα πλήθη και χρειάζεται ρητό `?force=true` — ίδιο
+    μοτίβο με τις ώρες (periods) και τα σενάρια."""
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     if not lesson:
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+
+    report = lesson_impact(db, lesson_id)
+    info = report["delete"]
+    if info["placed_total"] and not force:
+        raise HTTPException(status_code=409, detail={
+            "code": "lesson_has_placed_slots",
+            "requires_force": True,
+            "message": (f"Το μάθημα έχει {info['placed_total']} τοποθετημένες ώρες σε "
+                        f"{info['solutions_with_placed']} πρόγραμμα(τα). Η διαγραφή θα τις "
+                        "σβήσει οριστικά."),
+            "impact": report,
+        })
+
     db.delete(lesson)
     db.commit()
 

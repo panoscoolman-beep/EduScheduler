@@ -1369,6 +1369,29 @@ a:hover { color: var(--accent-blue-hover); }
     opacity: 0.7;
 }
 .palette-find-btn:hover { opacity: 1; transform: scale(1.15); }
+.palette-inspect-btn {
+    position: absolute;
+    bottom: 6px;
+    right: 30px;
+    background: none;
+    border: none;
+    font-size: 0.95em;
+    cursor: pointer;
+    padding: 2px;
+    opacity: 0.55;
+}
+.palette-inspect-btn:hover { opacity: 1; transform: scale(1.15); }
+.palette-card.palette-done .palette-inspect-btn,
+.palette-card.palette-missing .palette-inspect-btn { right: 8px; }
+
+/* Παράθυρο «Τι επηρεάζει;» */
+.lesson-impact .li-head { margin-bottom: 0.5rem; }
+.lesson-impact .li-effects,
+.lesson-impact .li-warnings { margin: 0.75rem 0; padding-left: 1.1rem; font-size: 0.85rem; }
+.lesson-impact .li-warnings { color: var(--accent-amber, #F59E0B); }
+.lesson-impact .li-actions { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.lesson-impact .li-hint { font-size: 0.8rem; color: var(--text-muted); margin: 0; }
+.lesson-impact .li-confirm { font-size: 0.85rem; display: flex; gap: 6px; align-items: flex-start; }
 .placement-day-row { margin-bottom: 0.75rem; }
 .placement-day-row strong { display: block; margin-bottom: 0.35rem; }
 .placement-chips { display: flex; flex-wrap: wrap; gap: 6px; }

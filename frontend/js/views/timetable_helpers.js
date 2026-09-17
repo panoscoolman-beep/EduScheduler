@@ -735,6 +735,18 @@ const TimetableHelpers = {
         return intro + rows + blockedHtml;
     },
 
+    /**
+     * Κουμπί «Τι επηρεάζει;» — κοινό σε όλες τις κάρτες της Παλέτας. Ανοίγει
+     * τον έλεγχο ΠΡΙΝ από καθάρισμα/διαγραφή ωρών (LessonImpactModal).
+     */
+    _paletteInspectBtnHtml(lessonId) {
+        return `<button class="palette-inspect-btn"
+                        onmousedown="event.stopPropagation();"
+                        ondragstart="event.stopPropagation(); event.preventDefault();"
+                        onclick="event.stopPropagation(); TimetableView.inspectLesson(${lessonId})"
+                        title="Τι επηρεάζει; — έλεγχος πριν σβήσεις ώρες">🔍</button>`;
+    },
+
     /** One palette card. Split out of buildLessonPaletteHtml for readability. */
     _paletteCardHtml(e) {
         const esc = TimetableHelpers.esc;
@@ -773,6 +785,7 @@ const TimetableHelpers = {
                             ondragstart="event.stopPropagation(); event.preventDefault();"
                             onclick="event.stopPropagation(); TimetableView.findPlacement(${e.lesson_id})"
                             title="Βρες μου θέση — δείξε όλες τις νόμιμες θέσεις">🎯</button>
+                    ${TimetableHelpers._paletteInspectBtnHtml(e.lesson_id)}
                 </div>`;
         }
         if (e.missing > 0) {
@@ -787,6 +800,7 @@ const TimetableHelpers = {
                             onclick="TimetableView.syncLessonSlots(${e.lesson_id})">
                         ➕ Λείπουν ${e.missing} ώρες
                     </button>
+                    ${TimetableHelpers._paletteInspectBtnHtml(e.lesson_id)}
                 </div>`;
         }
         return `
@@ -797,6 +811,7 @@ const TimetableHelpers = {
                 <div class="palette-card-title">${subject}</div>
                 <div class="palette-card-sub">${sub}</div>
                 <span class="palette-badge palette-badge-done">✓ ${e.placed}/${e.total}</span>
+                ${TimetableHelpers._paletteInspectBtnHtml(e.lesson_id)}
             </div>`;
     },
 

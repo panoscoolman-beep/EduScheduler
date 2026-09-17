@@ -125,7 +125,10 @@ const API = {
         get: (id) => API.get(`/lessons/${id}`),
         create: (data) => API.post('/lessons/', data),
         update: (id, data) => API.put(`/lessons/${id}`, data),
-        delete: (id) => API.delete(`/lessons/${id}`),
+        delete: (id, force = false) =>
+            API.delete(`/lessons/${id}${force ? '?force=true' : ''}`),
+        impact: (id) => API.get(`/lessons/${id}/impact`),
+        trimUnplaced: (id) => API.post(`/lessons/${id}/trim-unplaced`),
         importFromTerm: (sourceTermId, lessonIds) =>
             API.post('/lessons/import-from-term',
                 { source_term_id: sourceTermId, lesson_ids: lessonIds }),
