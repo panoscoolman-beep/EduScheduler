@@ -44,6 +44,7 @@ def add_lesson_to_open_solutions(db: Session, lesson_id: int) -> dict:
         db.query(TimetableSolution)
         .filter(
             TimetableSolution.status.in_(ACTIVE_STATUSES),
+            TimetableSolution.archived_at.is_(None),
             # Terms: ένα μάθημα ανήκει σε ΕΝΑ σενάριο — μόνο οι λύσεις του
             # ίδιου σεναρίου το αφορούν. Χωρίς το φίλτρο, νέο μάθημα στο
             # σενάριο Β θα «πάρκαρε» και σε λύσεις του σεναρίου Α.
@@ -132,6 +133,7 @@ def sync_lesson_slot_count(db: Session, lesson_id: int) -> dict:
         db.query(TimetableSolution)
         .filter(
             TimetableSolution.status.in_(ACTIVE_STATUSES),
+            TimetableSolution.archived_at.is_(None),
             # Ίδιο term-scoping σκεπτικό με το add_lesson_to_open_solutions.
             TimetableSolution.term_id == lesson.term_id,
         )

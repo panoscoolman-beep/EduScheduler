@@ -145,7 +145,10 @@ const API = {
         generate: (data) => API.post('/solver/generate', data),
         status: (id) => API.get(`/solver/status/${id}`),
         regenerateWithLocks: (sourceId, data) => API.post(`/solver/regenerate/${sourceId}`, data),
-        listSolutions: () => API.get('/solver/solutions'),
+        listSolutions: (includeArchived = false) =>
+            API.get(`/solver/solutions${includeArchived ? '?include_archived=true' : ''}`),
+        archiveSolution: (id) => API.post(`/solver/solutions/${id}/archive`, {}),
+        unarchiveSolution: (id) => API.post(`/solver/solutions/${id}/unarchive`, {}),
         getSolution: (id) => API.get(`/solver/solutions/${id}`),
         deleteSolution: (id) => API.delete(`/solver/solutions/${id}`),
         renameSolution: (id, name) =>

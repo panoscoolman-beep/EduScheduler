@@ -31,6 +31,7 @@ def _solution_rows(db: Session, lesson: Lesson) -> list[dict]:
         .filter(
             TimetableSolution.term_id == lesson.term_id,
             TimetableSolution.status.in_(ACTIVE_STATUSES),
+            TimetableSolution.archived_at.is_(None),
         )
         .order_by(TimetableSolution.id.desc())
         .all()

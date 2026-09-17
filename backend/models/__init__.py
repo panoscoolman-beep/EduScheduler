@@ -315,6 +315,10 @@ class TimetableSolution(Base):
     score = Column(Float)
     metadata_json = Column(Text)  # JSON with solver stats
     soft_violations = Column(Text)  # JSON list of violated soft constraints
+    # Αρχειοθέτηση: το πρόγραμμα μένει ακέραιο αλλά βγαίνει από τη ροή —
+    # δεν εμφανίζεται στη λίστα, δεν παίρνει slots από τον parking-lot sync
+    # και δεν «κρατά» ώρες στον έλεγχο της Παλέτας. Αναστρέψιμο.
+    archived_at = Column(DateTime, nullable=True)
 
     # Relationships
     slots = relationship("TimetableSlot", back_populates="solution", cascade="all, delete-orphan")

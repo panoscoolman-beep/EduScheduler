@@ -302,16 +302,18 @@ def list_solutions(
     term_id: int | None = Query(
         None, description="Σενάριο· απόν = το ενεργό. Το CRM/bot το χρησιμοποιεί "
                           "για να διαλέξει πρόγραμμα άλλου σεναρίου χωρίς να αλλάξει το ενεργό."),
+    include_archived: bool = Query(
+        False, description="Συμπερίλαβε και τα αρχειοθετημένα προγράμματα (για επαναφορά)."),
     db: Session = Depends(get_db),
 ):
-    """List generated timetable solutions for a scenario (default: the ACTIVE one)."""
+    """List generated timetable solutions for a scenario (default: the ACTIVE one).
+
+    Τα αρχειοθετημένα μένουν έξω εκτός αν ζητηθούν ρητά."""
     scope_term_id = term_id if term_id is not None else get_active_term_id(db)
-    solutions = (
-        db.query(TimetableSolution)
-        .filter(TimetableSolution.term_id == scope_term_id)
-        .order_by(TimetableSolution.created_at.desc())
-        .all()
-    )
+    query = db.query(TimetableSolution).filter(TimetableSolution.term_id == scope_term_id)
+    if not include_archived:
+        query = query.filter(TimetableSolution.archived_at.is_(None))
+    solutions = query.order_by(TimetableSolution.created_at.desc()).all()
     return [
         TimetableSolutionResponse(
             id=s.id,
@@ -320,9 +322,42 @@ def list_solutions(
             status=s.status,
             score=s.score,
             term_id=s.term_id,
+            archived=s.archived_at is not None,
         )
         for s in solutions
     ]
+
+
+def _set_archived(db: Session, solution_id: int, archived: bool) -> dict:
+    """Κοινή υλοποίηση αρχειοθέτησης/επαναφοράς. Δεν σβήνει ΤΙΠΟΤΑ."""
+    solution = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    if archived and solution.status == "generating":
+        raise HTTPException(status_code=409,
+                            detail="Το πρόγραμμα υπολογίζεται αυτή τη στιγμή — δοκίμασε μετά.")
+    solution.archived_at = utcnow_naive() if archived else None
+    db.commit()
+    return {
+        "id": solution.id,
+        "name": solution.name,
+        "archived": archived,
+        "message": (f"Το «{solution.name}» αρχειοθετήθηκε — βγήκε από τη λίστα και δεν κρατά "
+                    "πια ώρες στην Παλέτα. Επαναφέρεται όποτε θες.")
+        if archived else f"Το «{solution.name}» επανήλθε στη λίστα.",
+    }
+
+
+@router.post("/solutions/{solution_id}/archive")
+def archive_solution(solution_id: int, db: Session = Depends(get_db)):
+    """Βγάλε ένα παλιό πρόγραμμα από τη ροή, χωρίς να χαθεί τίποτα."""
+    return _set_archived(db, solution_id, True)
+
+
+@router.post("/solutions/{solution_id}/unarchive")
+def unarchive_solution(solution_id: int, db: Session = Depends(get_db)):
+    """Επαναφορά αρχειοθετημένου προγράμματος."""
+    return _set_archived(db, solution_id, False)
 
 
 @router.get("/solutions/{solution_id}", response_model=TimetableSolutionResponse)

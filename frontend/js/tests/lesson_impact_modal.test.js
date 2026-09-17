@@ -123,3 +123,35 @@ test('κάθε κάρτα της Παλέτας έχει το κουμπί ελ�
     assert.match(card({ missing: 2 }), /inspectLesson\(7\)/);
     assert.match(card({ placed: 4 }), /inspectLesson\(7\)/);       // ολοκληρωμένη κάρτα
 });
+
+test('επιλογέας προγράμματος: τα αρχειοθετημένα σε δική τους ομάδα', () => {
+    const sols = [
+        { id: 3, name: 'ΧΕΙΜΕΡΙΝΟ', archived: false },
+        { id: 2, name: 'Παλιό <b>8/5</b>', archived: true },
+        { id: 1, name: 'Πολύ παλιό', archived: true },
+    ];
+    const html = H.buildSolutionOptionsHtml(sols, 3);
+    assert.match(html, /<option value="3" selected>ΧΕΙΜΕΡΙΝΟ<\/option>/);
+    assert.match(html, /<optgroup label="📦 Αρχειοθετημένα \(2\)">/);
+    assert.match(html, /Παλιό &lt;b&gt;8\/5&lt;\/b&gt;/);          // escaped
+    assert.ok(html.indexOf('optgroup') > html.indexOf('ΧΕΙΜΕΡΙΝΟ'));
+
+    // Χωρίς αρχειοθετημένα: καμία ομάδα
+    assert.doesNotMatch(H.buildSolutionOptionsHtml([sols[0]], 3), /optgroup/);
+});
+
+test('ποιο πρόγραμμα ανοίγει + κατάσταση κουμπιού αρχειοθέτησης', () => {
+    const sols = [
+        { id: 3, name: 'ΧΕΙΜΕΡΙΝΟ', archived: false },
+        { id: 2, name: 'Παλιό', archived: true },
+    ];
+    assert.equal(H.defaultSolutionId(sols, 3), 3);
+    assert.equal(H.defaultSolutionId(sols, 2), 3);       // αρχειοθετημένο → το νεότερο ενεργό
+    assert.equal(H.defaultSolutionId(sols, null), 3);
+    assert.equal(H.defaultSolutionId([sols[1]], null), 2);   // μόνο αρχειοθετημένα → δείξε το
+
+    assert.deepEqual(H.archiveButtonState(sols, 3).icon, '📦');
+    assert.match(H.archiveButtonState(sols, 3).title, /Αρχειοθέτηση/);
+    assert.equal(H.archiveButtonState(sols, 2).archived, true);
+    assert.equal(H.archiveButtonState(sols, 2).icon, '♻️');
+});

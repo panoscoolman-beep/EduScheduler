@@ -7,7 +7,8 @@ const TimetableView = {
 
         try {
             const [solutions, periods, settings] = await Promise.all([
-                API.solver.listSolutions(),
+                // Με τα αρχειοθετημένα: μπαίνουν σε ξεχωριστή ομάδα ώστε να επαναφέρονται.
+                API.solver.listSolutions(true),
                 API.periods.list(),
                 API.settings.get(),
             ]);
@@ -28,7 +29,9 @@ const TimetableView = {
             }
 
             // Pick solution (latest or specified)
-            const solutionId = App._currentSolutionId || solutions[0].id;
+            const solutionId = TimetableHelpers.defaultSolutionId(
+                solutions, App._currentSolutionId);
+            const archiveBtn = TimetableHelpers.archiveButtonState(solutions, solutionId);
             const [solution, students, lessons] = await Promise.all([
                 API.solver.getSolution(solutionId),
                 API.students.list().catch(() => []),
@@ -99,10 +102,12 @@ const TimetableView = {
                             <label class="form-label">Πρόγραμμα</label>
                             <div style="display:flex; gap:4px; align-items:center;">
                                 <select class="form-select" id="tt-solution">
-                                    ${solutions.map(s => `<option value="${s.id}" ${s.id === solutionId ? 'selected' : ''}>${this._esc(s.name)}</option>`).join('')}
+                                    ${TimetableHelpers.buildSolutionOptionsHtml(solutions, solutionId)}
                                 </select>
                                 <button class="btn btn-secondary btn-sm" id="tt-rename"
                                         title="Μετονομασία προγράμματος">✏️</button>
+                                <button class="btn btn-secondary btn-sm" id="tt-archive"
+                                        title="${archiveBtn.title}">${archiveBtn.icon}</button>
                             </div>
                         </div>
                     </div>
@@ -359,6 +364,10 @@ const TimetableView = {
             document.getElementById('tt-rename').addEventListener('click', () =>
                 this._openRenameSolution(solutionId));
 
+            // Event: 📦 αρχειοθέτηση / ♻️ επαναφορά του επιλεγμένου προγράμματος
+            document.getElementById('tt-archive').addEventListener('click', () =>
+                this._toggleArchiveSolution(solutionId, solutions, container));
+
             // Undo / Redo wiring
             const undoBtn = document.getElementById('tt-undo');
             const redoBtn = document.getElementById('tt-redo');
@@ -521,6 +530,44 @@ const TimetableView = {
      * χωρίς πλήρες re-render. Η τιμή μπαίνει στο input μέσω DOM (όχι μέσα σε
      * attribute) ώστε εισαγωγικά στο όνομα να μη σπάνε το HTML.
      */
+    /**
+     * 📦 Αρχειοθέτηση / ♻️ επαναφορά προγράμματος. ΔΕΝ σβήνεται τίποτα: το
+     * αρχειοθετημένο βγαίνει απλώς από τη λίστα και σταματά να «κρατά» ώρες
+     * (το «🔍 Τι επηρεάζει;» δεν το μετρά πια).
+     */
+    _toggleArchiveSolution(solutionId, solutions, container) {
+        const state = TimetableHelpers.archiveButtonState(solutions, solutionId);
+        if (state.archived) {
+            this._applyArchive(solutionId, false, container);
+            return;
+        }
+        const solution = (solutions || []).find(s => s.id === solutionId) || {};
+        Modal.open('📦 Αρχειοθέτηση προγράμματος', `
+            <p>Το «<b>${this._esc(solution.name || '')}</b>» θα βγει από τη λίστα προγραμμάτων.</p>
+            <ul class="text-muted" style="font-size:0.85rem; margin:0.5rem 0 0 1.1rem">
+                <li>Δεν σβήνεται τίποτα — ώρες, κλειδώματα και ιστορικό μένουν ακέραια.</li>
+                <li>Σταματά να «κρατά» ώρες: η Παλέτα και ο έλεγχος 🔍 δεν το μετρούν πια.</li>
+                <li>Επαναφέρεται όποτε θες από την ομάδα «📦 Αρχειοθετημένα».</li>
+            </ul>`,
+            () => this._applyArchive(solutionId, true, container),
+            { saveText: '📦 Αρχειοθέτηση' });
+    },
+
+    async _applyArchive(solutionId, archived, container) {
+        try {
+            const res = archived
+                ? await API.solver.archiveSolution(solutionId)
+                : await API.solver.unarchiveSolution(solutionId);
+            Modal.close();
+            Toast.success(res.message || 'Έγινε');
+            // Μετά την αρχειοθέτηση ανοίγει το νεότερο ενεργό πρόγραμμα.
+            if (archived && App._currentSolutionId === solutionId) App._currentSolutionId = null;
+            await this.render(container);
+        } catch (err) {
+            Toast.error('Δεν έγινε: ' + this._esc(err.message));
+        }
+    },
+
     _openRenameSolution(solutionId) {
         const select = document.getElementById('tt-solution');
         const option = select ? [...select.options].find(o => Number(o.value) === solutionId) : null;

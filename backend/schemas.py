@@ -375,6 +375,7 @@ class TimetableSolutionResponse(BaseModel):
     status: str
     score: float | None = None
     term_id: int | None = None  # σε ποιο σενάριο ανήκει (για επιλογή από το CRM/bot)
+    archived: bool = False      # αρχειοθετημένο: εκτός λίστας/ροής, αναστρέψιμο
     slots: list[TimetableSlotResponse] = []
 
     class Config:

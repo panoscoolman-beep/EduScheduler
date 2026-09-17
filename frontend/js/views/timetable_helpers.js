@@ -747,6 +747,47 @@ const TimetableHelpers = {
                         title="Τι επηρεάζει; — έλεγχος πριν σβήσεις ώρες">🔍</button>`;
     },
 
+    /**
+     * Options του επιλογέα προγράμματος. Τα αρχειοθετημένα μπαίνουν σε δική
+     * τους ομάδα στο τέλος, ώστε να φαίνονται μόνο όταν τα ψάχνεις (και να
+     * μπορείς να τα επαναφέρεις).
+     */
+    buildSolutionOptionsHtml(solutions, currentId) {
+        const esc = TimetableHelpers.esc;
+        const opt = (s) =>
+            `<option value="${s.id}"${s.id === currentId ? ' selected' : ''}>${esc(s.name)}</option>`;
+        const list = solutions || [];
+        const active = list.filter(s => !s.archived);
+        const archived = list.filter(s => s.archived);
+        let html = active.map(opt).join('');
+        if (archived.length) {
+            html += `<optgroup label="📦 Αρχειοθετημένα (${archived.length})">`
+                + archived.map(opt).join('') + '</optgroup>';
+        }
+        return html;
+    },
+
+    /** Ποιο πρόγραμμα ανοίγει: το επιλεγμένο αν είναι ενεργό, αλλιώς το νεότερο ενεργό. */
+    defaultSolutionId(solutions, preferredId) {
+        const list = solutions || [];
+        const preferred = list.find(s => s.id === preferredId);
+        if (preferred && !preferred.archived) return preferred.id;
+        return ((list.find(s => !s.archived) || preferred || list[0]) || {}).id;
+    },
+
+    /** Εικονίδιο/επεξήγηση του κουμπιού αρχειοθέτησης για το επιλεγμένο πρόγραμμα. */
+    archiveButtonState(solutions, currentId) {
+        const current = (solutions || []).find(s => s.id === currentId);
+        const archived = Boolean(current && current.archived);
+        return {
+            archived,
+            icon: archived ? '♻️' : '📦',
+            title: archived
+                ? 'Επαναφορά του προγράμματος στη λίστα'
+                : 'Αρχειοθέτηση — βγαίνει από τη λίστα και σταματά να κρατά ώρες στην Παλέτα (αναστρέψιμο)',
+        };
+    },
+
     /** One palette card. Split out of buildLessonPaletteHtml for readability. */
     _paletteCardHtml(e) {
         const esc = TimetableHelpers.esc;
