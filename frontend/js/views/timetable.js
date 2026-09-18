@@ -75,7 +75,8 @@ const TimetableView = {
                             <button class="btn btn-secondary" id="tt-undo" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" style="margin-right:0.25rem" disabled>↩ Αναίρεση</button>
                             <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.25rem" disabled>↪ Επανάληψη</button>
                             <button class="btn btn-secondary" id="tt-history" title="Οι τελευταίες αλλαγές — αναίρεση μέχρι κάποιο σημείο" style="margin-right:0.5rem">🕘 Ιστορικό</button>
-                            <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.5rem">👤 Αντικατάσταση</button>
+                            <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.25rem">👤 Αντικατάσταση</button>
+                            <button class="btn btn-secondary" id="tt-empty" title="Όλες οι ώρες ενός καθηγητή ή τμήματος στην Παλέτα — επαναφέρονται με ένα κλικ" style="margin-right:0.5rem">🅿️ Άδειασμα</button>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-diff" title="Slot-level διαφορές με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε" style="margin-right:0.25rem">🔀 Τι άλλαξε;</button>
@@ -420,6 +421,8 @@ const TimetableView = {
             undoBtn.addEventListener('click', () => performUndoRedo('undo'));
             document.getElementById('tt-history').addEventListener('click', () =>
                 this._openHistory(solutionId, container));
+            document.getElementById('tt-empty').addEventListener('click', () =>
+                this._openBulkUnplace(solutionId, solution.slots, container));
             redoBtn.addEventListener('click', () => performUndoRedo('redo'));
             this._historyKeyHandler = (e) => {
                 if (!(e.ctrlKey || e.metaKey)) return;
@@ -579,6 +582,77 @@ const TimetableView = {
         } catch (err) {
             Toast.error('Δεν έγινε: ' + this._esc(err.message));
         }
+    },
+
+    /**
+     * 🅿️ Άδειασμα καθηγητή/τμήματος: όλες οι τοποθετημένες ώρες (εκτός 🔒)
+     * στην Παλέτα. Μετά: κουμπί «↩️ Επαναφορά όλων» (undo-to του 1ου βήματος).
+     */
+    _openBulkUnplace(solutionId, slots, container) {
+        const targets = TimetableHelpers.bulkUnplaceTargets(slots);
+        const options = (kind) => targets[kind].map(t =>
+            `<option value="${t.id}">${this._esc(t.name)} (${t.movable + t.locked} ώρες)</option>`).join('');
+        Modal.open('🅿️ Άδειασμα καθηγητή ή τμήματος', `
+            <div class="form-grid">
+                <div class="form-group">
+                    <label class="form-label">Τι αδειάζει</label>
+                    <select class="form-select" id="bu-kind">
+                        <option value="teacher">Καθηγητής</option>
+                        <option value="class">Τμήμα</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Ποιος / ποιο</label>
+                    <select class="form-select" id="bu-target"></select>
+                </div>
+            </div>
+            <p class="text-muted" id="bu-summary" style="font-size:0.9rem"></p>`,
+        async () => {
+            const kind = document.getElementById('bu-kind').value;
+            const id = Number(document.getElementById('bu-target').value);
+            if (!id) return;
+            try {
+                const res = await API.solver.unplaceBulk(solutionId,
+                    kind === 'teacher' ? { teacher_id: id } : { class_id: id });
+                Modal.close();
+                await this.render(container);
+                this._offerBulkRestore(solutionId, res, container);
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        }, { saveText: '🅿️ Άδειασμα' });
+        const kindSel = document.getElementById('bu-kind');
+        const targetSel = document.getElementById('bu-target');
+        const summary = document.getElementById('bu-summary');
+        const refresh = () => {
+            const kind = kindSel.value;
+            const t = targets[kind].find(x => String(x.id) === targetSel.value);
+            summary.textContent = TimetableHelpers.bulkUnplaceSummary(t);
+        };
+        const fill = () => { targetSel.innerHTML = options(kindSel.value); refresh(); };
+        kindSel.addEventListener('change', fill);
+        targetSel.addEventListener('change', refresh);
+        fill();
+    },
+
+    /** Μετά το άδειασμα: επαναφορά ΟΛΩΝ με ένα κλικ (αναστρέψιμη κι αυτή). */
+    _offerBulkRestore(solutionId, res, container) {
+        if (!res.first_entry_id) {
+            Toast.info(res.message);
+            return;
+        }
+        Modal.open('✅ Έγινε', `<p>${this._esc(res.message)}</p>
+            <p class="text-muted" style="font-size:0.85rem">Άλλαξες γνώμη; Επανέρχονται όλες ακριβώς όπου ήταν.</p>`,
+        async () => {
+            try {
+                const back = await API.solver.undoTo(solutionId, res.first_entry_id);
+                Toast.success(back.message);
+                Modal.close();
+                await this.render(container);
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        }, { saveText: '↩️ Επαναφορά όλων' });
     },
 
     /** 🕘 Ιστορικό αλλαγών με «αναίρεση μέχρι εδώ». */

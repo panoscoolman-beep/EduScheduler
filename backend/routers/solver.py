@@ -28,6 +28,7 @@ from backend.services.solver_jobs import (
 )
 from backend.services.substitute_finder import find_substitutes
 from backend.schemas import (
+    UnplaceBulkRequest,
     SolutionRename,
     FeasibilityReportResponse,
     SlotSwapRequest,
@@ -674,6 +675,72 @@ def swap_slots(
 MANUAL_UNPLACE_REASON = "Αφαιρέθηκε χειροκίνητα από το πρόγραμμα"
 
 
+def _unplace_placed_slot(db: Session, slot: TimetableSlot, reason: str):
+    """Τοποθετημένη ώρα → Παλέτα + εγγραφή 'unplace' στο ιστορικό (χωρίς
+    commit). Κοινό για μεμονωμένη και μαζική αφαίρεση. Επιστρέφει
+    (history entry, νέα κατάσταση)."""
+    prev_state = {
+        "day_of_week": slot.day_of_week,
+        "period_id": slot.period_id,
+        "classroom_id": slot.classroom_id,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": False,
+    }
+    slot.day_of_week = None
+    slot.period_id = None
+    slot.classroom_id = None
+    slot.is_unplaced = True
+    slot.unplaced_reason = reason
+    new_state = {
+        "day_of_week": None,
+        "period_id": None,
+        "classroom_id": None,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": True,
+    }
+    entry = slot_history_svc.record_edit(db, slot, prev_state, new_state, "unplace")
+    return entry, new_state
+
+
+@router.post("/solutions/{solution_id}/unplace-bulk")
+def unplace_bulk(solution_id: int, data: UnplaceBulkRequest, db: Session = Depends(get_db)):
+    """🅿️ «Άδειασε» καθηγητή ή τμήμα: όλες οι τοποθετημένες ώρες του στην
+    Παλέτα, εκτός από τις κλειδωμένες 🔒. Όλες ή καμία (ένα commit)· κάθε ώρα
+    γράφεται στο ιστορικό, οπότε «↩️ μέχρι εδώ» στο πρώτο βήμα
+    (`first_entry_id`) τις επαναφέρει όλες μαζί ακριβώς όπου ήταν."""
+    solution = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    column = Lesson.teacher_id if data.teacher_id is not None else Lesson.class_id
+    target = data.teacher_id if data.teacher_id is not None else data.class_id
+    slots = (
+        db.query(TimetableSlot)
+        .join(Lesson, Lesson.id == TimetableSlot.lesson_id)
+        .filter(TimetableSlot.solution_id == solution_id,
+                TimetableSlot.is_unplaced == False,  # noqa: E712
+                column == target)
+        .order_by(TimetableSlot.day_of_week, TimetableSlot.period_id, TimetableSlot.id)
+        .all()
+    )
+    locked = [s for s in slots if s.is_locked]
+    movable = [s for s in slots if not s.is_locked]
+    first_entry_id = None
+    for slot in movable:
+        entry, _ = _unplace_placed_slot(db, slot, BULK_UNPLACE_REASON)
+        first_entry_id = first_entry_id or entry.id
+    db.commit()
+    extra = f" ({len(locked)} κλειδωμένες 🔒 έμειναν στη θέση τους)" if locked else ""
+    return {
+        "status": "ok", "unplaced": len(movable), "skipped_locked": len(locked),
+        "first_entry_id": first_entry_id,
+        "message": f"{len(movable)} ώρες πήγαν στην Παλέτα{extra}.",
+        "history": slot_history_svc.history_summary(db, solution_id),
+    }
+
+
+BULK_UNPLACE_REASON = "Άδειασμα καθηγητή/τμήματος"
+
+
 @router.post("/solutions/{solution_id}/slots/{slot_id}/unplace")
 def unplace_slot(
     solution_id: int,
@@ -707,26 +774,7 @@ def unplace_slot(
             detail="Η κάρτα είναι κλειδωμένη 🔒 — ξεκλείδωσέ την πρώτα.",
         )
 
-    prev_state = {
-        "day_of_week": slot.day_of_week,
-        "period_id": slot.period_id,
-        "classroom_id": slot.classroom_id,
-        "is_locked": bool(slot.is_locked),
-        "is_unplaced": False,
-    }
-    slot.day_of_week = None
-    slot.period_id = None
-    slot.classroom_id = None
-    slot.is_unplaced = True
-    slot.unplaced_reason = MANUAL_UNPLACE_REASON
-    new_state = {
-        "day_of_week": None,
-        "period_id": None,
-        "classroom_id": None,
-        "is_locked": bool(slot.is_locked),
-        "is_unplaced": True,
-    }
-    slot_history_svc.record_edit(db, slot, prev_state, new_state, "unplace")
+    _, new_state = _unplace_placed_slot(db, slot, MANUAL_UNPLACE_REASON)
     db.commit()
     return {
         "status": "ok",

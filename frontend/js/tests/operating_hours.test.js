@@ -160,3 +160,17 @@ test('buildHistoryHtml: κουμπί «μέχρι εδώ (N)» μόνο στις
     assert.match(html, /Β &lt;x&gt;/);
     assert.match(H.buildHistoryHtml({ items: [] }), /Δεν υπάρχουν χειροκίνητες αλλαγές/);
 });
+
+test('bulkUnplaceTargets + summary: μετρά ώρες ανά καθηγητή/τμήμα, χωρίς Παλέτα', () => {
+    const slots = [
+        { teacher_id: 1, teacher_name: 'Βασίλης', class_id: 10, class_name: 'Β2', is_locked: false },
+        { teacher_id: 1, teacher_name: 'Βασίλης', class_id: 10, class_name: 'Β2', is_locked: true },
+        { teacher_id: 2, teacher_name: 'Άννα', class_id: 11, class_name: 'Γ1', is_locked: false },
+        { teacher_id: 2, teacher_name: 'Άννα', class_id: 11, class_name: 'Γ1', is_unplaced: true },
+    ];
+    const t = H.bulkUnplaceTargets(slots);
+    assert.deepEqual(t.teacher.map(x => [x.name, x.movable, x.locked]), [['Άννα', 1, 0], ['Βασίλης', 1, 1]]);
+    assert.deepEqual(t.class.map(x => x.name), ['Β2', 'Γ1']);
+    assert.match(H.bulkUnplaceSummary(t.teacher[1]), /Θα πάνε στην Παλέτα 1 ώρες · 1 κλειδωμένες 🔒 μένουν/);
+    assert.equal(H.bulkUnplaceSummary(null), '');
+});

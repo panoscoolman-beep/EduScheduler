@@ -322,6 +322,32 @@ const TimetableHelpers = {
                 <div style="max-height:400px; overflow:auto"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
     },
 
+    /**
+     * 🅿️ Άδειασμα: καθηγητές/τμήματα με τοποθετημένες ώρες στο πρόγραμμα,
+     * με πόσες θα φύγουν (όχι κλειδωμένες) και πόσες μένουν (🔒).
+     */
+    bulkUnplaceTargets(slots) {
+        const acc = { teacher: new Map(), class: new Map() };
+        for (const s of slots || []) {
+            if (s.is_unplaced) continue;
+            for (const [kind, id, name] of [['teacher', s.teacher_id, s.teacher_name],
+                                            ['class', s.class_id, s.class_name]]) {
+                if (id == null) continue;
+                const e = acc[kind].get(id) || { id, name: name || `#${id}`, movable: 0, locked: 0 };
+                if (s.is_locked) e.locked += 1; else e.movable += 1;
+                acc[kind].set(id, e);
+            }
+        }
+        const sorted = (m) => [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'el'));
+        return { teacher: sorted(acc.teacher), class: sorted(acc.class) };
+    },
+
+    bulkUnplaceSummary(target) {
+        if (!target) return '';
+        const locked = target.locked ? ` · ${target.locked} κλειδωμένες 🔒 μένουν στη θέση τους` : '';
+        return `Θα πάνε στην Παλέτα ${target.movable} ώρες${locked}. Επαναφέρονται όλες μαζί με ένα κουμπί.`;
+    },
+
     /** «📋 Έλεγχος δεδομένων» της σελίδας Δημιουργίας — pure HTML. */
     buildReadinessHtml(report) {
         const esc = TimetableHelpers.esc;

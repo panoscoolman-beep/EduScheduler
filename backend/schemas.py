@@ -358,6 +358,18 @@ class SlotSwapRequest(BaseModel):
     slot_b_id: int
 
 
+class UnplaceBulkRequest(BaseModel):
+    """🅿️ Άδειασμα: ΑΚΡΙΒΩΣ ένα από teacher_id / class_id."""
+    teacher_id: int | None = None
+    class_id: int | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self):
+        if (self.teacher_id is None) == (self.class_id is None):
+            raise ValueError("Δώσε ακριβώς ένα από teacher_id ή class_id.")
+        return self
+
+
 class PaletteCleanupRequest(BaseModel):
     """Μαζικό καθάρισμα Παλέτας: ποια μαθήματα-κάρτες να «κοπούν» στις
     τοποθετημένες ώρες και ποια να διαγραφούν (μόνο όσα δεν έχουν ΚΑΜΙΑ
