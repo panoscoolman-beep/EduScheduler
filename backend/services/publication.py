@@ -84,12 +84,16 @@ def _position(e: dict):
 # ---------------------------------------------------------------------------
 
 def teacher_changes(previous: list[dict], current: list[dict]) -> dict[int, dict]:
-    """Αλλαγές ανά καθηγητή (μόνο όσοι άλλαξαν). Κλειδί (καθηγητής, μάθημα):
-    μάθημα που άλλαξε καθηγητή βγαίνει ➖ στον παλιό και ➕ στον νέο."""
+    """Αλλαγές ανά καθηγητή (μόνο όσοι άλλαξαν).
+
+    Κλειδί (καθηγητής, «μάθημα (τμήμα)») — ό,τι βλέπει ο καθηγητής, όχι το
+    εσωτερικό id της κάρτας: κάρτα που σβήστηκε και ξαναφτιάχτηκε στις ίδιες
+    ώρες ΔΕΝ βγάζει ψεύτικο «➖ καταργείται / ➕ νέα ώρα». Μάθημα που άλλαξε
+    καθηγητή βγαίνει ➖ στον παλιό και ➕ στον νέο."""
     def by_key(entries):
         grouped: dict[tuple, list[dict]] = defaultdict(list)
         for e in entries:
-            grouped[(e["teacher_id"], e["lesson_id"])].append(e)
+            grouped[(e["teacher_id"], e["label"])].append(e)
         return grouped
 
     prev, cur = by_key(previous), by_key(current)

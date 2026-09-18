@@ -317,3 +317,112 @@ def test_permissive_mode_with_overconstrained_problem_uses_parking_lot(db):
     assert result.status in ("optimal", "feasible")
     # T1 has 3 lessons × 2 ppw = 6 blocks → all should land in parking
     assert len(result.unplaced) >= 6
+
+
+# ---------------------------------------------------------------------------
+# H0 — Ωράριο λειτουργίας (18/9/2026): ο solver δεν βγαίνει εκτός ωραρίου
+# ---------------------------------------------------------------------------
+
+def _periods_by_id(db):
+    return {p.id: p for p in db.query(Period).all()}
+
+
+def _set_window(db, **kw):
+    st = db.query(SchoolSettings).first()
+    for k, v in kw.items():
+        setattr(st, k, v)
+    db.commit()
+
+
+def test_operating_hours_keep_solver_out_of_closed_hours(db):
+    _set_window(db, visible_from="10:00", visible_to="22:00")
+    result = _solve(db)
+    assert result.status in ("optimal", "feasible"), result.message
+    assert len(result.slots) == 18
+    starts = {_periods_by_id(db)[s["period_id"]].start_time for s in result.slots}
+    assert starts <= {"10:00", "11:00", "12:00", "13:00"}
+
+
+def test_saturday_has_its_own_window(db):
+    _set_window(db, days_per_week=6, visible_from="12:00", visible_to="22:00",
+                saturday_from="08:00", saturday_to="22:00")
+    result = _solve(db)
+    assert result.status in ("optimal", "feasible"), result.message
+    periods = _periods_by_id(db)
+    for s in result.slots:
+        if periods[s["period_id"]].start_time < "12:00":
+            assert s["day_of_week"] == 5                    # πρωί μόνο το Σάββατο
+
+
+def test_explicitly_locked_hour_outside_window_is_kept(db):
+    _set_window(db, visible_from="10:00", visible_to="22:00")
+    early = next(p for p in db.query(Period).all() if p.start_time == "08:00")
+    lesson = db.query(Lesson).first()
+    room = db.query(Classroom).first()
+    locked = [{"lesson_id": lesson.id, "day_of_week": 0, "period_id": early.id, "classroom_id": room.id}]
+    result = TimetableSolver(db, max_time_seconds=10, locked_assignments=locked).solve()
+    assert result.status in ("optimal", "feasible"), result.message
+    mine = [(s["day_of_week"], s["period_id"]) for s in result.slots if s["lesson_id"] == lesson.id]
+    assert (0, early.id) in mine                            # η ρητή επιλογή μένει
+    others = [s for s in result.slots if (s["lesson_id"], s["day_of_week"], s["period_id"]) != (lesson.id, 0, early.id)]
+    assert all(_periods_by_id(db)[s["period_id"]].start_time >= "10:00" for s in others)
+
+
+# ---------------------------------------------------------------------------
+# Κλειδωμένες (χειροκίνητες) ώρες υπερισχύουν ορίων — 18/9/2026. Πριν, μία ώρα
+# πάνω από max/μέρα έκανε όλο το «Γέμισε τα κενά» infeasible.
+# ---------------------------------------------------------------------------
+
+def _lock_entries(db, lesson, cells, room=None):
+    room = room or db.query(Classroom).first()
+    return [{"lesson_id": lesson.id, "day_of_week": d, "period_id": p.id, "classroom_id": room.id}
+            for d, p in cells]
+
+
+def _kept(result, entries):
+    got = {(s["lesson_id"], s["day_of_week"], s["period_id"], s["classroom_id"]) for s in result.slots}
+    return all((e["lesson_id"], e["day_of_week"], e["period_id"], e["classroom_id"]) in got for e in entries)
+
+
+def _sorted_periods(db):
+    return sorted(db.query(Period).all(), key=lambda p: p.sort_order)
+
+
+def test_locked_hours_over_teacher_daily_max_stay_and_solve(db):
+    t1 = db.query(Teacher).filter_by(name="T1").first()
+    t1.max_periods_per_day = 2
+    db.commit()
+    ps = _sorted_periods(db)
+    l1, l2 = db.query(Lesson).filter_by(teacher_id=t1.id).limit(2).all()
+    locked = _lock_entries(db, l1, [(0, ps[0]), (0, ps[1])]) + _lock_entries(db, l2, [(0, ps[2])])
+    r = TimetableSolver(db, max_time_seconds=10, mode="permissive", locked_assignments=locked).solve()
+    assert r.status in ("optimal", "feasible"), r.message
+    assert _kept(r, locked)
+    t1_monday = [s for s in r.slots if s["day_of_week"] == 0
+                 and s["lesson_id"] in {l.id for l in db.query(Lesson).filter_by(teacher_id=t1.id)}]
+    assert len(t1_monday) == 3                              # το όριο «ανοίγει» μόνο ως τις κλειδωμένες
+
+
+def test_locked_room_other_than_pinned_is_kept(db):
+    r1, r2 = db.query(Classroom).order_by(Classroom.id).all()
+    lesson = db.query(Lesson).first()
+    lesson.classroom_id = r1.id
+    db.commit()
+    locked = _lock_entries(db, lesson, [(1, _sorted_periods(db)[0])], room=r2)
+    r = TimetableSolver(db, max_time_seconds=10, locked_assignments=locked).solve()
+    assert r.status in ("optimal", "feasible"), r.message
+    assert _kept(r, locked)
+
+
+def test_locked_split_of_a_double_block_and_new_unavailability(db):
+    lesson = db.query(Lesson).first()
+    lesson.distribution = "2"                               # δίωρο…
+    db.commit()
+    ps = _sorted_periods(db)
+    locked = _lock_entries(db, lesson, [(0, ps[0]), (2, ps[3])])   # …που μπήκε σπασμένο
+    db.add(TeacherAvailability(teacher_id=lesson.teacher_id, day_of_week=2, period_id=ps[3].id,
+                               status="unavailable"))        # κώλυμα δηλωμένο αργότερα
+    db.commit()
+    r = TimetableSolver(db, max_time_seconds=10, locked_assignments=locked).solve()
+    assert r.status in ("optimal", "feasible"), r.message
+    assert _kept(r, locked)

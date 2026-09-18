@@ -31,7 +31,7 @@ const SettingsView = {
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">🕒 Ωράριο λειτουργίας (εμφάνιση)</label>
+                        <label class="form-label">🕒 Ωράριο λειτουργίας</label>
                         <div style="display:flex; gap:0.5rem; align-items:center;">
                             <input class="form-input" id="s-visible-from" type="time"
                                    value="${settings.visible_from || ''}" style="max-width:140px">
@@ -52,7 +52,9 @@ const SettingsView = {
                             (π.χ. 14:00–22:00) και δείχνει «κλειστά» τα κελιά εκτός ωραρίου της κάθε
                             μέρας. Το Σάββατο μπορεί να έχει δικό του ωράριο (π.χ. 08:00–22:00· κενό =
                             ίδιο με τις καθημερινές). Ώρα που έχει ήδη μάθημα <b>δεν κρύβεται ποτέ</b>.
-                            Κενό = όλες οι ώρες. Ο solver δεν επηρεάζεται.
+                            Κενό = όλες οι ώρες. <b>Ο solver δεν τοποθετεί μαθήματα εκτός ωραρίου</b>
+                            (δημιουργία, Lock &amp; Regenerate, Γέμισε τα κενά) — εκτός από ώρες που έχεις
+                            κλειδώσει 🔒. Για καλοκαιρινό πρόγραμμα με πρωινά, άλλαξε πρώτα το ωράριο.
                         </p>
                     </div>
                     <div class="form-group">

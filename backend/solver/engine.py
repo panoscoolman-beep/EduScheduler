@@ -18,6 +18,7 @@ from backend.models import (
     TimetableSolution, TimetableSlot, SchoolSettings,
     StudentClassEnrollment, StudentAvailability
 )
+from backend.services.operating_hours import closed_cells
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,14 @@ class TimetableSolver:
         self._lessons_by_class: dict[int, list[Lesson]] = {}
         self._lessons_by_student: dict[int, list[Lesson]] = {}
         self._unavailable: set[tuple[int, int, int]] = set()  # (teacher_id, day, period_id)
+        self._closed_cells: set[tuple[int, int]] = set()      # (day, period_id) εκτός ωραρίου
+        # Κλειδωμένα από τον χρήστη (βλ. _index_locked) — εξαιρούνται από όρια/κωλύματα.
+        self._kept_cells: set[tuple[int, int, int]] = set()   # (lesson_id, day, period_id)
+        self._locked_count: dict[int, int] = {}
+        self._locked_rooms: dict[int, list] = {}
+        self._locked_teacher_day: dict[tuple[int, int], int] = {}
+        self._locked_teacher_days: dict[int, set[int]] = {}
+        self._locked_student_days: dict[int, set[int]] = {}
         self._student_unavailable: set[tuple[int, int, int]] = set() # (student_id, day, period_id)
         self._teaching_period_ids: list[int] = []
 
@@ -118,6 +127,7 @@ class TimetableSolver:
                 return SolverResult(status="error", message=validation_error)
 
             self._build_indices()
+            self._index_locked()
             self._create_variables()
             self._apply_hard_constraints()
             self._apply_locked_assignments()
@@ -170,6 +180,8 @@ class TimetableSolver:
 
         settings = self.db.query(SchoolSettings).first()
         self.days_per_week = settings.days_per_week if settings else 5
+        # Κελιά εκτός ωραρίου λειτουργίας (π.χ. πρωινά καθημερινής) — βλ. H0.
+        self._closed_cells = closed_cells(settings, self.periods, self.days_per_week)
 
     def _validate_data(self) -> str | None:
         """Validate that we have enough data to generate a schedule.
@@ -283,19 +295,60 @@ class TimetableSolver:
         for savail in self.student_availabilities:
             self._student_unavailable.add((savail.student_id, savail.day_of_week, savail.period_id))
 
+    def _index_locked(self):
+        """Ό,τι έχει κλειδώσει ο χρήστης είναι δική του απόφαση και ο solver
+        χτίζει γύρω του — δεν το «διορθώνει». Χωρίς αυτό, μια χειροκίνητη ώρα
+        που ξεπερνά ένα όριο (π.χ. 5 ώρες τη μέρα με max 4) ή κάθεται σε άλλη
+        αίθουσα από την «καρφωμένη» της κάρτας έκανε όλο το Lock & Regenerate /
+        Γέμισε τα κενά infeasible ή μετακινούσε σιωπηλά την ώρα."""
+        lesson_by_id = {l.id: l for l in self.lessons}
+        students_of_class: dict[int, set[int]] = {}
+        for e in self.enrollments:
+            students_of_class.setdefault(e.class_id, set()).add(e.student_id)
+        all_rooms = {r.id: r for r in self.db.query(Classroom).all()}
+        self._kept_cells = {(e.get("lesson_id"), e.get("day_of_week"), e.get("period_id"))
+                            for e in self.locked_assignments}
+        self._locked_count: dict[int, int] = {}
+        self._locked_rooms: dict[int, list[Classroom]] = {}
+        self._locked_teacher_day: dict[tuple[int, int], int] = {}
+        self._locked_teacher_days: dict[int, set[int]] = {}
+        self._locked_student_days: dict[int, set[int]] = {}
+        for e in self.locked_assignments:
+            lesson = lesson_by_id.get(e.get("lesson_id"))
+            day = e.get("day_of_week")
+            if lesson is None or day is None or e.get("period_id") is None:
+                continue
+            self._locked_count[lesson.id] = self._locked_count.get(lesson.id, 0) + 1
+            room = all_rooms.get(e.get("classroom_id"))
+            if room is not None:
+                rooms = self._locked_rooms.setdefault(lesson.id, [])
+                if room not in rooms:
+                    rooms.append(room)
+            key = (lesson.teacher_id, day)
+            self._locked_teacher_day[key] = self._locked_teacher_day.get(key, 0) + 1
+            self._locked_teacher_days.setdefault(lesson.teacher_id, set()).add(day)
+            for sid in students_of_class.get(lesson.class_id, ()):
+                self._locked_student_days.setdefault(sid, set()).add(day)
+
     def _get_available_rooms(self, lesson: Lesson) -> list[Classroom]:
-        """Get rooms that can host this lesson."""
+        """Get rooms that can host this lesson (+ όσες έχει κλειδώσει ο χρήστης)."""
         if lesson.classroom_id:
             room = next((r for r in self.classrooms if r.id == lesson.classroom_id), None)
-            return [room] if room else []
-
-        if lesson.subject and lesson.subject.requires_special_room:
-            return [r for r in self.classrooms if r.room_type == lesson.subject.special_room_type]
-
-        return self.classrooms
+            rooms = [room] if room else []
+        elif lesson.subject and lesson.subject.requires_special_room:
+            rooms = [r for r in self.classrooms if r.room_type == lesson.subject.special_room_type]
+        else:
+            rooms = self.classrooms
+        extra = [r for r in getattr(self, "_locked_rooms", {}).get(lesson.id, []) if r not in rooms]
+        return list(rooms) + extra if extra else rooms
 
     def _parse_distribution(self, lesson: Lesson) -> list[int]:
         """Convert a distribution string like '2,1' to a list of block lengths [2, 1]."""
+        locked = getattr(self, "_locked_count", {}).get(lesson.id, 0)
+        if locked:
+            # Κλειδωμένες ώρες: μονόωρα blocks, ώστε να «χωράει» όπως τις έβαλε ο
+            # χρήστης (π.χ. δίωρο σπασμένο σε δύο μέρες) — και όχι λιγότερα από αυτές.
+            return [1] * max(lesson.periods_per_week, locked)
         if lesson.distribution:
             try:
                 blocks = [int(v.strip()) for v in lesson.distribution.split(",") if v.strip()]
@@ -433,13 +486,22 @@ class TimetableSolver:
                     if vars_at_slot:
                         self.model.Add(sum(vars_at_slot) <= 1)
 
+        # H0: Ωράριο λειτουργίας — κανένα μάθημα εκτός ωραρίου της μέρας.
+        # Εξαίρεση: ό,τι έχει κλειδώσει ρητά ο χρήστης (Lock & Regenerate /
+        # Γέμισε τα κενά) μένει εκεί που είναι.
+        if self._closed_cells:
+            for (lesson_id, day, period_id, _room_id), x_var in self.x.items():
+                if (day, period_id) in self._closed_cells and (lesson_id, day, period_id) not in self._kept_cells:
+                    self.model.Add(x_var == 0)
+
         # H5: Teacher availability — block unavailable slots
         for teacher_id, teacher_lessons in self._lessons_by_teacher.items():
             for lesson in teacher_lessons:
                 available_rooms = self._get_available_rooms(lesson)
                 for day in days:
                     for period in self.periods:
-                        if (teacher_id, day, period.id) in self._unavailable:
+                        if ((teacher_id, day, period.id) in self._unavailable
+                                and (lesson.id, day, period.id) not in self._kept_cells):
                             for room in available_rooms:
                                 key = (lesson.id, day, period.id, room.id)
                                 if key in self.x:
@@ -459,7 +521,9 @@ class TimetableSolver:
                                 if key in self.x:
                                     vars_in_day.append(self.x[key])
                     if vars_in_day:
-                        self.model.Add(sum(vars_in_day) <= teacher.max_periods_per_day)
+                        limit = max(teacher.max_periods_per_day,
+                                    self._locked_teacher_day.get((teacher.id, day), 0))
+                        self.model.Add(sum(vars_in_day) <= limit)
 
         # H7: No student clash (cross-class overlap)
         for student_id, student_lessons in self._lessons_by_student.items():
@@ -481,7 +545,8 @@ class TimetableSolver:
                 available_rooms = self._get_available_rooms(lesson)
                 for day in days:
                     for period in self.periods:
-                        if (student_id, day, period.id) in self._student_unavailable:
+                        if ((student_id, day, period.id) in self._student_unavailable
+                                and (lesson.id, day, period.id) not in self._kept_cells):
                             for room in available_rooms:
                                 key = (lesson.id, day, period.id, room.id)
                                 if key in self.x:
@@ -510,7 +575,8 @@ class TimetableSolver:
                     else:
                         self.model.Add(day_var == 0)
                 
-                self.model.Add(sum(days_working_vars) <= teacher.max_days_per_week)
+                self.model.Add(sum(days_working_vars) <= max(
+                    teacher.max_days_per_week, len(self._locked_teacher_days.get(teacher.id, ()))))
 
         # H10: Student Max Days Per Week
         for enrollment in self.enrollments:
@@ -536,7 +602,8 @@ class TimetableSolver:
                     else:
                         self.model.Add(day_var == 0)
                 
-                self.model.Add(sum(days_working_vars) <= student.max_days_per_week)
+                self.model.Add(sum(days_working_vars) <= max(
+                    student.max_days_per_week, len(self._locked_student_days.get(student.id, ()))))
 
     def _apply_locked_assignments(self):
         """Force the cells named in self.locked_assignments to 1.

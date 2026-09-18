@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
-from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
+from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom, TimetableSlot
+from backend.services import lesson_change_guard as change_guard
+from backend.services import slot_history as slot_history_svc
 from backend.services.lesson_impact import lesson_impact, palette_review
 from backend.schemas import (
     PaletteCleanupRequest,
@@ -197,12 +199,28 @@ def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{lesson_id}", response_model=LessonResponse)
-def update_lesson(lesson_id: int, data: LessonCreate, db: Session = Depends(get_db)):
+def update_lesson(lesson_id: int, data: LessonCreate, force: bool = False, db: Session = Depends(get_db)):
+    """Αλλαγή κάρτας. Αν αλλάζει καθηγητής/τμήμα και κάποιες τοποθετημένες ώρες
+    συγκρούονται → 409 + λίστα· με `?force=true` η αλλαγή γίνεται και ΜΟΝΟ οι
+    ώρες που συγκρούονται πάνε στην Παλέτα (ένα commit, γράφονται στο ιστορικό)."""
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     if not lesson:
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+    conflicts = change_guard.change_conflicts(db, lesson, data.teacher_id, data.class_id)
+    if conflicts and not force:
+        raise HTTPException(status_code=409, detail={
+            "code": "lesson_change_conflicts",
+            "requires_force": True,
+            "message": change_guard.conflicts_message(conflicts),
+            "conflicts": conflicts,
+        })
     for key, value in data.model_dump().items():
         setattr(lesson, key, value)
+    if conflicts:
+        ids = [c["slot_id"] for c in conflicts]
+        for slot in db.query(TimetableSlot).filter(TimetableSlot.id.in_(ids)).all():
+            slot_history_svc.unplace_placed_slot(
+                db, slot, "Σύγκρουση μετά την αλλαγή καθηγητή/τμήματος της κάρτας", unlock=True)
     db.commit()
 
     # Reconcile each active solution's slot count with the (possibly

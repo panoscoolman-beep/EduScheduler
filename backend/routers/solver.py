@@ -704,30 +704,8 @@ MANUAL_UNPLACE_REASON = "Αφαιρέθηκε χειροκίνητα από το
 
 
 def _unplace_placed_slot(db: Session, slot: TimetableSlot, reason: str):
-    """Τοποθετημένη ώρα → Παλέτα + εγγραφή 'unplace' στο ιστορικό (χωρίς
-    commit). Κοινό για μεμονωμένη και μαζική αφαίρεση. Επιστρέφει
-    (history entry, νέα κατάσταση)."""
-    prev_state = {
-        "day_of_week": slot.day_of_week,
-        "period_id": slot.period_id,
-        "classroom_id": slot.classroom_id,
-        "is_locked": bool(slot.is_locked),
-        "is_unplaced": False,
-    }
-    slot.day_of_week = None
-    slot.period_id = None
-    slot.classroom_id = None
-    slot.is_unplaced = True
-    slot.unplaced_reason = reason
-    new_state = {
-        "day_of_week": None,
-        "period_id": None,
-        "classroom_id": None,
-        "is_locked": bool(slot.is_locked),
-        "is_unplaced": True,
-    }
-    entry = slot_history_svc.record_edit(db, slot, prev_state, new_state, "unplace")
-    return entry, new_state
+    """Κοινό για μεμονωμένη και μαζική αφαίρεση (βλ. slot_history)."""
+    return slot_history_svc.unplace_placed_slot(db, slot, reason)
 
 
 @router.post("/solutions/{solution_id}/unplace-bulk")

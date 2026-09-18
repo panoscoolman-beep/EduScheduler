@@ -146,3 +146,12 @@ def test_archived_or_generating_or_missing_cannot_be_published(env):
     env.s.commit()
     assert env.get(f"/api/publications/preview/{env.sol.id}").json()["detail"]["code"] == "generating"
     assert env.post("/api/publications/solutions/999", json={}).status_code == 404
+
+
+def test_recreated_card_at_same_hours_is_not_a_change():
+    prev = [_e(1, 10, 1, "17:00", "18:00"), _e(1, 10, 3, "18:00", "19:00")]
+    cur = [_e(1, 99, 1, "17:00", "18:00"), _e(1, 99, 3, "19:00", "20:00")]   # νέο id κάρτας
+    ch = svc.teacher_changes(prev, cur)
+    assert ch[1]["added"] == [] and ch[1]["removed"] == []
+    assert [(m["from"]["start"], m["to"]["start"]) for m in ch[1]["moved"]] == [("18:00", "19:00")]
+    assert svc.teacher_changes(prev, [dict(e, lesson_id=99) for e in prev]) == {}

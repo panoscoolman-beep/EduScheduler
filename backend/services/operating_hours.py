@@ -6,8 +6,10 @@
 
 Κανόνας ασφαλείας: μια ώρα που έχει ΤΟΠΟΘΕΤΗΜΕΝΟ μάθημα δεν κρύβεται ποτέ
 (εμφανίζεται με σήμανση «εκτός ωραρίου»), ώστε να μη «χαθεί» μάθημα από την
-οθόνη. Αφορά μόνο την εμφάνιση — ο solver δεν αλλάζει. Ίδιοι κανόνες με το
-`TimetableHelpers.visiblePeriods` του frontend.
+οθόνη. Ίδιοι κανόνες με το `TimetableHelpers.visiblePeriods` του frontend.
+
+Από 18/9/2026 το ωράριο δεσμεύει ΚΑΙ τον solver (`closed_cells`): δεν
+τοποθετεί μάθημα εκτός ωραρίου της μέρας, εκτός αν είναι ρητά κλειδωμένο.
 """
 from __future__ import annotations
 
@@ -44,6 +46,18 @@ def day_window(settings, day: int) -> tuple:
                             or getattr(settings, "saturday_to", None)):
         return settings.saturday_from, settings.saturday_to
     return getattr(settings, "visible_from", None), getattr(settings, "visible_to", None)
+
+
+def closed_cells(settings, periods: Iterable, days_per_week: int) -> set[tuple[int, int]]:
+    """(μέρα, period_id) εκτός ωραρίου λειτουργίας — κενό αν δεν έχει οριστεί ωράριο."""
+    if not has_any_window(settings):
+        return set()
+    periods = list(periods)
+    out = set()
+    for day in range(days_per_week):
+        lo, hi = day_window(settings, day)
+        out |= {(day, p.id) for p in periods if not in_window(p.start_time, lo, hi)}
+    return out
 
 
 def has_any_window(settings) -> bool:

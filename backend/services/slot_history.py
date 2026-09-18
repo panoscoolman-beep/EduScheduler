@@ -274,3 +274,33 @@ def undo_to(db: Session, solution_id: int, entry_id: int) -> int:
         if undo(db, solution_id) is None:
             raise ValueError("Μια αλλαγή δεν μπορεί να αναιρεθεί (η ώρα δεν υπάρχει πια).")
         count += 1
+
+
+def unplace_placed_slot(db: Session, slot: TimetableSlot, reason: str, *, unlock: bool = False):
+    """Τοποθετημένη ώρα → Παλέτα + εγγραφή 'unplace' στο ιστορικό (χωρίς commit).
+
+    `unlock=True` βγάζει και το 🔒 (το «↩️» το επαναφέρει μαζί με τη θέση).
+    Επιστρέφει (history entry, νέα κατάσταση)."""
+    prev_state = {
+        "day_of_week": slot.day_of_week,
+        "period_id": slot.period_id,
+        "classroom_id": slot.classroom_id,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": False,
+    }
+    if unlock:
+        slot.is_locked = False
+    slot.day_of_week = None
+    slot.period_id = None
+    slot.classroom_id = None
+    slot.is_unplaced = True
+    slot.unplaced_reason = reason
+    new_state = {
+        "day_of_week": None,
+        "period_id": None,
+        "classroom_id": None,
+        "is_locked": bool(slot.is_locked),
+        "is_unplaced": True,
+    }
+    entry = record_edit(db, slot, prev_state, new_state, "unplace")
+    return entry, new_state

@@ -154,8 +154,9 @@ class DataTable {
         const formHTML = this.formBuilder(item);
 
         Modal.open(`${title} — ${this.entityName}`, formHTML, async () => {
+            let formData = null;
             try {
-                const formData = this.formParser();
+                formData = this.formParser();
                 if (editId) {
                     await this.api.update(editId, formData);
                     Toast.success('Η εγγραφή ενημερώθηκε');
@@ -166,7 +167,13 @@ class DataTable {
                 Modal.close();
                 await this.loadData();
             } catch (err) {
-                Toast.error(err.message);
+                // Η αλλαγή συγκρούεται με τοποθετημένες ώρες (π.χ. νέος καθηγητής
+                // σε κάρτα) → δεύτερη επιβεβαίωση και επανάληψη με force.
+                if (editId && err.status === 409 && err.detail && err.detail.requires_force) {
+                    this._confirmForceUpdate(editId, formData, err.detail.message);
+                } else {
+                    Toast.error(err.message);
+                }
             }
         });
 
@@ -205,6 +212,25 @@ class DataTable {
                 }
             },
             { saveText: 'Διαγραφή', saveClass: 'btn-danger' },
+        );
+    }
+
+    _confirmForceUpdate(id, formData, message) {
+        Modal.open(
+            '⚠️ Η αλλαγή συγκρούεται με το πρόγραμμα',
+            `<p style="font-weight:600">${DataTable.esc(message)}</p>
+             <p class="text-muted mt-sm">Οι υπόλοιπες ώρες μένουν όπως είναι.</p>`,
+            async () => {
+                try {
+                    await this.api.update(id, formData, true);  // force
+                    Toast.success('Αποθηκεύτηκε — οι ώρες που συγκρούονταν είναι στην Παλέτα.');
+                    Modal.close();
+                    await this.loadData();
+                } catch (err) {
+                    Toast.error(err.message);
+                }
+            },
+            { saveText: 'Ναι, αποθήκευση', saveClass: 'btn-warning' },
         );
     }
 

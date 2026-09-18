@@ -132,3 +132,44 @@ test('409 requires_force → κόκκινη επιβεβαίωση με escaped 
     await opened[1].onSave();                                  // ρητή επιβεβαίωση
     assert.deepEqual(calls, [[5, false], [5, true]]);
 });
+
+test('αποθήκευση με 409 requires_force → επιβεβαίωση → ίδια δεδομένα με force· αλλιώς απλό σφάλμα', async () => {
+    setup();
+    const opened = [];
+    const errors = [];
+    global.Modal = { open(title, body, onSave) { opened.push({ title, body, onSave }); }, close() {} };
+    global.Toast = { error: (m) => errors.push(m), success() {}, info() {} };
+    const calls = [];
+    let parses = 0;
+    const api = {
+        list: async () => [{ id: 7, name: 'Χημεία' }],
+        update: async (id, data, force = false) => {
+            calls.push([id, data, force]);
+            if (!force) {
+                const err = new Error('conflict');
+                err.status = 409;
+                err.detail = { requires_force: true, message: 'Ο «<i>Τ2</i>» διδάσκει ήδη Τετ 15:00' };
+                throw err;
+            }
+            return {};
+        },
+    };
+    const t = new DataTable({
+        columns: [{ key: 'name', label: 'Όνομα' }], apiService: api, entityName: 'Μαθήματα',
+        formBuilder: () => '', formParser: () => ({ teacher_id: 2, n: ++parses }),
+    });
+    await t.render(document.getElementById('host'));
+    t.openForm(7);
+    await opened[0].onSave();
+    assert.match(opened[1].title, /συγκρούεται/);
+    assert.match(opened[1].body, /&lt;i&gt;Τ2&lt;\/i&gt;/);
+    await opened[1].onSave();
+    assert.deepEqual(calls, [[7, { teacher_id: 2, n: 1 }, false], [7, { teacher_id: 2, n: 1 }, true]]);
+
+    // Άλλο σφάλμα (π.χ. 422) → μόνο μήνυμα, όχι δεύτερο παράθυρο.
+    api.update = async () => { const e = new Error('κακά δεδομένα'); e.status = 422; throw e; };
+    t.openForm(7);
+    await opened[2].onSave();
+    assert.equal(opened.length, 3);
+    assert.deepEqual(errors, ['κακά δεδομένα']);
+});
