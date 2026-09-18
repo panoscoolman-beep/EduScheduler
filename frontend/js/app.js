@@ -24,6 +24,7 @@ const App = {
     },
 
     init() {
+        VersionCheck.start();
         Modal.init();
         this._bindNavigation();
         this._bindMenuToggle();

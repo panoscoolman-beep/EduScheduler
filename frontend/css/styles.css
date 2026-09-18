@@ -1207,6 +1207,14 @@ a:hover { color: var(--accent-blue-hover); }
     }
 }
 
+/* ── 🔄 Νέα έκδοση ──────────────────────────────────────── */
+.version-banner {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2000;
+    display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px);
+    padding: 8px 12px; border-radius: 10px; background: var(--bg-secondary);
+    border: 1px solid var(--border-strong); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
 /* ── 📱 Σήμερα ──────────────────────────────────────────── */
 .today-root { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-sm); }
 .today-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
