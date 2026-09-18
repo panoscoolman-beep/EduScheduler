@@ -1207,6 +1207,27 @@ a:hover { color: var(--accent-blue-hover); }
     }
 }
 
+/* ── 📱 Σήμερα ──────────────────────────────────────────── */
+.today-root { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-sm); }
+.today-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.today-bar .btn { min-width: 48px; min-height: 44px; font-size: 1.1rem; }
+.today-title { text-align: center; font-size: 1.1rem; line-height: 1.3; }
+.today-source { font-size: 0.8rem; margin: 0; }
+.today-group { border: 1px solid var(--border-default); border-radius: 10px; padding: var(--space-sm) var(--space-md); }
+.today-group h3 { margin: 0 0 var(--space-xs, 4px); font-size: 1rem; }
+.today-group.is-now { border-width: 2px; border-color: #16a34a; }
+.today-group.is-next { border-color: #2563eb; }
+.today-item { display: grid; grid-template-columns: 7rem 1fr; gap: 2px var(--space-sm); padding: 6px 0; border-top: 1px dashed var(--border-subtle); }
+.today-item:first-of-type { border-top: 0; }
+.today-room { grid-row: span 2; font-weight: 600; }
+.today-what small { display: block; color: var(--text-muted); overflow-wrap: anywhere; }
+.today-who { font-size: 0.85rem; }
+.today-empty { text-align: center; padding: var(--space-lg) 0; }
+@media (max-width: 480px) {
+    .today-item { grid-template-columns: 1fr; }
+    .today-room { grid-row: auto; }
+}
+
 /* ── Utility Classes ────────────────────────────────────── */
 .hidden { display: none !important; }
 .text-center { text-align: center; }

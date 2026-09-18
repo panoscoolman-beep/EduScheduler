@@ -19,6 +19,7 @@ const App = {
         constraints: { title: 'Περιορισμοί', renderer: ConstraintsView },
         generate: { title: 'Δημιουργία Ωρολογίου', renderer: GenerateView },
         timetable: { title: 'Ωρολόγιο Πρόγραμμα', renderer: TimetableView },
+        today: { title: 'Σήμερα', renderer: TodayView },
         settings: { title: 'Ρυθμίσεις', renderer: SettingsView },
     },
 
@@ -28,7 +29,8 @@ const App = {
         this._bindMenuToggle();
         this._bindTermSelector();
         this.refreshTermSelector();
-        this.navigateTo('dashboard');
+        // …/#today → κατευθείαν στο «Σήμερα» (σελιδοδείκτης κινητού).
+        this.navigateTo(window.location.hash === '#today' ? 'today' : 'dashboard');
     },
 
     _bindTermSelector() {
@@ -69,6 +71,11 @@ const App = {
         if (!view) return;
 
         this._currentView = viewName;
+        // Το «Σήμερα» κρατά #today στη διεύθυνση, ώστε να μπαίνει σε σελιδοδείκτη.
+        const hash = viewName === 'today' ? '#today' : '';
+        if (window.location.hash !== hash) {
+            history.replaceState(null, '', window.location.pathname + window.location.search + hash);
+        }
 
         // Update active nav item
         document.querySelectorAll('.nav-item').forEach(item => {
