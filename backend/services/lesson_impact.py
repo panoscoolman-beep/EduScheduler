@@ -60,16 +60,25 @@ def _solution_rows(db: Session, lesson: Lesson) -> list[dict]:
     return rows
 
 
-def _trim_plan(periods_per_week: int, max_placed: int) -> dict:
-    """Μέχρι πού μπορούν να κοπούν οι ώρες χωρίς να χαθεί τοποθετημένη ώρα."""
+def _trim_plan(periods_per_week: int, max_placed: int, max_total: int | None = None) -> dict:
+    """Μέχρι πού μπορούν να κοπούν οι ώρες χωρίς να χαθεί τοποθετημένη ώρα.
+
+    `max_total` = το μεγαλύτερο πλήθος ωρών (τοποθετημένες + Παλέτα) σε ένα
+    πρόγραμμα. Αν ξεπερνά τις ώρες/εβδ., οι επιπλέον ώρες Παλέτας είναι
+    ΠΕΡΙΤΤΕΣ και αφαιρούνται χωρίς να αλλάξουν οι ώρες/εβδ. (`surplus`)."""
     if max_placed <= 0:
         return {"can_trim": False, "trim_to": periods_per_week, "would_remove": 0,
-                "blocked_reason": "no_placed_hours"}
-    if periods_per_week <= max_placed:
-        return {"can_trim": False, "trim_to": periods_per_week, "would_remove": 0,
-                "blocked_reason": "nothing_to_trim"}
-    return {"can_trim": True, "trim_to": max_placed,
-            "would_remove": periods_per_week - max_placed, "blocked_reason": None}
+                "blocked_reason": "no_placed_hours", "surplus": False}
+    if periods_per_week > max_placed:
+        return {"can_trim": True, "trim_to": max_placed,
+                "would_remove": periods_per_week - max_placed, "blocked_reason": None,
+                "surplus": False}
+    extra = (max_total or 0) - periods_per_week
+    if extra > 0:
+        return {"can_trim": True, "trim_to": periods_per_week, "would_remove": extra,
+                "blocked_reason": None, "surplus": True}
+    return {"can_trim": False, "trim_to": periods_per_week, "would_remove": 0,
+            "blocked_reason": "nothing_to_trim", "surplus": False}
 
 
 def lesson_impact(db: Session, lesson_id: int) -> dict | None:
@@ -116,7 +125,8 @@ def lesson_impact(db: Session, lesson_id: int) -> dict | None:
             "unplaced": sum(r["unplaced"] for r in rows),
             "max_placed": max_placed,
         },
-        "trim": _trim_plan(int(lesson.periods_per_week), max_placed),
+        "trim": _trim_plan(int(lesson.periods_per_week), max_placed,
+                           max([r["placed"] + r["unplaced"] for r in rows], default=0)),
         "delete": {
             "placed_total": placed_total,
             "solutions_with_placed": sum(1 for r in rows if r["placed"]),
@@ -170,7 +180,8 @@ def palette_review(db: Session, term_id: int) -> dict:
             continue
         placed_total = sum(p for p, _ in per_solution.values())
         max_placed = max((p for p, _ in per_solution.values()), default=0)
-        trim = _trim_plan(int(lesson.periods_per_week), max_placed)
+        max_total = max((p + u for p, u in per_solution.values()), default=0)
+        trim = _trim_plan(int(lesson.periods_per_week), max_placed, max_total)
         items.append({
             "lesson_id": lesson.id,
             "subject_name": lesson.subject.name if lesson.subject else "",

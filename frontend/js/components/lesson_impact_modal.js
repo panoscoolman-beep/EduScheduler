@@ -97,13 +97,19 @@ const LessonImpactModal = {
         const state = {
             trimEnabled: Boolean(trim.can_trim),
             trimLabel: trim.can_trim
-                ? `✂️ Κράτα μόνο τις τοποθετημένες (${trim.trim_to} ώρες/εβδ.)`
+                ? (trim.surplus
+                    ? `✂️ Αφαίρεση ${trim.would_remove} περιττών ωρών Παλέτας`
+                    : `✂️ Κράτα μόνο τις τοποθετημένες (${trim.trim_to} ώρες/εβδ.)`)
                 : '✂️ Καθάρισμα ωρών',
             trimHint: '',
             deleteLabel: '🗑️ Διαγραφή μαθήματος',
             confirmLabel: '',
         };
-        if (trim.can_trim) {
+        if (trim.can_trim && trim.surplus) {
+            state.trimHint = `Υπάρχουν ${trim.would_remove} ώρες στην Παλέτα ΠΑΝΩ από τις `
+                + `${l.periods_per_week} ώρες/εβδ. του μαθήματος — είναι περιττές. Θα αφαιρεθούν· `
+                + 'οι ώρες/εβδ. μένουν ίδιες και καμία τοποθετημένη ώρα δεν θα πειραχτεί.';
+        } else if (trim.can_trim) {
             state.trimHint = `Θα αφαιρεθούν ${trim.would_remove} ώρες από την Παλέτα `
                 + `(από ${l.periods_per_week} σε ${trim.trim_to} ώρες/εβδομάδα). `
                 + 'Καμία τοποθετημένη ώρα δεν θα πειραχτεί.';

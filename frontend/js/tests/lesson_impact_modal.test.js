@@ -155,3 +155,11 @@ test('ποιο πρόγραμμα ανοίγει + κατάσταση κουμπ
     assert.equal(H.archiveButtonState(sols, 2).archived, true);
     assert.equal(H.archiveButtonState(sols, 2).icon, '♻️');
 });
+
+
+test('actionState: περιττές ώρες — οι ώρες/εβδ. μένουν ίδιες', () => {
+    const st = M.actionState({ ...DATA, lesson: { ...DATA.lesson, periods_per_week: 1 },
+        trim: { can_trim: true, trim_to: 1, would_remove: 1, surplus: true, blocked_reason: null } });
+    assert.equal(st.trimLabel, '✂️ Αφαίρεση 1 περιττών ωρών Παλέτας');
+    assert.match(st.trimHint, /ΠΑΝΩ από τις 1 ώρες\/εβδ\..*μένουν ίδιες/);
+});

@@ -63,3 +63,10 @@ test('η Παλέτα δείχνει «🧹 Καθάρισμα» μόνο ότα
     assert.match(palette(2), /id="palette-cleanup"/);
     assert.doesNotMatch(palette(0), /id="palette-cleanup"/);
 });
+
+
+test('περιττές ώρες Παλέτας (πάνω από τις ώρες/εβδ.): σωστή διατύπωση', () => {
+    const it = item(9, 'trim', { periods_per_week: 1,
+        trim: { can_trim: true, trim_to: 1, would_remove: 1, surplus: true } });
+    assert.match(M.suggestionText(it), /Αφαίρεση 1 περιττών ωρών Παλέτας \(πάνω από τις 1 ώρες\/εβδ\.\)/);
+});

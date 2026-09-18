@@ -127,7 +127,8 @@ def test_impact_shows_where_the_lesson_is_used(scenario):
     assert rows["Πρόγραμμα Β"]["placed"] == 1 and rows["Πρόγραμμα Β"]["unplaced"] == 3
     assert body["totals"] == {"solutions": 2, "placed": 4, "unplaced": 4, "max_placed": 3}
     # Καθάρισμα μέχρι τις τοποθετημένες του «γεμάτου» προγράμματος — ποτέ πιο κάτω.
-    assert body["trim"] == {"can_trim": True, "trim_to": 3, "would_remove": 1, "blocked_reason": None}
+    assert body["trim"] == {"can_trim": True, "trim_to": 3, "would_remove": 1, "blocked_reason": None,
+                            "surplus": False}
     assert body["delete"] == {"placed_total": 4, "solutions_with_placed": 2, "requires_force": True}
 
 
@@ -252,3 +253,21 @@ def test_palette_cleanup_never_touches_placed_hours(cleanup_env):
     assert c.session.query(Lesson).filter(Lesson.id == ids["l2"]).first() is None
     assert _counts(c, ids["b"], ids["l3"]) == (3, 0)             # το l3 δεν σβήστηκε
     assert c.session.query(Lesson).filter(Lesson.id == ids["l3"]).first() is not None
+
+
+def test_surplus_palette_hours_above_the_weekly_hours_are_removable(client):
+    """Ζωντανή περίπτωση (ΓΕΩΜΕΤΡΙΑ Β): 1 ώρα/εβδ., ήδη τοποθετημένη, ΚΑΙ 1
+    επιπλέον ώρα στην Παλέτα — περιττή. Αφαιρείται χωρίς να αλλάξουν οι ώρες."""
+    lesson = _lesson(client, ppw=1)
+    sol = _solution(client, "ΧΕΙΜΕΡΙΝΟ")
+    _slots(client, sol, lesson, placed=1, unplaced=1)
+
+    trim = client.get(f"/api/lessons/{lesson.id}/impact").json()["trim"]
+    assert trim == {"can_trim": True, "trim_to": 1, "would_remove": 1, "blocked_reason": None,
+                    "surplus": True}
+    review = client.get("/api/lessons/palette-review?term_id=1").json()
+    assert [i["suggestion"] for i in review["items"]] == ["trim"]
+
+    res = client.post(f"/api/lessons/{lesson.id}/trim-unplaced").json()
+    assert res["periods_per_week"] == 1 and res["removed"] == 1
+    assert _counts(client, sol.id, lesson.id) == (1, 0)            # η τοποθετημένη έμεινε

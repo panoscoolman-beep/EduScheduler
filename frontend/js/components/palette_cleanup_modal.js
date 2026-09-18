@@ -19,6 +19,9 @@ const PaletteCleanupModal = {
 
     /** Κείμενο πρότασης για ένα μάθημα. */
     suggestionText(item) {
+        if (item.suggestion === 'trim' && item.trim.surplus) {
+            return `✂️ Αφαίρεση ${item.trim.would_remove} περιττών ωρών Παλέτας (πάνω από τις ${item.periods_per_week} ώρες/εβδ.)`;
+        }
         if (item.suggestion === 'trim') {
             return `✂️ Κράτα ${item.trim.trim_to} ώρες/εβδ. — σβήνει ${item.trim.would_remove} ώρα(ες) Παλέτας`;
         }
