@@ -244,6 +244,31 @@ const TimetableHelpers = {
     },
 
     /** "HH:MM" → λεπτά από τα μεσάνυχτα, ή null. Pure. */
+    /**
+     * Ωράριο λειτουργίας: ποιες διδακτικές ώρες φαίνονται στο πλέγμα. Μέσα
+     * είναι όσες ΞΕΚΙΝΟΥΝ στο [from, to)· χωρίς ωράριο ή με άγνωστη ώρα → όλες.
+     * Ώρα με ΤΟΠΟΘΕΤΗΜΕΝΟ μάθημα δεν κρύβεται ποτέ — επιστρέφεται στο
+     * `outside` για σήμανση. Ίδιος κανόνας με backend/services/operating_hours.py.
+     */
+    visiblePeriods(periods, window, slots) {
+        const w = window || {};
+        const lo = TimetableHelpers.timeToMinutes(w.from);
+        const hi = TimetableHelpers.timeToMinutes(w.to);
+        const used = new Set((slots || [])
+            .filter(s => !s.is_unplaced && s.period_id != null)
+            .map(s => s.period_id));
+        const outside = new Set();
+        const visible = (periods || []).filter(p => {
+            const start = TimetableHelpers.timeToMinutes(p.start_time);
+            const inside = start == null
+                || ((lo == null || start >= lo) && (hi == null || start < hi));
+            if (inside) return true;
+            if (used.has(p.id)) { outside.add(p.id); return true; }
+            return false;
+        });
+        return { periods: visible, outside };
+    },
+
     timeToMinutes(hhmm) {
         const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm ?? '').trim());
         if (!m) return null;

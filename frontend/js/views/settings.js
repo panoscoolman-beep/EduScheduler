@@ -31,6 +31,21 @@ const SettingsView = {
                         </div>
                     </div>
                     <div class="form-group">
+                        <label class="form-label">🕒 Ωράριο λειτουργίας (εμφάνιση)</label>
+                        <div style="display:flex; gap:0.5rem; align-items:center;">
+                            <input class="form-input" id="s-visible-from" type="time"
+                                   value="${settings.visible_from || ''}" style="max-width:140px">
+                            <span>έως</span>
+                            <input class="form-input" id="s-visible-to" type="time"
+                                   value="${settings.visible_to || ''}" style="max-width:140px">
+                        </div>
+                        <p class="text-muted" style="font-size:0.8rem; margin-top:0.35rem;">
+                            Κρύβει από το πρόγραμμα και τις εκτυπώσεις τις ώρες εκτός ωραρίου
+                            (π.χ. 14:00–22:00). Ώρα που έχει ήδη μάθημα <b>δεν κρύβεται ποτέ</b> —
+                            φαίνεται με ⏰. Κενό = όλες οι ώρες. Ο solver δεν επηρεάζεται.
+                        </p>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">Τύπος Ιδρύματος</label>
                         <select class="form-select" id="s-type">
                             <option value="frontistirio" ${settings.institution_type === 'frontistirio' ? 'selected' : ''}>Φροντιστήριο</option>
@@ -64,6 +79,8 @@ const SettingsView = {
                         days_per_week: parseInt(document.getElementById('s-days').value),
                         academic_year: document.getElementById('s-year').value.trim() || null,
                         institution_type: document.getElementById('s-type').value,
+                        visible_from: document.getElementById('s-visible-from').value || null,
+                        visible_to: document.getElementById('s-visible-to').value || null,
                     });
                     Toast.success('Οι ρυθμίσεις αποθηκεύτηκαν');
                     document.getElementById('school-name').textContent = document.getElementById('s-name').value.trim();

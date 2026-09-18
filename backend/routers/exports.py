@@ -42,7 +42,7 @@ from backend.models import (
     TimetableSlot,
     TimetableSolution,
 )
-from backend.services import greek_holidays
+from backend.services import greek_holidays, operating_hours
 from backend.services.student_filters import StudentFilter
 
 router = APIRouter()
@@ -144,6 +144,19 @@ def _load_all_placed_slots(db: Session, solution_id: int) -> list[TimetableSlot]
         )
         .all()
     )
+
+
+def _teaching_periods(db: Session, solution_id: int) -> list[Period]:
+    """Διδακτικές ώρες για πλέγματα εκτύπωσης/Excel: μέσα στο ωράριο
+    λειτουργίας + όσες έχουν τοποθετημένο μάθημα (ίδιες γραμμές με την οθόνη)."""
+    periods = sorted(_periods_by_id(db).values(), key=lambda p: p.sort_order)
+    teaching = [p for p in periods if not p.is_break]
+    settings = db.query(SchoolSettings).first()
+    if not settings or not (settings.visible_from or settings.visible_to):
+        return teaching
+    used = {s.period_id for s in _load_all_placed_slots(db, solution_id)}
+    return operating_hours.visible_periods(teaching, settings.visible_from,
+                                           settings.visible_to, used)
 
 
 def _days_for_school(db: Session) -> list[int]:
@@ -481,7 +494,7 @@ def export_print(
         title, group_by, detail_kind = _BULK_MODES[all]
         solution = _get_solution_or_404(db, solution_id)
         periods = sorted(_periods_by_id(db).values(), key=lambda p: p.sort_order)
-        teaching_periods = [p for p in periods if not p.is_break]
+        teaching_periods = _teaching_periods(db, solution_id)
         days = _days_for_school(db)
 
         sections_html = []
@@ -514,7 +527,7 @@ def export_print(
 
     solution, slots, label = _load_filtered_slots(db, solution_id, teacher_id, student_id)
     periods = sorted(_periods_by_id(db).values(), key=lambda p: p.sort_order)
-    teaching_periods = [p for p in periods if not p.is_break]
+    teaching_periods = _teaching_periods(db, solution_id)
     days = _days_for_school(db)
     detail_kind = "class" if teacher_id is not None else "teacher"
     table = _grid_table_html(slots, teaching_periods, days, detail_kind, class_label)
@@ -586,7 +599,7 @@ def export_xlsx(
     from openpyxl.styles import Alignment, Font, PatternFill
 
     periods = sorted(_periods_by_id(db).values(), key=lambda p: p.sort_order)
-    teaching_periods = [p for p in periods if not p.is_break]
+    teaching_periods = _teaching_periods(db, solution_id)
     days = _days_for_school(db)
 
     wb = Workbook()

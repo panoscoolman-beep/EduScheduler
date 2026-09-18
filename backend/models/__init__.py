@@ -32,6 +32,10 @@ class SchoolSettings(Base):
     days_per_week = Column(Integer, nullable=False, default=5)
     academic_year = Column(String(20))
     institution_type = Column(String(50), default="frontistirio")  # frontistirio / school
+    # Ωράριο λειτουργίας «HH:MM» — κρύβει ώρες εκτός από πλέγμα/εκτυπώσεις
+    # (ποτέ ώρα με τοποθετημένο μάθημα). Κενό = όλες. Βλ. services/operating_hours.
+    visible_from = Column(String(5), nullable=True)
+    visible_to = Column(String(5), nullable=True)
 
 
 class Term(Base):

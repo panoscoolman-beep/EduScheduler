@@ -1509,3 +1509,9 @@ a:hover { color: var(--accent-blue-hover); }
 .sf-chip:hover { border-color: var(--accent-blue); }
 .sf-chip.is-on { background: rgba(59, 130, 246, 0.18); border-color: var(--accent-blue); }
 .sf-chip small { opacity: 0.65; margin-left: 2px; }
+
+/* Ωράριο λειτουργίας: ώρα εκτός ωραρίου που φαίνεται επειδή έχει μάθημα */
+.period-cell.period-outside {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--accent-amber, #F59E0B);
+}

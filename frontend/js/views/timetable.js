@@ -15,6 +15,12 @@ const TimetableView = {
             // Honour school_settings.days_per_week — until now this was
             // hardcoded to 5, hiding any slots placed on Σάβ/Κυρ.
             const daysCount = settings.days_per_week || 5;
+            // Ωράριο λειτουργίας: κρύβει ώρες εκτός (όχι όσες έχουν μάθημα) και
+            // γίνεται η προεπιλογή του παραθύρου των «Ελεύθερων Αιθουσών».
+            const schoolWindow = (settings.visible_from || settings.visible_to)
+                ? { from: settings.visible_from || '', to: settings.visible_to || '' } : null;
+            TimetableGrid.operatingWindow = schoolWindow;
+            this._schoolWindow = schoolWindow;
 
             if (!solutions.length) {
                 container.innerHTML = `
@@ -612,7 +618,7 @@ const TimetableView = {
             const [from, to] = saved.split('|');
             if (from || to) return { from: from || '', to: to || '' };
         }
-        return { ...this.FREE_ROOMS_DEFAULT_WINDOW };
+        return { ...(this._schoolWindow || this.FREE_ROOMS_DEFAULT_WINDOW) };
     },
 
     /** Επιλογή ωρών από τους selects — αποθήκευση + επανασχεδίαση. */

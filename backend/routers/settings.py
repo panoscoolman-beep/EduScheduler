@@ -31,7 +31,9 @@ def get_settings(db: Session = Depends(get_db)):
 @router.put("/", response_model=SchoolSettingsResponse)
 def update_settings(data: SchoolSettingsBase, db: Session = Depends(get_db)):
     settings = _get_or_create_settings(db)
-    for key, value in data.model_dump().items():
+    # Μόνο ό,τι στάλθηκε: ένας παλιός (cached) client χωρίς τα νέα πεδία δεν
+    # πρέπει να σβήσει π.χ. το ωράριο λειτουργίας.
+    for key, value in data.model_dump(exclude_unset=True).items():
         setattr(settings, key, value)
     db.commit()
     db.refresh(settings)

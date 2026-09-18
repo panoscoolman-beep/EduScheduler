@@ -425,11 +425,23 @@ class FeasibilityReportResponse(BaseModel):
 
 # ─── Settings ───────────────────────────────────────────
 
+_HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
 class SchoolSettingsBase(BaseModel):
     school_name: str = Field("Το Σχολείο μου", min_length=1, max_length=200)
     days_per_week: int = Field(5, ge=1, le=7)
     academic_year: str | None = None
     institution_type: str = Field("frontistirio", pattern=r"^(frontistirio|school)$")
+    # Ωράριο λειτουργίας (μόνο εμφάνιση): «14:00» / «22:00»· κενό = όλες οι ώρες.
+    visible_from: str | None = Field(None, pattern=_HHMM, examples=["14:00"])
+    visible_to: str | None = Field(None, pattern=_HHMM, examples=["22:00"])
+
+    @model_validator(mode="after")
+    def _window_order(self):
+        if self.visible_from and self.visible_to and self.visible_from >= self.visible_to:
+            raise ValueError("Το «από» του ωραρίου πρέπει να είναι πριν από το «έως».")
+        return self
 
 
 class SchoolSettingsResponse(SchoolSettingsBase):

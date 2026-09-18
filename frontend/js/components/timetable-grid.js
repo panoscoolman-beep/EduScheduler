@@ -4,13 +4,24 @@
 const TimetableGrid = {
     DAY_NAMES: ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'],
 
+    // Ωράριο λειτουργίας {from, to} από τις Ρυθμίσεις (το ορίζει το TimetableView).
+    operatingWindow: null,
+
+    /** Διδακτικές ώρες του πλέγματος + ποιες φαίνονται μόνο επειδή έχουν μάθημα. */
+    _teachingPeriods(periods, slots) {
+        const teaching = periods.filter(p => !p.is_break);
+        const res = TimetableHelpers.visiblePeriods(teaching, this.operatingWindow, slots);
+        this._outsidePeriods = res.outside;
+        return res.periods;
+    },
+
     render(containerId, slots, periods, daysCount = 5, viewType = 'class', filterValue = null, solutionId = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
         this._slots = slots;  // keep a reference so edits stay in sync on re-render
         this._solutionId = solutionId;  // needed by the drag placement-map fetch
 
-        const teachingPeriods = periods.filter(p => !p.is_break);
+        const teachingPeriods = this._teachingPeriods(periods, slots);
         const days = this.DAY_NAMES.slice(0, daysCount);
 
         // Build grid lookup: [dayIndex][periodId] -> slot data.
@@ -38,9 +49,11 @@ const TimetableGrid = {
 
         // Build rows
         const rows = teachingPeriods.map(period => {
+            const outside = this._outsidePeriods && this._outsidePeriods.has(period.id);
             const periodCell = `
-                <td class="period-cell">
-                    ${period.short_name}
+                <td class="period-cell${outside ? ' period-outside' : ''}"${outside
+                    ? ' title="Εκτός ωραρίου λειτουργίας — φαίνεται γιατί έχει μάθημα"' : ''}>
+                    ${period.short_name}${outside ? ' ⏰' : ''}
                     <span class="period-time">${period.start_time}-${period.end_time}</span>
                 </td>
             `;
@@ -175,7 +188,7 @@ const TimetableGrid = {
         // HTML parser would otherwise decode on read-back) plus the quote.
         const attrJson = (o) => JSON.stringify(o)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
-        const teachingPeriods = periods.filter(p => !p.is_break);
+        const teachingPeriods = this._teachingPeriods(periods, slots);
         const days = this.DAY_NAMES.slice(0, daysCount);
         const placed = slots.filter(s => !s.is_unplaced);
 
@@ -891,3 +904,7 @@ const TimetableGrid = {
         }
     },
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = TimetableGrid;
+}
