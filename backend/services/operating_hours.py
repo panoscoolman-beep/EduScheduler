@@ -35,6 +35,30 @@ def in_window(start_time, window_from, window_to) -> bool:
     return True
 
 
+SATURDAY = 5
+
+
+def day_window(settings, day: int) -> tuple:
+    """(από, έως) μιας ημέρας: το Σάββατο έχει δικό του ωράριο αν έχει οριστεί."""
+    if day == SATURDAY and (getattr(settings, "saturday_from", None)
+                            or getattr(settings, "saturday_to", None)):
+        return settings.saturday_from, settings.saturday_to
+    return getattr(settings, "visible_from", None), getattr(settings, "visible_to", None)
+
+
+def has_any_window(settings) -> bool:
+    return bool(settings and any(getattr(settings, f, None) for f in
+                                 ("visible_from", "visible_to", "saturday_from", "saturday_to")))
+
+
+def visible_periods_for_days(periods: Iterable, windows: list[tuple],
+                             used_period_ids: set[int] | None = None) -> list:
+    """Γραμμή φαίνεται αν είναι ανοιχτή ΕΣΤΩ μία ημέρα ή αν έχει μάθημα."""
+    used = used_period_ids or set()
+    return [p for p in periods
+            if p.id in used or any(in_window(p.start_time, lo, hi) for lo, hi in windows)]
+
+
 def visible_periods(periods: Iterable, window_from, window_to,
                     used_period_ids: set[int] | None = None) -> list:
     """Οι ώρες μέσα στο ωράριο + όσες έχουν τοποθετημένο μάθημα."""

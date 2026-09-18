@@ -1515,3 +1515,9 @@ a:hover { color: var(--accent-blue-hover); }
     background: rgba(245, 158, 11, 0.12);
     color: var(--accent-amber, #F59E0B);
 }
+
+/* Κλειστό κελί (εκτός ωραρίου της ημέρας): δεν δέχεται κάρτες */
+td.closed-cell {
+    background: repeating-linear-gradient(135deg, rgba(148,163,184,0.06) 0 6px, transparent 6px 12px);
+    cursor: not-allowed;
+}

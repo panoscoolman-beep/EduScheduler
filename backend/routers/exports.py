@@ -152,11 +152,11 @@ def _teaching_periods(db: Session, solution_id: int) -> list[Period]:
     periods = sorted(_periods_by_id(db).values(), key=lambda p: p.sort_order)
     teaching = [p for p in periods if not p.is_break]
     settings = db.query(SchoolSettings).first()
-    if not settings or not (settings.visible_from or settings.visible_to):
+    if not operating_hours.has_any_window(settings):
         return teaching
     used = {s.period_id for s in _load_all_placed_slots(db, solution_id)}
-    return operating_hours.visible_periods(teaching, settings.visible_from,
-                                           settings.visible_to, used)
+    windows = [operating_hours.day_window(settings, d) for d in _days_for_school(db)]
+    return operating_hours.visible_periods_for_days(teaching, windows, used)
 
 
 def _days_for_school(db: Session) -> list[int]:

@@ -250,23 +250,36 @@ const TimetableHelpers = {
      * Ώρα με ΤΟΠΟΘΕΤΗΜΕΝΟ μάθημα δεν κρύβεται ποτέ — επιστρέφεται στο
      * `outside` για σήμανση. Ίδιος κανόνας με backend/services/operating_hours.py.
      */
-    visiblePeriods(periods, window, slots) {
-        const w = window || {};
-        const lo = TimetableHelpers.timeToMinutes(w.from);
-        const hi = TimetableHelpers.timeToMinutes(w.to);
+    visiblePeriods(periods, window, slots, daysCount = 7) {
         const used = new Set((slots || [])
             .filter(s => !s.is_unplaced && s.period_id != null)
             .map(s => s.period_id));
+        const days = [...Array(Math.max(1, daysCount)).keys()];
         const outside = new Set();
         const visible = (periods || []).filter(p => {
-            const start = TimetableHelpers.timeToMinutes(p.start_time);
-            const inside = start == null
-                || ((lo == null || start >= lo) && (hi == null || start < hi));
+            // Γραμμή ανοιχτή αν είναι ανοιχτή ΕΣΤΩ μία ημέρα (π.χ. πρωί Σαββάτου).
+            const inside = days.some(d => TimetableHelpers.isCellOpen(p, d, window));
             if (inside) return true;
             if (used.has(p.id)) { outside.add(p.id); return true; }
             return false;
         });
         return { periods: visible, outside };
+    },
+
+    /** Ωράριο μιας ημέρας: το Σάββατο (5) έχει δικό του αν έχει οριστεί. */
+    dayWindow(window, dayIdx) {
+        const w = window || {};
+        const sat = w.saturday || {};
+        return (dayIdx === 5 && (sat.from || sat.to)) ? sat : w;
+    },
+
+    /** Είναι ανοιχτό το κελί (ώρα × ημέρα) με βάση το ωράριο λειτουργίας; */
+    isCellOpen(period, dayIdx, window) {
+        const w = TimetableHelpers.dayWindow(window, dayIdx);
+        const start = TimetableHelpers.timeToMinutes(period.start_time);
+        const lo = TimetableHelpers.timeToMinutes(w.from);
+        const hi = TimetableHelpers.timeToMinutes(w.to);
+        return start == null || ((lo == null || start >= lo) && (hi == null || start < hi));
     },
 
     /**

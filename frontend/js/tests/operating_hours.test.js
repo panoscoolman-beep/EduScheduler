@@ -98,3 +98,32 @@ test('προβολή αίθουσας: το drop στέλνει ρητά αυτ�
     Grid.render('grid', slots, PERIODS, 6, 'class', 'all', 1);
     assert.ok([...document.querySelectorAll('td.droppable-cell')].every(td => td.dataset.room === undefined));
 });
+
+test('Σάββατο με δικό του ωράριο: πρωινά κελιά καθημερινών «κλειστά», του Σαββάτου ανοιχτά', () => {
+    const dom = new JSDOM('<!DOCTYPE html><body><div id="grid"></div></body>');
+    global.window = dom.window;
+    global.document = dom.window.document;
+    global.TimetableHelpers = H;
+    const Grid = require('../components/timetable-grid.js');
+    const win = { from: '14:00', to: '22:00', saturday: { from: '08:00', to: '22:00' } };
+    assert.equal(H.isCellOpen(PERIODS[0], 0, win), false);     // Δευτέρα 08:00
+    assert.equal(H.isCellOpen(PERIODS[0], 5, win), true);      // Σάββατο 08:00
+    assert.equal(H.isCellOpen(PERIODS[3], 2, win), true);      // Τετάρτη 14:00
+
+    Grid.operatingWindow = win;
+    const satSlot = { ...SLOT, id: 5, day_of_week: 5, period_id: 2 };
+    Grid.render('grid', [satSlot], PERIODS, 6, 'class', 'all', 1);
+    const rows = [...document.querySelectorAll('tbody tr, table tr')].filter(tr => tr.querySelector('td.period-cell'));
+    assert.equal(rows.length, 4);                               // όλες οι ώρες (το Σάββατο τις ανοίγει)
+    const firstRow = rows[0];                                   // 1η ώρα 08:00
+    assert.equal(firstRow.querySelectorAll('td.closed-cell').length, 5);        // Δευ–Παρ κλειστά
+    assert.equal(firstRow.querySelectorAll('td.droppable-cell').length, 1);     // Σάββατο ανοιχτό
+    assert.equal(document.querySelectorAll('.period-outside').length, 0);       // κανένα ⏰
+    assert.equal(document.querySelectorAll('td.closed-cell .lesson-card').length, 0);
+
+    // Μάθημα σε «κλειστό» κελί καθημερινής: το κελί μένει κανονικό (δεν χάνεται)
+    const weekdayMorning = { ...SLOT, id: 9, day_of_week: 1, period_id: 1 };
+    Grid.render('grid', [satSlot, weekdayMorning], PERIODS, 6, 'class', 'all', 1);
+    const cell = document.querySelector('td.droppable-cell[data-day="1"][data-period="1"]');
+    assert.ok(cell && cell.querySelector('[data-slot-id="9"]'));
+});

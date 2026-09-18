@@ -8,9 +8,9 @@ const TimetableGrid = {
     operatingWindow: null,
 
     /** Διδακτικές ώρες του πλέγματος + ποιες φαίνονται μόνο επειδή έχουν μάθημα. */
-    _teachingPeriods(periods, slots) {
+    _teachingPeriods(periods, slots, daysCount = 7) {
         const teaching = periods.filter(p => !p.is_break);
-        const res = TimetableHelpers.visiblePeriods(teaching, this.operatingWindow, slots);
+        const res = TimetableHelpers.visiblePeriods(teaching, this.operatingWindow, slots, daysCount);
         this._outsidePeriods = res.outside;
         return res.periods;
     },
@@ -21,7 +21,7 @@ const TimetableGrid = {
         this._slots = slots;  // keep a reference so edits stay in sync on re-render
         this._solutionId = solutionId;  // needed by the drag placement-map fetch
 
-        const teachingPeriods = this._teachingPeriods(periods, slots);
+        const teachingPeriods = this._teachingPeriods(periods, slots, daysCount);
         const days = this.DAY_NAMES.slice(0, daysCount);
 
         // Build grid lookup: [dayIndex][periodId] -> slot data.
@@ -127,6 +127,11 @@ const TimetableGrid = {
                     `;
                 }).join('');
 
+                // Κλειστό κελί (εκτός ωραρίου ημέρας) χωρίς μάθημα: γκρι, δεν δέχεται
+                // κάρτες. Με μάθημα μένει κανονικό — ποτέ δεν «κρύβεται» μάθημα.
+                if (!slotsHere.length && !TimetableHelpers.isCellOpen(period, dayIdx, this.operatingWindow)) {
+                    return `<td class="closed-cell" title="Εκτός ωραρίου λειτουργίας"></td>`;
+                }
                 return `<td class="droppable-cell" 
                             data-day="${dayIdx}" 
                             data-period="${period.id}"${roomAttr}
@@ -192,7 +197,7 @@ const TimetableGrid = {
         // HTML parser would otherwise decode on read-back) plus the quote.
         const attrJson = (o) => JSON.stringify(o)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
-        const teachingPeriods = this._teachingPeriods(periods, slots);
+        const teachingPeriods = this._teachingPeriods(periods, slots, daysCount);
         const days = this.DAY_NAMES.slice(0, daysCount);
         const placed = slots.filter(s => !s.is_unplaced);
 
@@ -273,6 +278,9 @@ const TimetableGrid = {
                                     <span class="l2">${esc(line2)}</span>
                                 </div>`;
                     }).join('');
+                    if (!cards && !TimetableHelpers.isCellOpen(p, dayIdx, this.operatingWindow)) {
+                        return `<td class="ov-cell closed-cell${pi === 0 ? ' ov-day-start' : ''}" title="Εκτός ωραρίου λειτουργίας"></td>`;
+                    }
                     return `<td class="ov-cell droppable-cell${pi === 0 ? ' ov-day-start' : ''}"
                                 data-day="${dayIdx}" data-period="${p.id}" data-entity="${entity}"
                                 ondragover="TimetableGrid.handleDragOver(event)"

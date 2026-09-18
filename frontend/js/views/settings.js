@@ -39,10 +39,20 @@ const SettingsView = {
                             <input class="form-input" id="s-visible-to" type="time"
                                    value="${settings.visible_to || ''}" style="max-width:140px">
                         </div>
+                        <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem;">
+                            <span style="min-width:70px">Σάββατο:</span>
+                            <input class="form-input" id="s-sat-from" type="time"
+                                   value="${settings.saturday_from || ''}" style="max-width:140px">
+                            <span>έως</span>
+                            <input class="form-input" id="s-sat-to" type="time"
+                                   value="${settings.saturday_to || ''}" style="max-width:140px">
+                        </div>
                         <p class="text-muted" style="font-size:0.8rem; margin-top:0.35rem;">
                             Κρύβει από το πρόγραμμα και τις εκτυπώσεις τις ώρες εκτός ωραρίου
-                            (π.χ. 14:00–22:00). Ώρα που έχει ήδη μάθημα <b>δεν κρύβεται ποτέ</b> —
-                            φαίνεται με ⏰. Κενό = όλες οι ώρες. Ο solver δεν επηρεάζεται.
+                            (π.χ. 14:00–22:00) και δείχνει «κλειστά» τα κελιά εκτός ωραρίου της κάθε
+                            μέρας. Το Σάββατο μπορεί να έχει δικό του ωράριο (π.χ. 08:00–22:00· κενό =
+                            ίδιο με τις καθημερινές). Ώρα που έχει ήδη μάθημα <b>δεν κρύβεται ποτέ</b>.
+                            Κενό = όλες οι ώρες. Ο solver δεν επηρεάζεται.
                         </p>
                     </div>
                     <div class="form-group">
@@ -81,6 +91,8 @@ const SettingsView = {
                         institution_type: document.getElementById('s-type').value,
                         visible_from: document.getElementById('s-visible-from').value || null,
                         visible_to: document.getElementById('s-visible-to').value || null,
+                        saturday_from: document.getElementById('s-sat-from').value || null,
+                        saturday_to: document.getElementById('s-sat-to').value || null,
                     });
                     Toast.success('Οι ρυθμίσεις αποθηκεύτηκαν');
                     document.getElementById('school-name').textContent = document.getElementById('s-name').value.trim();

@@ -436,11 +436,16 @@ class SchoolSettingsBase(BaseModel):
     # Ωράριο λειτουργίας (μόνο εμφάνιση): «14:00» / «22:00»· κενό = όλες οι ώρες.
     visible_from: str | None = Field(None, pattern=_HHMM, examples=["14:00"])
     visible_to: str | None = Field(None, pattern=_HHMM, examples=["22:00"])
+    # Σάββατο: δικό του ωράριο (κενό = ίδιο με τις καθημερινές).
+    saturday_from: str | None = Field(None, pattern=_HHMM, examples=["08:00"])
+    saturday_to: str | None = Field(None, pattern=_HHMM, examples=["22:00"])
 
     @model_validator(mode="after")
     def _window_order(self):
-        if self.visible_from and self.visible_to and self.visible_from >= self.visible_to:
-            raise ValueError("Το «από» του ωραρίου πρέπει να είναι πριν από το «έως».")
+        for lo, hi, label in ((self.visible_from, self.visible_to, "του ωραρίου"),
+                              (self.saturday_from, self.saturday_to, "του Σαββάτου")):
+            if lo and hi and lo >= hi:
+                raise ValueError(f"Το «από» {label} πρέπει να είναι πριν από το «έως».")
         return self
 
 

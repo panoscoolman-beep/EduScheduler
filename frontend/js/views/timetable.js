@@ -17,8 +17,12 @@ const TimetableView = {
             const daysCount = settings.days_per_week || 5;
             // Ωράριο λειτουργίας: κρύβει ώρες εκτός (όχι όσες έχουν μάθημα) και
             // γίνεται η προεπιλογή του παραθύρου των «Ελεύθερων Αιθουσών».
-            const schoolWindow = (settings.visible_from || settings.visible_to)
-                ? { from: settings.visible_from || '', to: settings.visible_to || '' } : null;
+            const hasWindow = settings.visible_from || settings.visible_to
+                || settings.saturday_from || settings.saturday_to;
+            const schoolWindow = hasWindow ? {
+                from: settings.visible_from || '', to: settings.visible_to || '',
+                saturday: { from: settings.saturday_from || '', to: settings.saturday_to || '' },
+            } : null;
             TimetableGrid.operatingWindow = schoolWindow;
             this._schoolWindow = schoolWindow;
 

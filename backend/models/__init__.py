@@ -36,6 +36,9 @@ class SchoolSettings(Base):
     # (ποτέ ώρα με τοποθετημένο μάθημα). Κενό = όλες. Βλ. services/operating_hours.
     visible_from = Column(String(5), nullable=True)
     visible_to = Column(String(5), nullable=True)
+    # Ξεχωριστό ωράριο Σαββάτου (π.χ. και πρωί)· κενό = ίδιο με τις καθημερινές.
+    saturday_from = Column(String(5), nullable=True)
+    saturday_to = Column(String(5), nullable=True)
 
 
 class Term(Base):

@@ -112,3 +112,30 @@ def test_print_hides_empty_morning_hours_but_keeps_ones_with_lessons(client):
     assert "08:00–09:00" not in after                           # άδεια πρωινή ώρα → κρυφή
     assert "09:00–10:00" in after                               # έχει μάθημα → φαίνεται
     assert "14:00–15:00" in after
+
+
+def test_saturday_window_overrides_weekdays():
+    from backend.services.operating_hours import day_window, has_any_window, visible_periods_for_days
+    st = NS(visible_from="14:00", visible_to="22:00", saturday_from="08:00", saturday_to="22:00")
+    assert day_window(st, 0) == ("14:00", "22:00")
+    assert day_window(st, 5) == ("08:00", "22:00")
+    assert day_window(NS(visible_from="14:00", visible_to="22:00",
+                         saturday_from=None, saturday_to=None), 5) == ("14:00", "22:00")
+    assert has_any_window(st) and not has_any_window(NS(visible_from=None, visible_to=None,
+                                                        saturday_from=None, saturday_to=None))
+    p = [NS(id=1, start_time="08:00"), NS(id=7, start_time="14:00")]
+    windows = [day_window(st, d) for d in range(6)]
+    assert [x.id for x in visible_periods_for_days(p, windows)] == [1, 7]   # πρωί Σαββάτου ανοιχτό
+    assert [x.id for x in visible_periods_for_days(p, windows[:5])] == [7]  # 5ήμερο: μόνο απόγευμα
+
+
+def test_saturday_settings_validation(client):
+    ok = _put(client, visible_from="14:00", visible_to="22:00", saturday_from="08:00", saturday_to="22:00")
+    assert ok.status_code == 200 and ok.json()["saturday_from"] == "08:00"
+    assert _put(client, saturday_from="15:00", saturday_to="09:00").status_code == 422
+
+
+def test_print_keeps_morning_rows_when_saturday_opens_them(client):
+    _put(client, visible_from="14:00", visible_to="22:00", saturday_from="08:00", saturday_to="22:00")
+    body = client.get(f"/api/exports/print?solution_id={client.sol.id}&teacher_id={client.teacher.id}").text
+    assert "08:00–09:00" in body and "09:00–10:00" in body      # ανοιχτές το Σάββατο (6ήμερο)
