@@ -269,6 +269,16 @@ const TimetableHelpers = {
         return { periods: visible, outside };
     },
 
+    /**
+     * Προβολή μίας αίθουσας: το id της, ώστε το drop σε κελί να σημαίνει «ΑΥΤΗ
+     * η αίθουσα» (ρητή επιλογή). Αλλιώς null → ο server κρατά/διαλέγει αίθουσα.
+     */
+    roomIdForFilter(slots, viewType, filterValue) {
+        if (viewType !== 'room' || !filterValue || filterValue === 'all') return null;
+        const hit = (slots || []).find(s => s.classroom_name === filterValue && s.classroom_id != null);
+        return hit ? hit.classroom_id : null;
+    },
+
     timeToMinutes(hhmm) {
         const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm ?? '').trim());
         if (!m) return null;

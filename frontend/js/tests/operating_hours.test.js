@@ -49,3 +49,52 @@ test('TimetableGrid.render: γραμμές μόνο εντός ωραρίου + 
     assert.equal(document.querySelectorAll('td.period-cell').length, 4);
     assert.equal(document.querySelectorAll('.period-outside').length, 0);
 });
+
+test('roomIdForFilter: μόνο στην προβολή μίας αίθουσας', () => {
+    const slots = [{ classroom_id: 3, classroom_name: 'Αίθ 3' }, { classroom_id: 4, classroom_name: 'Αίθ 4' }];
+    assert.equal(H.roomIdForFilter(slots, 'room', 'Αίθ 4'), 4);
+    assert.equal(H.roomIdForFilter(slots, 'room', 'all'), null);
+    assert.equal(H.roomIdForFilter(slots, 'teacher', 'Αίθ 4'), null);
+    assert.equal(H.roomIdForFilter(slots, 'room', 'Άγνωστη'), null);
+});
+
+test('προβολή αίθουσας: το drop στέλνει ρητά αυτή την αίθουσα', async () => {
+    const dom = new JSDOM('<!DOCTYPE html><body><div id="grid"></div></body>');
+    global.window = dom.window;
+    global.document = dom.window.document;
+    global.TimetableHelpers = H;
+    const sent = [];
+    const toasts = [];
+    global.API = { solver: { updateSlot: async (sid, slotId, body) => {
+        sent.push(body);
+        return { slot: { classroom_id: 4, classroom_name: 'Αίθ 4' } };
+    } } };
+    global.Toast = { success: (m) => toasts.push(m), error: (m) => toasts.push('ERR ' + m) };
+    const Grid = require('../components/timetable-grid.js');
+    Grid.operatingWindow = null;
+    Grid._notifyHistoryChanged = () => {};
+    Grid._notifyParkingLotChanged = () => {};
+    const slots = [
+        { ...SLOT, id: 5, classroom_id: 4, classroom_name: 'Αίθ 4', period_id: 7, day_of_week: 0 },
+        { ...SLOT, id: 6, classroom_id: 3, classroom_name: 'Αίθ 3', period_id: 7, day_of_week: 1 },
+    ];
+    Grid.render('grid', slots, PERIODS, 6, 'room', 'Αίθ 4', 1);
+    const cells = document.querySelectorAll('td.droppable-cell');
+    assert.ok([...cells].every(td => td.dataset.room === '4'));
+
+    // Κάρτα της Αίθ 3 (από άλλο σημείο) αφήνεται σε κελί της προβολής «Αίθ 4».
+    const card = document.createElement('div');
+    card.className = 'lesson-card';
+    card.dataset.slotId = '6';
+    card.dataset.json = JSON.stringify(slots[1]);
+    document.body.appendChild(card);
+    const target = [...cells].find(td => td.dataset.day === '2' && td.dataset.period === '7');
+    await Grid.handleDrop({ preventDefault() {}, target,
+        dataTransfer: { getData: () => '6' } }, 1);
+    assert.deepEqual(sent, [{ day_of_week: 2, period_id: 7, classroom_id: 4 }]);
+    assert.match(toasts[0], /μπήκε στην αίθουσα «Αίθ 4»/);
+
+    // Χωρίς φίλτρο αίθουσας: ΚΑΝΕΝΑ classroom_id (ο server διαλέγει όπως πριν).
+    Grid.render('grid', slots, PERIODS, 6, 'class', 'all', 1);
+    assert.ok([...document.querySelectorAll('td.droppable-cell')].every(td => td.dataset.room === undefined));
+});

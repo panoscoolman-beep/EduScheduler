@@ -48,6 +48,10 @@ const TimetableGrid = {
         const dayHeaders = days.map(d => `<th>${d}</th>`).join('');
 
         // Build rows
+        // Προβολή μίας αίθουσας → κάθε κελί «ξέρει» την αίθουσα (ρητή επιλογή στο drop).
+        const roomId = TimetableHelpers.roomIdForFilter(slots, viewType, filterValue);
+        const roomAttr = roomId != null ? ` data-room="${roomId}"` : '';
+
         const rows = teachingPeriods.map(period => {
             const outside = this._outsidePeriods && this._outsidePeriods.has(period.id);
             const periodCell = `
@@ -125,7 +129,7 @@ const TimetableGrid = {
 
                 return `<td class="droppable-cell" 
                             data-day="${dayIdx}" 
-                            data-period="${period.id}"
+                            data-period="${period.id}"${roomAttr}
                             ondragover="TimetableGrid.handleDragOver(event)"
                             ondragenter="TimetableGrid.handleDragEnter(event)"
                             ondragleave="TimetableGrid.handleDragLeave(event)"
@@ -605,6 +609,8 @@ const TimetableGrid = {
 
         const newDay = parseInt(target.dataset.day);
         const newPeriod = parseInt(target.dataset.period);
+        // Στην προβολή αίθουσας το κελί ορίζει ΡΗΤΑ την αίθουσα.
+        const targetRoom = target.dataset.room ? parseInt(target.dataset.room) : null;
 
         const sourceCard = document.querySelector(
             `.lesson-card[data-slot-id="${slotId}"]`
@@ -673,15 +679,14 @@ const TimetableGrid = {
 
         // 2) API call
         try {
-            const res = await API.solver.updateSlot(solutionId, slotId, {
-                day_of_week: newDay,
-                period_id: newPeriod,
-            });
+            const payload = { day_of_week: newDay, period_id: newPeriod };
+            if (targetRoom != null) payload.classroom_id = targetRoom;
+            const res = await API.solver.updateSlot(solutionId, slotId, payload);
             // Ο server μπορεί να άλλαξε αίθουσα (auto-reassign όταν η
             // τρέχουσα είναι κατειλημμένη στη νέα ώρα) — πέρνα id + όνομα
             // στην κάρτα ώστε να μη δείχνει την παλιά αίθουσα.
             const newRoom = (res && res.slot) ? res.slot : null;
-            const roomChanged = !!newRoom && prevRoomId != null
+            const roomChanged = targetRoom == null && !!newRoom && prevRoomId != null
                 && newRoom.classroom_id !== prevRoomId;
             if (newRoom && newRoom.classroom_id != null) {
                 slotData.classroom_id = newRoom.classroom_id;
@@ -708,7 +713,9 @@ const TimetableGrid = {
             });
             Toast.success(roomChanged
                 ? `Μετακινήθηκε — άλλαξε αίθουσα σε «${slotData.classroom_name}» (η προηγούμενη ήταν κατειλημμένη)`
-                : 'Η κάρτα μετακινήθηκε επιτυχώς!');
+                : (targetRoom != null && slotData.classroom_name
+                    ? `Η κάρτα μπήκε στην αίθουσα «${slotData.classroom_name}»`
+                    : 'Η κάρτα μετακινήθηκε επιτυχώς!'));
             if (wasParkingCard) {
                 this._notifyParkingLotChanged();
             }
