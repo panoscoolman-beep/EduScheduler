@@ -185,3 +185,92 @@ def _drop_undone_tail(db: Session, solution_id: int) -> None:
         TimetableSlotHistory.undone == True,  # noqa: E712
         TimetableSlotHistory.id > last_active_id,
     ).delete(synchronize_session=False)
+
+
+# ─── 🕘 λίστα ιστορικού + «αναίρεση μέχρι εδώ» ──────────────────────────
+
+_DAY_SHORT = ["Δευ", "Τρι", "Τετ", "Πεμ", "Παρ", "Σαβ", "Κυρ"]
+_OPERATION_LABELS = {
+    "move": "Μετακίνηση", "lock": "Κλείδωμα", "unlock": "Ξεκλείδωμα",
+    "place": "Τοποθέτηση", "unplace": "Στην Παλέτα",
+}
+
+
+def _position(day, period_id, room_id, unplaced, periods: dict, rooms: dict) -> str:
+    """«Δευ 3η · Αίθ 2» ή «Παλέτα»."""
+    if unplaced or day is None or period_id is None:
+        return "Παλέτα"
+    period = periods.get(period_id)
+    label = f"{_DAY_SHORT[day] if 0 <= day < 7 else day} {period.short_name if period else ''}".strip()
+    return f"{label} · {rooms[room_id]}" if room_id in rooms else label
+
+
+def history_entries(db: Session, solution_id: int, limit: int = 20) -> dict:
+    """Οι τελευταίες αλλαγές (νεότερες πρώτα) με ανθρώπινη περιγραφή."""
+    from backend.models import Classroom, Lesson, Period
+
+    rows = (
+        db.query(TimetableSlotHistory)
+        .filter(TimetableSlotHistory.solution_id == solution_id)
+        .order_by(TimetableSlotHistory.id.desc())
+        .limit(max(1, min(int(limit), 100)))
+        .all()
+    )
+    periods = {p.id: p for p in db.query(Period).all()}
+    rooms = {r.id: r.name for r in db.query(Classroom).all()}
+    slot_ids = {r.slot_id for r in rows}
+    lessons = {}
+    if slot_ids:
+        for slot in db.query(TimetableSlot).filter(TimetableSlot.id.in_(slot_ids)).all():
+            lesson = db.query(Lesson).filter(Lesson.id == slot.lesson_id).first()
+            if lesson:
+                parts = [lesson.subject.name if lesson.subject else "",
+                         lesson.school_class.name if lesson.school_class else "",
+                         lesson.teacher.name if lesson.teacher else ""]
+                lessons[slot.id] = " · ".join(p for p in parts if p)
+    items = []
+    for r in rows:
+        items.append({
+            "id": r.id,
+            "performed_at": r.performed_at.isoformat() if r.performed_at else None,
+            "operation": r.operation,
+            "operation_label": _OPERATION_LABELS.get(r.operation, r.operation),
+            "undone": bool(r.undone),
+            "lesson": lessons.get(r.slot_id, ""),
+            "from": _position(r.prev_day_of_week, r.prev_period_id, r.prev_classroom_id,
+                              r.prev_is_unplaced, periods, rooms),
+            "to": _position(r.new_day_of_week, r.new_period_id, r.new_classroom_id,
+                            r.new_is_unplaced, periods, rooms),
+        })
+    return {"items": items, "summary": history_summary(db, solution_id)}
+
+
+def undo_to(db: Session, solution_id: int, entry_id: int) -> int:
+    """Αναίρεση της αλλαγής `entry_id` ΚΑΙ όλων των νεότερων, με τη σωστή σειρά.
+
+    Δεν κάνει commit (all-or-nothing στον caller). ValueError αν η αλλαγή δεν
+    ανήκει στο πρόγραμμα ή έχει ήδη αναιρεθεί. Αναστρέψιμο με redo()."""
+    target = (
+        db.query(TimetableSlotHistory)
+        .filter(TimetableSlotHistory.id == entry_id,
+                TimetableSlotHistory.solution_id == solution_id)
+        .first()
+    )
+    if target is None:
+        raise ValueError("Η αλλαγή δεν βρέθηκε σε αυτό το πρόγραμμα.")
+    if target.undone:
+        raise ValueError("Η αλλαγή έχει ήδη αναιρεθεί.")
+    count = 0
+    while True:
+        latest = (
+            db.query(TimetableSlotHistory)
+            .filter(TimetableSlotHistory.solution_id == solution_id,
+                    TimetableSlotHistory.undone == False)  # noqa: E712
+            .order_by(TimetableSlotHistory.id.desc())
+            .first()
+        )
+        if latest is None or latest.id < entry_id:
+            return count
+        if undo(db, solution_id) is None:
+            raise ValueError("Μια αλλαγή δεν μπορεί να αναιρεθεί (η ώρα δεν υπάρχει πια).")
+        count += 1

@@ -292,6 +292,36 @@ const TimetableHelpers = {
         return hit ? hit.classroom_id : null;
     },
 
+    /**
+     * 🕘 Λίστα ιστορικού (νεότερες πρώτα). Σε κάθε ΕΝΕΡΓΗ αλλαγή κουμπί
+     * «↩️ μέχρι εδώ (N)» — N = πόσες αλλαγές θα αναιρεθούν (αυτή + οι νεότερες).
+     */
+    buildHistoryHtml(history) {
+        const esc = TimetableHelpers.esc;
+        const items = (history && history.items) || [];
+        if (!items.length) return '<p class="text-muted">Δεν υπάρχουν χειροκίνητες αλλαγές σε αυτό το πρόγραμμα.</p>';
+        let active = 0;
+        const rows = items.map(it => {
+            const time = (it.performed_at || '').replace('T', ' ').slice(5, 16);
+            const icon = { move: '🔀', lock: '🔒', unlock: '🔓', place: '📥', unplace: '🅿️' }[it.operation] || '•';
+            let action = '<span class="text-muted">(αναιρέθηκε)</span>';
+            if (!it.undone) {
+                active += 1;
+                action = `<button class="btn btn-secondary btn-sm hist-undo-to" data-id="${it.id}">
+                              ↩️ μέχρι εδώ (${active})</button>`;
+            }
+            return `<tr class="${it.undone ? 'hist-undone' : ''}">
+                        <td><small>${esc(time)}</small></td>
+                        <td>${icon} ${esc(it.operation_label)}<br><small>${esc(it.lesson)}</small></td>
+                        <td><small>${esc(it.from)} → ${esc(it.to)}</small></td>
+                        <td>${action}</td>
+                    </tr>`;
+        }).join('');
+        return `<p class="text-muted" style="font-size:0.85rem">Νεότερες πρώτα. Η «αναίρεση μέχρι εδώ»
+                    αναιρεί αυτή και όλες τις νεότερες — και ξαναγίνονται με «↪ Επανάληψη».</p>
+                <div style="max-height:400px; overflow:auto"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
+    },
+
     /** «📋 Έλεγχος δεδομένων» της σελίδας Δημιουργίας — pure HTML. */
     buildReadinessHtml(report) {
         const esc = TimetableHelpers.esc;

@@ -73,7 +73,8 @@ const TimetableView = {
                         <h2 class="card-title">📋 ${solution.name}</h2>
                         <div>
                             <button class="btn btn-secondary" id="tt-undo" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" style="margin-right:0.25rem" disabled>↩ Αναίρεση</button>
-                            <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.5rem" disabled>↪ Επανάληψη</button>
+                            <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.25rem" disabled>↪ Επανάληψη</button>
+                            <button class="btn btn-secondary" id="tt-history" title="Οι τελευταίες αλλαγές — αναίρεση μέχρι κάποιο σημείο" style="margin-right:0.5rem">🕘 Ιστορικό</button>
                             <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.5rem">👤 Αντικατάσταση</button>
                             <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
@@ -417,6 +418,8 @@ const TimetableView = {
             this._refreshHistoryButtons = refreshHistoryButtons;
 
             undoBtn.addEventListener('click', () => performUndoRedo('undo'));
+            document.getElementById('tt-history').addEventListener('click', () =>
+                this._openHistory(solutionId, container));
             redoBtn.addEventListener('click', () => performUndoRedo('redo'));
             this._historyKeyHandler = (e) => {
                 if (!(e.ctrlKey || e.metaKey)) return;
@@ -576,6 +579,33 @@ const TimetableView = {
         } catch (err) {
             Toast.error('Δεν έγινε: ' + this._esc(err.message));
         }
+    },
+
+    /** 🕘 Ιστορικό αλλαγών με «αναίρεση μέχρι εδώ». */
+    async _openHistory(solutionId, container) {
+        Modal.open('🕘 Ιστορικό αλλαγών',
+            '<div class="loading-spinner"><div class="spinner"></div></div>',
+            null, { hideFooter: true, wide: true });
+        let history;
+        try {
+            history = await API.solver.history(solutionId);
+        } catch (err) {
+            Toast.error(err.message);
+            return;
+        }
+        const body = document.getElementById('modal-body');
+        if (!body) return;
+        body.innerHTML = TimetableHelpers.buildHistoryHtml(history);
+        body.querySelectorAll('.hist-undo-to').forEach(btn => btn.addEventListener('click', async () => {
+            try {
+                const res = await API.solver.undoTo(solutionId, Number(btn.dataset.id));
+                Toast.success(res.message);
+                Modal.close();
+                await this.render(container);
+            } catch (err) {
+                Toast.error(err.message);
+            }
+        }));
     },
 
     _openRenameSolution(solutionId) {

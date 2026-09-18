@@ -863,6 +863,42 @@ def redo_last_undo(solution_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/solutions/{solution_id}/history")
+def get_history(solution_id: int, limit: int = 20, db: Session = Depends(get_db)):
+    """🕘 Οι τελευταίες χειροκίνητες αλλαγές (νεότερες πρώτα), με περιγραφή."""
+    _get_solution_or_404_local(db, solution_id)
+    return slot_history_svc.history_entries(db, solution_id, limit)
+
+
+@router.post("/solutions/{solution_id}/history/undo-to/{entry_id}")
+def undo_to_entry(solution_id: int, entry_id: int, db: Session = Depends(get_db)):
+    """Αναίρεση μιας αλλαγής ΚΑΙ όλων των νεότερων — όλες ή καμία.
+    Αναστρέψιμο με «↪ Επανάληψη»."""
+    _get_solution_or_404_local(db, solution_id)
+    try:
+        count = slot_history_svc.undo_to(db, solution_id, entry_id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409,
+                            detail="Η αναίρεση δεν μπορεί να γίνει — κάτι άλλαξε στο μεταξύ. Τίποτα δεν πειράχτηκε.")
+    return {
+        "status": "ok", "undone": count,
+        "message": f"Αναιρέθηκαν {count} αλλαγές — ξαναγίνονται με «↪ Επανάληψη».",
+        "history": slot_history_svc.history_summary(db, solution_id),
+    }
+
+
+def _get_solution_or_404_local(db: Session, solution_id: int) -> TimetableSolution:
+    solution = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    if not solution:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    return solution
+
+
 @router.get("/solutions/{solution_id}/history-summary")
 def get_history_summary(solution_id: int, db: Session = Depends(get_db)):
     """Return how many undo / redo steps are currently available."""

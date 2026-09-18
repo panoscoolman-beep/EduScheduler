@@ -142,3 +142,21 @@ test('buildReadinessHtml: έτοιμο / προειδοποιήσεις με ο�
     assert.match(H.buildReadinessHtml({ ok: true, checks: [
         { key: 'x', level: 'info', title: 'Τ', hint: 'h', count: 1, names: [] }] }), /μπορείς να προχωρήσεις/);
 });
+
+test('buildHistoryHtml: κουμπί «μέχρι εδώ (N)» μόνο στις ενεργές, με σωστό N', () => {
+    const html = H.buildHistoryHtml({ items: [
+        { id: 3, operation: 'move', operation_label: 'Μετακίνηση', undone: true, lesson: 'Α',
+          from: 'Δευ 1η', to: 'Τρι 1η', performed_at: '2026-09-18T10:05:00' },
+        { id: 2, operation: 'lock', operation_label: 'Κλείδωμα', undone: false, lesson: 'Β <x>',
+          from: 'Τρι 1η', to: 'Τρι 1η', performed_at: '2026-09-18T10:04:00' },
+        { id: 1, operation: 'unplace', operation_label: 'Στην Παλέτα', undone: false, lesson: 'Γ',
+          from: 'Τετ 2η', to: 'Παλέτα', performed_at: '2026-09-18T10:03:00' },
+    ] });
+    assert.match(html, /\(αναιρέθηκε\)/);
+    assert.match(html, /data-id="2">\s*↩️ μέχρι εδώ \(1\)/);
+    assert.match(html, /data-id="1">\s*↩️ μέχρι εδώ \(2\)/);
+    assert.doesNotMatch(html, /data-id="3"/);
+    assert.match(html, /🅿️ Στην Παλέτα/);
+    assert.match(html, /Β &lt;x&gt;/);
+    assert.match(H.buildHistoryHtml({ items: [] }), /Δεν υπάρχουν χειροκίνητες αλλαγές/);
+});
