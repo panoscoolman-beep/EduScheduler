@@ -417,6 +417,14 @@ class SolverRequest(BaseModel):
             "permissive: place what fits, drop the rest in the parking lot."
         ),
     )
+    lock_all_placed: bool = Field(
+        False,
+        description=(
+            "Μόνο στο /regenerate: «🧩 Γέμισε τα κενά» — ΟΛΕΣ οι τοποθετημένες "
+            "ώρες μένουν σταθερές (όχι μόνο οι 🔒) και ο solver τοποθετεί μόνο τις "
+            "ώρες της Παλέτας, σε permissive mode, σε ΝΕΟ πρόγραμμα."
+        ),
+    )
     warm_start_from_solution_id: int | None = Field(
         None,
         description=(

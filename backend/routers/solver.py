@@ -243,17 +243,16 @@ def regenerate_with_locks(
     if not source:
         raise HTTPException(status_code=404, detail="Η λύση πηγή δεν βρέθηκε")
 
-    locked_slots = (
-        db.query(TimetableSlot)
-        .filter(
-            TimetableSlot.solution_id == source_solution_id,
-            TimetableSlot.is_locked == True,  # noqa: E712
-            TimetableSlot.is_unplaced == False,  # noqa: E712
-        )
-        .all()
+    placed_q = db.query(TimetableSlot).filter(
+        TimetableSlot.solution_id == source_solution_id,
+        TimetableSlot.is_unplaced == False,  # noqa: E712
     )
+    # «🧩 Γέμισε τα κενά»: ΟΛΑ τα τοποθετημένα σταθερά· αλλιώς μόνο τα 🔒.
+    locked_slots = (placed_q.all() if request.lock_all_placed
+                    else placed_q.filter(TimetableSlot.is_locked == True).all())  # noqa: E712
+    mode = "permissive" if request.lock_all_placed else request.mode
 
-    if not locked_slots:
+    if not locked_slots and not request.lock_all_placed:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -290,11 +289,12 @@ def regenerate_with_locks(
         _run_generation_job,
         solution.id,
         request.max_time_seconds,
-        request.mode,
+        mode,
         None,  # no warm-start
         locked_assignments,
         {"locked_from_solution": source_solution_id,
-         "locked_count": len(locked_assignments)},
+         "locked_count": len(locked_assignments),
+         "fill_gaps": bool(request.lock_all_placed)},
     )
 
     return SolverStatusResponse(

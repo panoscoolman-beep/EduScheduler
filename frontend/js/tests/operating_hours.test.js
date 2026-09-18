@@ -174,3 +174,9 @@ test('bulkUnplaceTargets + summary: μετρά ώρες ανά καθηγητή/
     assert.match(H.bulkUnplaceSummary(t.teacher[1]), /Θα πάνε στην Παλέτα 1 ώρες · 1 κλειδωμένες 🔒 μένουν/);
     assert.equal(H.bulkUnplaceSummary(null), '');
 });
+
+test('fillGapsCounts: τοποθετημένες vs Παλέτα', () => {
+    assert.deepEqual(H.fillGapsCounts([{ is_unplaced: false }, { is_unplaced: true }, { is_unplaced: false }]),
+                     { placed: 2, palette: 1 });
+    assert.deepEqual(H.fillGapsCounts(null), { placed: 0, palette: 0 });
+});

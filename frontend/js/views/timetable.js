@@ -77,7 +77,8 @@ const TimetableView = {
                             <button class="btn btn-secondary" id="tt-history" title="Οι τελευταίες αλλαγές — αναίρεση μέχρι κάποιο σημείο" style="margin-right:0.5rem">🕘 Ιστορικό</button>
                             <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.25rem">👤 Αντικατάσταση</button>
                             <button class="btn btn-secondary" id="tt-empty" title="Όλες οι ώρες ενός καθηγητή ή τμήματος στην Παλέτα — επαναφέρονται με ένα κλικ" style="margin-right:0.5rem">🅿️ Άδειασμα</button>
-                            <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.5rem">🔒 Lock & Regenerate</button>
+                            <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.25rem">🔒 Lock & Regenerate</button>
+                            <button class="btn btn-secondary" id="tt-fill" title="Κράτα ΟΛΑ όσα έχεις βάλει και άφησε τον solver να τοποθετήσει τις ώρες της Παλέτας — σε νέο πρόγραμμα" style="margin-right:0.5rem">🧩 Γέμισε τα κενά</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-diff" title="Slot-level διαφορές με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε" style="margin-right:0.25rem">🔀 Τι άλλαξε;</button>
                             <button class="btn btn-secondary" id="tt-violations" title="Γιατί αυτό το score; Κενά καθηγητών, αργές ώρες, φόρτος" style="margin-right:0.5rem">⚖️ Ποιότητα</button>
@@ -235,6 +236,11 @@ const TimetableView = {
                     }
                 }, { saveText: '🚀 Εκτέλεση', saveClass: 'btn-warning' });
             });
+
+            // 🧩 Γέμισε τα κενά: όλα τα τοποθετημένα σταθερά, ο solver βάζει ό,τι
+            // χωράει από την Παλέτα, σε ΝΕΟ πρόγραμμα (το τρέχον δεν αλλάζει).
+            document.getElementById('tt-fill').addEventListener('click', () =>
+                this._openFillGaps(solutionId, solution, container));
 
             // Slots passed to the grid. For "student" view we pre-filter
             // to only the slots whose class the selected student attends;
@@ -653,6 +659,45 @@ const TimetableView = {
                 Toast.error(err.message);
             }
         }, { saveText: '↩️ Επαναφορά όλων' });
+    },
+
+    _openFillGaps(solutionId, solution, container) {
+        const { placed, palette } = TimetableHelpers.fillGapsCounts(solution.slots);
+        if (!palette) {
+            Toast.info('Η Παλέτα είναι άδεια — δεν υπάρχουν κενά να γεμίσουν.');
+            return;
+        }
+        Modal.open('🧩 Γέμισε τα κενά', `
+            <p>Οι <b>${placed}</b> ώρες που έχεις ήδη βάλει μένουν <b>ακριβώς ίδιες</b>. Ο solver
+               προσπαθεί να τοποθετήσει τις <b>${palette}</b> ώρες της Παλέτας στα κενά· ό,τι δεν
+               χωράει μένει στην Παλέτα.</p>
+            <p class="text-muted" style="font-size:0.85rem">Το αποτέλεσμα βγαίνει ως <b>νέο πρόγραμμα</b> —
+               το τρέχον δεν αλλάζει. Σύγκρινέ τα με «📊 Σύγκριση» και κράτα όποιο θες.</p>
+            <div class="form-group">
+                <label class="form-label">Όνομα νέου προγράμματος</label>
+                <input class="form-input" id="fill-name" value="${this._esc(solution.name)} (συμπλήρωση)">
+            </div>`,
+        async () => {
+            const name = document.getElementById('fill-name').value.trim();
+            if (!name) { Toast.error('Δώσε όνομα.'); return; }
+            Modal.close();
+            Toast.success('🧠 Ο solver γεμίζει τα κενά στο παρασκήνιο…');
+            try {
+                const started = await API.solver.regenerateWithLocks(solutionId, {
+                    name, max_time_seconds: 120, mode: 'permissive', lock_all_placed: true,
+                });
+                const result = await TimetableInteractions.pollSolve(started.solution_id, 120);
+                if (result.status === 'optimal' || result.status === 'feasible') {
+                    Toast.success(`✅ Έτοιμο το «${name}» — σύγκρινέ το με το αρχικό.`);
+                    App._currentSolutionId = result.solution_id;
+                    await this.render(container);
+                } else {
+                    Toast.error(result.message);
+                }
+            } catch (err) {
+                Toast.error(`Δεν έγινε: ${err.message}`);
+            }
+        }, { saveText: '🧩 Εκτέλεση' });
     },
 
     /** 🕘 Ιστορικό αλλαγών με «αναίρεση μέχρι εδώ». */

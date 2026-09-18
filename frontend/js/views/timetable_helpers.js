@@ -348,6 +348,13 @@ const TimetableHelpers = {
         return `Θα πάνε στην Παλέτα ${target.movable} ώρες${locked}. Επαναφέρονται όλες μαζί με ένα κουμπί.`;
     },
 
+    /** 🧩 Γέμισε τα κενά: πόσες ώρες μένουν σταθερές και πόσες περιμένουν. */
+    fillGapsCounts(slots) {
+        const placed = (slots || []).filter(s => !s.is_unplaced).length;
+        const palette = (slots || []).filter(s => s.is_unplaced).length;
+        return { placed, palette };
+    },
+
     /** «📋 Έλεγχος δεδομένων» της σελίδας Δημιουργίας — pure HTML. */
     buildReadinessHtml(report) {
         const esc = TimetableHelpers.esc;
