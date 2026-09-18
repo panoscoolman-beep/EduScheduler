@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.services import delete_guards as guards
 from backend.models import Classroom
 from backend.schemas import ClassroomCreate, ClassroomResponse
 
@@ -50,9 +51,15 @@ def update_classroom(classroom_id: int, data: ClassroomCreate, db: Session = Dep
 
 
 @router.delete("/{classroom_id}", status_code=204)
-def delete_classroom(classroom_id: int, db: Session = Depends(get_db)):
+def delete_classroom(classroom_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """Οι ώρες που είναι τοποθετημένες εδώ θα έμεναν «τοποθετημένες χωρίς
+    αίθουσα». Χωρίς `?force=true` → 409 + πλήθη· με force → γυρίζουν στην
+    Παλέτα πριν σβηστεί η αίθουσα (δεν χάνεται ώρα)."""
     classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
     if not classroom:
         raise HTTPException(status_code=404, detail="Η αίθουσα δεν βρέθηκε")
+    guards.guard_classroom(guards.classroom_usage(db, classroom_id), force=force,
+                           name=classroom.name)
+    guards.unplace_room_slots(db, classroom_id, classroom.name)
     db.delete(classroom)
     db.commit()

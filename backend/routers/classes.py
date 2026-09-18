@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.services import delete_guards as guards
 from backend.models import SchoolClass, Student, StudentClassEnrollment
 from backend.schemas import (
     SchoolClassCreate,
@@ -170,7 +171,12 @@ def unenroll_student(class_id: int, student_id: int, db: Session = Depends(get_d
 
 
 @router.delete("/{class_id}", status_code=204)
-def delete_class(class_id: int, db: Session = Depends(get_db)):
+def delete_class(class_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """Σβήνει και τα μαθήματα-κάρτες του τμήματος → 409 + πλήθη χωρίς
+    `?force=true`. Οι μαθητές δεν σβήνονται (μόνο οι εγγραφές τους)."""
     school_class = _get_class_or_404(db, class_id)
+    guards.guard_lessons_owner(guards.class_usage(db, class_id), force=force,
+                               code="class_in_use",
+                               subject=f"Το τμήμα «{school_class.name}» έχει")
     db.delete(school_class)
     db.commit()

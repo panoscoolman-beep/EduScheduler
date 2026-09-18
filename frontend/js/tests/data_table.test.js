@@ -81,3 +81,54 @@ test('empty data keeps the «no records» state and still notifies', async () =>
     assert.match(document.getElementById('host').textContent, /Δεν υπάρχουν εγγραφές/);
     assert.deepEqual(seen.at(-1), [0, 0]);
 });
+
+test('απλά κελιά κάνουν escape, οι στήλες με render μένουν ως HTML', async () => {
+    setup();
+    const t = makeTable({
+        columns: [
+            { key: 'name', label: 'Όνομα' },
+            { key: 'badge', label: 'Σήμα', render: (v) => `<b>${v}</b>` },
+        ],
+    }, [{ id: 1, name: 'Καθ <img src=x onerror=alert(1)>', badge: 'OK' }]);
+    await t.render(document.getElementById('host'));
+    const cells = document.querySelectorAll('tbody td');
+    assert.equal(cells[0].textContent, 'Καθ <img src=x onerror=alert(1)>');
+    assert.equal(cells[0].querySelector('img'), null);                // δεν έγινε στοιχείο
+    assert.equal(cells[1].querySelector('b').textContent, 'OK');
+});
+
+test('409 requires_force → κόκκινη επιβεβαίωση με escaped μήνυμα → διαγραφή με force', async () => {
+    setup();
+    const opened = [];
+    global.Modal = {
+        open(title, body, onSave) { opened.push({ title, body, onSave }); },
+        close() {},
+    };
+    const calls = [];
+    const api = {
+        list: async () => [{ id: 5, name: 'Β2' }],
+        delete: async (id, force = false) => {
+            calls.push([id, force]);
+            if (!force) {
+                const err = new Error('in use');
+                err.status = 409;
+                err.detail = { requires_force: true, message: 'Το τμήμα «<b>Β2</b>» έχει 3 μαθήματα-κάρτες' };
+                throw err;
+            }
+            return null;
+        },
+    };
+    const t = new DataTable({
+        columns: [{ key: 'name', label: 'Όνομα' }], apiService: api, entityName: 'Τμήματα',
+        formBuilder: () => '', formParser: () => ({}),
+    });
+    await t.render(document.getElementById('host'));
+    t.confirmDelete(5);
+    await opened[0].onSave();                                  // «Είστε σίγουροι;» → 409
+    assert.equal(opened.length, 2);
+    assert.match(opened[1].title, /Καταστροφική διαγραφή/);
+    assert.match(opened[1].body, /&lt;b&gt;Β2&lt;\/b&gt;/);
+    assert.doesNotMatch(opened[1].body, /<b>Β2<\/b>/);
+    await opened[1].onSave();                                  // ρητή επιβεβαίωση
+    assert.deepEqual(calls, [[5, false], [5, true]]);
+});

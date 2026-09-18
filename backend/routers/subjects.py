@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.services import delete_guards as guards
 from backend.models import Subject
 from backend.schemas import SubjectCreate, SubjectResponse
 
@@ -50,9 +51,13 @@ def update_subject(subject_id: int, data: SubjectCreate, db: Session = Depends(g
 
 
 @router.delete("/{subject_id}", status_code=204)
-def delete_subject(subject_id: int, db: Session = Depends(get_db)):
+def delete_subject(subject_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """Σβήνει και τα μαθήματα-κάρτες του → 409 + πλήθη χωρίς `?force=true`."""
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Το μάθημα δεν βρέθηκε")
+    guards.guard_lessons_owner(guards.subject_usage(db, subject_id), force=force,
+                               code="subject_in_use",
+                               subject=f"Το μάθημα «{subject.name}» χρησιμοποιείται σε")
     db.delete(subject)
     db.commit()

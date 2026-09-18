@@ -54,7 +54,8 @@ const API = {
         get: (id) => API.get(`/teachers/${id}`),
         create: (data) => API.post('/teachers/', data),
         update: (id, data) => API.put(`/teachers/${id}`, data),
-        delete: (id) => API.delete(`/teachers/${id}`),
+        delete: (id, force = false) =>
+            API.delete(`/teachers/${id}${force ? '?force=true' : ''}`),
         getAvailability: (id) => API.get(`/teachers/${id}/availability`),
         updateAvailability: (id, data) => API.put(`/teachers/${id}/availability`, data),
     },
@@ -63,7 +64,8 @@ const API = {
         get: (id) => API.get(`/subjects/${id}`),
         create: (data) => API.post('/subjects/', data),
         update: (id, data) => API.put(`/subjects/${id}`, data),
-        delete: (id) => API.delete(`/subjects/${id}`),
+        delete: (id, force = false) =>
+            API.delete(`/subjects/${id}${force ? '?force=true' : ''}`),
     },
     students: {
         list: () => API.get('/students/'),
@@ -82,14 +84,16 @@ const API = {
         get: (id) => API.get(`/classrooms/${id}`),
         create: (data) => API.post('/classrooms/', data),
         update: (id, data) => API.put(`/classrooms/${id}`, data),
-        delete: (id) => API.delete(`/classrooms/${id}`),
+        delete: (id, force = false) =>
+            API.delete(`/classrooms/${id}${force ? '?force=true' : ''}`),
     },
     classes: {
         list: () => API.get('/classes/'),
         get: (id) => API.get(`/classes/${id}`),
         create: (data) => API.post('/classes/', data),
         update: (id, data) => API.put(`/classes/${id}`, data),
-        delete: (id) => API.delete(`/classes/${id}`),
+        delete: (id, force = false) =>
+            API.delete(`/classes/${id}${force ? '?force=true' : ''}`),
         // Εγγραφές μαθητών: μεμονωμένα, idempotent (επιλογέας + καρτέλα Μαθητή).
         students: (id) => API.get(`/classes/${id}/students`),
         addStudent: (classId, studentId) => API.post(`/classes/${classId}/students/${studentId}`),

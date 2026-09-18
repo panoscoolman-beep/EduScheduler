@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.services import delete_guards as guards
 from backend.models import Teacher, TeacherAvailability
 from backend.schemas import (
     TeacherCreate,
@@ -56,10 +57,15 @@ def update_teacher(teacher_id: int, data: TeacherCreate, db: Session = Depends(g
 
 
 @router.delete("/{teacher_id}", status_code=204)
-def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
+def delete_teacher(teacher_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """Σβήνει και τα μαθήματα-κάρτες του (σε όλα τα σενάρια) → 409 + πλήθη
+    χωρίς ρητό `?force=true` (βλ. services/delete_guards.py)."""
     teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Ο καθηγητής δεν βρέθηκε")
+    guards.guard_lessons_owner(guards.teacher_usage(db, teacher_id), force=force,
+                               code="teacher_in_use",
+                               subject=f"Ο καθηγητής «{teacher.name}» έχει")
     db.delete(teacher)
     db.commit()
 

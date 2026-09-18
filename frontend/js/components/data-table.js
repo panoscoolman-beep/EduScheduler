@@ -2,6 +2,13 @@
  * DataTable Component — Reusable CRUD table with add/edit/delete.
  */
 class DataTable {
+    /** HTML escape για απλό κείμενο (ονόματα, μηνύματα του server). */
+    static esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady,
                   rowFilter, onRendered }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
@@ -84,8 +91,10 @@ class DataTable {
 
         const rows = visible.map(item => {
             const cells = this.columns.map(col => {
-                let value = item[col.key];
-                if (col.render) value = col.render(value, item);
+                // Με `render` η στήλη επιστρέφει HTML· αλλιώς είναι απλό κείμενο
+                // (ονόματα, email…) και ΠΡΕΠΕΙ να γίνει escape.
+                const raw = item[col.key];
+                const value = col.render ? col.render(raw, item) : DataTable.esc(raw);
                 return `<td>${value ?? ''}</td>`;
             }).join('');
 
@@ -200,13 +209,13 @@ class DataTable {
     _confirmForceDelete(id, name, message) {
         Modal.open(
             '⚠️ Προσοχή — Καταστροφική διαγραφή',
-            `<p style="color:var(--accent-rose,#F43F5E);font-weight:600">${message}</p>
+            `<p style="color:var(--accent-rose,#F43F5E);font-weight:600">${DataTable.esc(message)}</p>
              <p class="text-muted mt-sm">Η ενέργεια αυτή <strong>ΔΕΝ αναιρείται</strong> και επηρεάζει
              ΟΛΑ τα προγράμματα. Αν θες απλώς να αλλάξεις ωράριο, χρησιμοποίησε «Σενάριο» αντί για διαγραφή.</p>`,
             async () => {
                 try {
                     await this.api.delete(id, true);  // force
-                    Toast.success(`Διαγράφηκε «${name}»`);
+                    Toast.success(`Διαγράφηκε «${DataTable.esc(name)}»`);
                     Modal.close();
                     await this.loadData();
                 } catch (err) {
