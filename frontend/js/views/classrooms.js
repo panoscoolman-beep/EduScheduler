@@ -6,15 +6,18 @@ const ClassroomsView = {
 
     async render(container) {
         const self = this;
+        const archive = ArchiveControls.create(API.classrooms, 'την αίθουσα');
         const table = new DataTable({
             columns: [
-                { key: 'name', label: 'Αίθουσα' },
+                { key: 'name', label: 'Αίθουσα' , render: ArchiveControls.nameRender },
                 { key: 'short_name', label: 'Συντομ.' },
                 { key: 'capacity', label: 'Χωρητικότητα' },
                 { key: 'room_type', label: 'Τύπος', render: v => self.ROOM_TYPES[v] || v },
                 { key: 'building', label: 'Κτίριο', render: v => v || '—' },
             ],
-            apiService: API.classrooms,
+            apiService: archive.api,
+            toolbarHtml: archive.toolbarHtml(),
+            customActions: [archive.action],
             entityName: 'Αίθουσες',
             formBuilder: (item) => `
                 <div class="form-grid">
@@ -57,5 +60,6 @@ const ClassroomsView = {
 
         container.innerHTML = '<div id="classrooms-table"></div>';
         await table.render(document.getElementById('classrooms-table'));
+        archive.wire(container, table);
     },
 };

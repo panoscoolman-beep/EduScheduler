@@ -111,7 +111,7 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
 
     teachers = db.query(Teacher).all()
     classes = db.query(SchoolClass).all()
-    classrooms = db.query(Classroom).all()
+    classrooms = db.query(Classroom).filter(Classroom.archived_at.is_(None)).all()
     lessons_q = db.query(Lesson)
     teacher_unavail_q = db.query(TeacherAvailability).filter(
         TeacherAvailability.status == "unavailable"

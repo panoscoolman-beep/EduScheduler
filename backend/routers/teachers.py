@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.services import archive as archive_svc
 from backend.services import delete_guards as guards
 from backend.models import Teacher, TeacherAvailability
 from backend.schemas import (
@@ -20,8 +21,24 @@ router = APIRouter()
 
 
 @router.get("/", response_model=list[TeacherResponse])
-def list_teachers(db: Session = Depends(get_db)):
-    return db.query(Teacher).order_by(Teacher.name).all()
+def list_teachers(include_archived: bool = False, db: Session = Depends(get_db)):
+    """Τα αρχειοθετημένα μένουν έξω εκτός αν ζητηθούν (επαναφορά)."""
+    query = db.query(Teacher)
+    if not include_archived:
+        query = query.filter(Teacher.archived_at.is_(None))
+    return query.order_by(Teacher.name).all()
+
+
+@router.post("/{teacher_id}/archive")
+def archive_teacher(teacher_id: int, db: Session = Depends(get_db)):
+    """📦 Κρύψε τον/την από τις λίστες χωρίς να σβηστεί τίποτα (409 αν
+    χρησιμοποιείται στο ενεργό σενάριο)."""
+    return archive_svc.set_archived(db, "teacher", teacher_id, True)
+
+
+@router.post("/{teacher_id}/unarchive")
+def unarchive_teacher(teacher_id: int, db: Session = Depends(get_db)):
+    return archive_svc.set_archived(db, "teacher", teacher_id, False)
 
 
 @router.get("/{teacher_id}", response_model=TeacherResponse)

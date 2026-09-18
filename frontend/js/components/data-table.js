@@ -10,7 +10,7 @@ class DataTable {
     }
 
     constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady,
-                  rowFilter, onRendered }) {
+                  rowFilter, onRendered, toolbarHtml }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -25,6 +25,7 @@ class DataTable {
         // this.data μένουν ολόκληρα ώστε edit/delete να βρίσκουν κάθε εγγραφή.
         this.rowFilter = rowFilter;
         this.onRendered = onRendered;
+        this.toolbarHtml = toolbarHtml || '';   // προαιρετικά controls δίπλα στο «Προσθήκη»
         this.data = [];
     }
 
@@ -35,6 +36,7 @@ class DataTable {
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">${this.entityName}</h2>
+                    ${this.toolbarHtml}
                     <button class="btn btn-primary" id="dt-add-${this.slug}">
                         ➕ Προσθήκη
                     </button>

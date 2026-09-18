@@ -151,7 +151,8 @@ class TimetableSolver:
         self.teachers = self.db.query(Teacher).all()
         self.subjects = self.db.query(Subject).all()
         self.classes = self.db.query(SchoolClass).all()
-        self.classrooms = self.db.query(Classroom).all()
+        # Αρχειοθετημένες αίθουσες δεν δίνονται στον solver.
+        self.classrooms = self.db.query(Classroom).filter(Classroom.archived_at.is_(None)).all()
         # Scenario scope: only this term's lessons + availability feed the solve.
         lessons_q = self.db.query(Lesson)
         ta_q = self.db.query(TeacherAvailability).filter(TeacherAvailability.status == "unavailable")

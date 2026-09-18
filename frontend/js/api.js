@@ -50,7 +50,10 @@ const API = {
 
     // ─── Entity-specific helpers ───────────────────────
     teachers: {
-        list: () => API.get('/teachers/'),
+        list: (includeArchived = false) =>
+            API.get(`/teachers/${includeArchived ? '?include_archived=true' : ''}`),
+        archive: (id) => API.post(`/teachers/${id}/archive`, {}),
+        unarchive: (id) => API.post(`/teachers/${id}/unarchive`, {}),
         get: (id) => API.get(`/teachers/${id}`),
         create: (data) => API.post('/teachers/', data),
         update: (id, data) => API.put(`/teachers/${id}`, data),
@@ -80,7 +83,10 @@ const API = {
         updateAvailability: (id, data) => API.put(`/students/${id}/availability`, data),
     },
     classrooms: {
-        list: () => API.get('/classrooms/'),
+        list: (includeArchived = false) =>
+            API.get(`/classrooms/${includeArchived ? '?include_archived=true' : ''}`),
+        archive: (id) => API.post(`/classrooms/${id}/archive`, {}),
+        unarchive: (id) => API.post(`/classrooms/${id}/unarchive`, {}),
         get: (id) => API.get(`/classrooms/${id}`),
         create: (data) => API.post('/classrooms/', data),
         update: (id, data) => API.put(`/classrooms/${id}`, data),
@@ -88,7 +94,10 @@ const API = {
             API.delete(`/classrooms/${id}${force ? '?force=true' : ''}`),
     },
     classes: {
-        list: () => API.get('/classes/'),
+        list: (includeArchived = false) =>
+            API.get(`/classes/${includeArchived ? '?include_archived=true' : ''}`),
+        archive: (id) => API.post(`/classes/${id}/archive`, {}),
+        unarchive: (id) => API.post(`/classes/${id}/unarchive`, {}),
         get: (id) => API.get(`/classes/${id}`),
         create: (data) => API.post('/classes/', data),
         update: (id, data) => API.put(`/classes/${id}`, data),

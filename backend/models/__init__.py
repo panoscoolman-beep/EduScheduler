@@ -88,6 +88,12 @@ class Teacher(Base):
     __tablename__ = "teachers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Αρχειοθέτηση: κρυφό από λίστες/solver, αναστρέψιμο (services/archive.py).
+    archived_at = Column(DateTime, nullable=True)
+
+    @property
+    def archived(self) -> bool:
+        return self.archived_at is not None
     name = Column(String(200), nullable=False)
     short_name = Column(String(20), nullable=False, unique=True)
     email = Column(String(200))
@@ -148,6 +154,12 @@ class SchoolClass(Base):
     __tablename__ = "classes"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Αρχειοθέτηση: κρυφό από λίστες/solver, αναστρέψιμο (services/archive.py).
+    archived_at = Column(DateTime, nullable=True)
+
+    @property
+    def archived(self) -> bool:
+        return self.archived_at is not None
     name = Column(String(100), nullable=False)
     short_name = Column(String(20), nullable=False, unique=True)
     grade_level = Column(Integer)  # 1=A, 2=B, 3=C
@@ -245,6 +257,12 @@ class Classroom(Base):
     __tablename__ = "classrooms"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # Αρχειοθέτηση: κρυφό από λίστες/solver, αναστρέψιμο (services/archive.py).
+    archived_at = Column(DateTime, nullable=True)
+
+    @property
+    def archived(self) -> bool:
+        return self.archived_at is not None
     name = Column(String(200), nullable=False)
     short_name = Column(String(20), nullable=False, unique=True)
     capacity = Column(Integer, default=30)

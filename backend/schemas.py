@@ -95,6 +95,7 @@ class TeacherCreate(TeacherBase):
 
 class TeacherResponse(TeacherBase):
     id: int
+    archived: bool = False
 
     class Config:
         from_attributes = True
@@ -226,6 +227,7 @@ class SchoolClassUpdate(SchoolClassBase):
 class SchoolClassResponse(SchoolClassBase):
     id: int
     student_ids: list[int] = []
+    archived: bool = False
 
     class Config:
         from_attributes = True
@@ -247,6 +249,7 @@ class ClassroomCreate(ClassroomBase):
 
 class ClassroomResponse(ClassroomBase):
     id: int
+    archived: bool = False
 
     class Config:
         from_attributes = True

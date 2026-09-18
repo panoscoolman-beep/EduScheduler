@@ -51,7 +51,8 @@ def pick_default_classroom(
     if lesson.classroom_id and lesson.classroom_id not in excluded:
         return lesson.classroom_id
 
-    rooms = db.query(Classroom).all()
+    # Αρχειοθετημένες αίθουσες δεν προτείνονται σε νέες τοποθετήσεις.
+    rooms = db.query(Classroom).filter(Classroom.archived_at.is_(None)).all()
 
     # 2) Special-room match (lab/gym/etc.)
     if lesson.subject and lesson.subject.requires_special_room:
@@ -392,8 +393,9 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
     teacher_shorts = {t.id: (t.short_name or t.name) for t in teacher_rows}
     class_names = {c.id: c.short_name for c in db.query(SchoolClass.id, SchoolClass.short_name).all()}
     subject_names = {x.id: x.name for x in db.query(Subject.id, Subject.name).all()}
-    rooms = db.query(Classroom).all()
-    room_names = {r.id: r.name for r in rooms}
+    all_rooms = db.query(Classroom).all()
+    room_names = {r.id: r.name for r in all_rooms}          # ονόματα: και παλιές αίθουσες
+    rooms = [r for r in all_rooms if r.archived_at is None]  # υποψήφιες: όχι αρχειοθετημένες
     my_teacher = teacher_names.get(lesson.teacher_id, "")
     my_teacher_short = teacher_shorts.get(lesson.teacher_id, "")
     my_class = class_names.get(lesson.class_id, "")

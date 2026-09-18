@@ -3,19 +3,22 @@
  */
 const TeachersView = {
     async render(container) {
+        const archive = ArchiveControls.create(API.teachers, 'τον καθηγητή');
         const table = new DataTable({
             columns: [
                 { key: 'color', label: '', render: (v) => `<span class="color-dot" style="background:${v}"></span>` },
-                { key: 'name', label: 'Ονοματεπώνυμο' },
+                { key: 'name', label: 'Ονοματεπώνυμο' , render: ArchiveControls.nameRender },
                 { key: 'short_name', label: 'Συντομογραφία' },
                 { key: 'email', label: 'Email' },
                 { key: 'max_periods_per_day', label: 'Max/Ημέρα', render: v => v || '—' },
                 { key: 'max_periods_per_week', label: 'Max/Εβδ.', render: v => v || '—' },
                 { key: 'max_days_per_week', label: 'Max Ημέρες', render: v => v || '—' },
             ],
-            apiService: API.teachers,
+            apiService: archive.api,
+            toolbarHtml: archive.toolbarHtml(),
             entityName: 'Καθηγητές',
             customActions: [
+                archive.action,
                 {
                     id: 'availability',
                     title: 'Πρόγραμμα / Κωλύματα',
@@ -80,5 +83,6 @@ const TeachersView = {
 
         container.innerHTML = '<div id="teachers-table"></div>';
         await table.render(document.getElementById('teachers-table'));
+        archive.wire(container, table);
     },
 };

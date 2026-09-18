@@ -10,14 +10,17 @@ const ClassesView = {
     async render(container) {
         const classrooms = await API.classrooms.list();
 
+        const archive = ArchiveControls.create(API.classes, 'το τμήμα');
         const table = new DataTable({
             columns: [
-                { key: 'name', label: 'Τάξη' },
+                { key: 'name', label: 'Τάξη' , render: ArchiveControls.nameRender },
                 { key: 'short_name', label: 'Συντομ.' },
                 { key: 'grade_level', label: 'Βαθμίδα', render: v => v ? `${v}` : '—' },
                 { key: 'student_ids', label: 'Μαθητές', render: v => (v || []).length },
             ],
-            apiService: API.classes,
+            apiService: archive.api,
+            toolbarHtml: archive.toolbarHtml(),
+            customActions: [archive.action],
             entityName: 'Τάξεις',
             formBuilder: (item) => `
                 <div class="form-grid">
@@ -65,6 +68,7 @@ const ClassesView = {
 
         container.innerHTML = '<div id="classes-table"></div>';
         await table.render(document.getElementById('classes-table'));
+        archive.wire(container, table);
     },
 
     /** Φρέσκοι μαθητές + τμήματα, μετά mount του επιλογέα στη φόρμα. */

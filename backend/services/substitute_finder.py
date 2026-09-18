@@ -102,7 +102,8 @@ def find_substitutes(
         )
         .all()
     )
-    all_teachers = db.query(Teacher).filter(Teacher.id != teacher_id).all()
+    all_teachers = (db.query(Teacher)
+                    .filter(Teacher.id != teacher_id, Teacher.archived_at.is_(None)).all())
     # Scenario scope (Terms Phase 1): lessons και availability κρίνονται μόνο
     # στο σενάριο της λύσης — κώλυμα/φόρτος δηλωμένα σε άλλο σενάριο δεν
     # πρέπει να αποκλείουν υποψήφιους ή να πετάνε reschedule slots.

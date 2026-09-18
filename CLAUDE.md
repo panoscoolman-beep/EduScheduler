@@ -78,7 +78,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 `Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
 (βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
 `lifespan` στο `backend/main.py`). Head στις 2026-09-18:
-`a3b4c5d6e7f8_saturday_hours.py`.
+`b4c5d6e7f8a9_archive_teachers_classes_rooms.py`.
 
 **Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
 
@@ -98,7 +98,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 | `teachers` | Καθηγητές (id, name, short_name, email, phone, max_periods_per_*, color) |
 | `classes` | Τμήματα (όχι ακαδημαϊκές περίοδοι — μάθημα + ομάδα μαθητών) |
 | `subjects` | Μαθήματα/κωδικοί (Άλγεβρα, Έκθεση κτλ) |
-| `classrooms` | Αίθουσες με capacity & type |
+| `classrooms` | Αίθουσες με capacity & type. Καθηγητές/τμήματα/αίθουσες έχουν `archived_at` (📦, `services/archive.py`): κρυφά από λίστες (`?include_archived=true`), solver, αυτόματη αίθουσα, εφικτότητα, αντικαταστάτη· 409 αν χρησιμοποιούνται στο ενεργό σενάριο |
 | `lessons` | Διδακτικές ενότητες (συσχετίζει class με teacher με subject) |
 | `periods` | Διδακτικές ώρες της ημέρας (1η Ώρα 08:00–09:00, 2η Ώρα…): name, short_name, start_time, end_time, is_break, sort_order. **Όχι** ακαδημαϊκές περίοδοι (αυτές στο EDS είναι τα `terms`/σενάρια) |
 | `constraints` | Hard/soft constraints με βαρύτητες |
