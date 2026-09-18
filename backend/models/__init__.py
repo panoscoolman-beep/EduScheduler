@@ -397,6 +397,28 @@ class TimetableSlot(Base):
     )
 
 
+class SolutionPublication(Base):
+    """📢 Δημοσίευση προγράμματος: στιγμιότυπο του τι ίσχυε όταν δημοσιεύτηκε.
+
+    Το snapshot είναι αυτοτελές (ονόματα, ώρες, αίθουσες), ώστε η επόμενη
+    δημοσίευση να βγάζει «τι άλλαξε για σένα» ακόμα κι αν στο μεταξύ
+    αλλάξουν/σβηστούν οντότητες ή το ίδιο το πρόγραμμα.
+    """
+
+    __tablename__ = "solution_publications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    term_id = Column(Integer, ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True)
+    solution_id = Column(Integer, ForeignKey("timetable_solutions.id", ondelete="SET NULL"), nullable=True)
+    solution_name = Column(String(200), nullable=False)
+    published_at = Column(DateTime, default=utcnow_naive, nullable=False)
+    note = Column(Text)
+    snapshot_json = Column(Text, nullable=False)   # [{teacher_id, lesson_id, day, ...}]
+    messages_json = Column(Text, nullable=False)   # [{teacher_id, teacher, message}]
+    notify_telegram = Column(Boolean, nullable=False, default=False)
+    telegram_sent_at = Column(DateTime, nullable=True)
+
+
 class TimetableSlotHistory(Base):
     """Audit log for manual slot edits, used by undo / redo.
 

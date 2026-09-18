@@ -29,6 +29,7 @@ from backend.routers import (
     settings as settings_router,
     exports,
     integration,
+    publications,
 )
 
 
@@ -150,6 +151,7 @@ app.include_router(solver.router, prefix="/api/solver", tags=["Solver"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Ρυθμίσεις"])
 app.include_router(exports.router, prefix="/api/exports", tags=["Εξαγωγές"])
 app.include_router(integration.router, prefix="/api/integration", tags=["Ενσωμάτωση CRM"])
+app.include_router(publications.router, prefix="/api/publications", tags=["Δημοσίευση"])
 
 # Serve frontend static files
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

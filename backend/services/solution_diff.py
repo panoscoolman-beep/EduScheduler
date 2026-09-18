@@ -20,6 +20,18 @@ _GREEK_DAYS = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη",
 _Position = tuple[int, int, int | None]
 
 
+def pair_changes(before, after):
+    """Θέσεις ενός μαθήματος before→after (κοινό με τη Δημοσίευση).
+
+    Επιστρέφει (moved[(από, προς)], removed, added, unchanged_count): οι
+    θέσεις που χάθηκαν ζευγαρώνονται με όσες εμφανίστηκαν ως «μετακινήσεις»
+    και ό,τι περισσεύει μετρά ως αφαίρεση/προσθήκη.
+    """
+    b_set, a_set = set(before), set(after)
+    gone, new = sorted(b_set - a_set), sorted(a_set - b_set)
+    return list(zip(gone, new)), gone[len(new):], new[len(gone):], len(b_set & a_set)
+
+
 def _positions_by_lesson(db: Session, solution_id: int) -> dict[int, list[_Position]]:
     slots = (
         db.query(TimetableSlot)
@@ -95,27 +107,23 @@ def compute_diff(db: Session, base_id: int, other_id: int) -> dict | None:
 
     for lid in sorted(lesson_ids):
         info = labels.get(lid, {"label": f"lesson {lid}", "teacher": "—"})
-        b = sorted(base_pos.get(lid, []))
-        o = sorted(other_pos.get(lid, []))
-        b_set, o_set = set(b), set(o)
-        unchanged += len(b_set & o_set)
-        gone = sorted(b_set - o_set)   # θέσεις που χάθηκαν από τη base
-        new = sorted(o_set - b_set)    # θέσεις που εμφανίστηκαν στην other
-        # Ζευγάρωμα gone↔new = «μετακίνηση»· ό,τι περισσέψει = added/removed.
-        for from_p, to_p in zip(gone, new):
+        pairs, gone_extra, new_extra, same = pair_changes(
+            base_pos.get(lid, []), other_pos.get(lid, []))
+        unchanged += same
+        for from_p, to_p in pairs:
             moved.append({
                 "lesson": info["label"],
                 "teacher": info["teacher"],
                 "from": _describe(from_p, periods, rooms),
                 "to": _describe(to_p, periods, rooms),
             })
-        for extra in gone[len(new):]:
+        for extra in gone_extra:
             removed.append({
                 "lesson": info["label"],
                 "teacher": info["teacher"],
                 "at": _describe(extra, periods, rooms),
             })
-        for extra in new[len(gone):]:
+        for extra in new_extra:
             added.append({
                 "lesson": info["label"],
                 "teacher": info["teacher"],

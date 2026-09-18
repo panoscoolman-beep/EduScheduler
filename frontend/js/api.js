@@ -181,6 +181,8 @@ const API = {
             API.post(`/solver/solutions/${solutionId}/slots/swap`,
                 { slot_a_id: slotAId, slot_b_id: slotBId }),
         history: (solutionId, limit = 20) => API.get(`/solver/solutions/${solutionId}/history?limit=${limit}`),
+        publishPreview: (solutionId) => API.get(`/publications/preview/${solutionId}`),
+        publish: (solutionId, data) => API.post(`/publications/solutions/${solutionId}`, data),
         undoTo: (solutionId, entryId) =>
             API.post(`/solver/solutions/${solutionId}/history/undo-to/${entryId}`, {}),
         unplaceBulk: (solutionId, body) => API.post(`/solver/solutions/${solutionId}/unplace-bulk`, body),

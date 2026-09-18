@@ -322,6 +322,55 @@ const TimetableHelpers = {
                 <div style="max-height:400px; overflow:auto"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
     },
 
+    /** 📢 mailto: με έτοιμο θέμα/κείμενο — ανοίγει το δικό σου email, δεν στέλνει μόνο του. */
+    publishMailto(teacher) {
+        if (!teacher || !teacher.email) return '';
+        return `mailto:${encodeURIComponent(teacher.email)}` +
+               `?subject=${encodeURIComponent('Ενημέρωση προγράμματος')}` +
+               `&body=${encodeURIComponent(teacher.message || '')}`;
+    },
+
+    /** 📢 Προεπισκόπηση δημοσίευσης: ποιοι επηρεάζονται + τα μηνύματά τους. */
+    buildPublishHtml(preview) {
+        const esc = TimetableHelpers.esc;
+        const teachers = (preview && preview.teachers) || [];
+        const prev = preview && preview.previous;
+        const when = (iso) => (iso || '').replace('T', ' ').slice(0, 16);
+        const intro = preview.first
+            ? '<p>Πρώτη δημοσίευση σε αυτό το σενάριο: <b>όλοι</b> οι καθηγητές παίρνουν το πρόγραμμά τους.</p>'
+            : `<p>Σε σχέση με την τελευταία δημοσίευση («${esc(prev.solution_name)}», ${esc(when(prev.published_at))})
+                  επηρεάζονται <b>${teachers.length}</b> καθηγητές. Οι υπόλοιποι δεν ενοχλούνται.</p>`;
+        const warn = preview.unplaced
+            ? `<p class="text-warning">⚠️ ${preview.unplaced} ώρες είναι ακόμα στην Παλέτα και δεν περιλαμβάνονται.</p>`
+            : '';
+        if (!preview.first && !teachers.length) {
+            return `${intro}<p>✅ Δεν άλλαξε τίποτα από την τελευταία δημοσίευση — δεν χρειάζεται νέα.</p>`;
+        }
+        const cards = teachers.map((t, i) => {
+            const mail = TimetableHelpers.publishMailto(t);
+            const n = t.changes
+                ? t.changes.moved.length + t.changes.added.length + t.changes.removed.length : 0;
+            const badge = t.changes ? `${n} αλλαγ${n === 1 ? 'ή' : 'ές'}` : 'νέο πρόγραμμα';
+            return `<details class="pub-teacher" style="margin-bottom:0.4rem">
+                        <summary><b>${esc(t.teacher)}</b> · <small>${badge} · ${t.hours} ώρες</small></summary>
+                        <pre class="pub-message" style="white-space:pre-wrap; font-size:0.85rem">${esc(t.message)}</pre>
+                        <button class="btn btn-secondary btn-sm pub-copy" data-idx="${i}">📋 Αντιγραφή</button>
+                        ${mail ? `<a class="btn btn-secondary btn-sm" href="${esc(mail)}">✉️ Email</a>`
+                               : '<small class="text-muted">χωρίς email</small>'}
+                    </details>`;
+        }).join('');
+        return `${intro}${warn}
+                <div style="max-height:340px; overflow:auto; margin:0.5rem 0">${cards}</div>
+                <div class="form-group">
+                    <label class="form-label">Σημείωση (προαιρετική)</label>
+                    <input class="form-input" id="pub-note" maxlength="500" placeholder="π.χ. αλλαγές μετά τις εγγραφές">
+                </div>
+                <label><input type="checkbox" id="pub-telegram" checked>
+                    📨 Στείλε μου τα μηνύματα στο Telegram για προώθηση</label>
+                <p class="text-muted" style="font-size:0.8rem">Κανένα μήνυμα δεν φεύγει αυτόματα σε καθηγητές —
+                    τα στέλνεις εσύ (προώθηση, αντιγραφή ή email).</p>`;
+    },
+
     /**
      * 🅿️ Άδειασμα: καθηγητές/τμήματα με τοποθετημένες ώρες στο πρόγραμμα,
      * με πόσες θα φύγουν (όχι κλειδωμένες) και πόσες μένουν (🔒).

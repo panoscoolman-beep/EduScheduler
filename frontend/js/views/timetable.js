@@ -82,6 +82,7 @@ const TimetableView = {
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-diff" title="Slot-level διαφορές με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε" style="margin-right:0.25rem">🔀 Τι άλλαξε;</button>
                             <button class="btn btn-secondary" id="tt-violations" title="Γιατί αυτό το score; Κενά καθηγητών, αργές ώρες, φόρτος" style="margin-right:0.5rem">⚖️ Ποιότητα</button>
+                            <button class="btn btn-primary" id="tt-publish" title="Δημοσίευση: ποιοι καθηγητές επηρεάζονται και το μήνυμα για τον καθένα" style="margin-right:0.25rem">📢 Δημοσίευση</button>
                             <button class="btn btn-secondary" id="tt-bulk-export" title="Όλα τα προγράμματα μαζί: εκτύπωση με μία σελίδα ανά καθηγητή/τμήμα, ή Excel" style="margin-right:0.25rem">📦 Μαζική εξαγωγή</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση: με επιλεγμένο καθηγητή/μαθητή ανοίγει καθαρή σελίδα εκτύπωσης" style="margin-right:0.25rem">🖨️ Εκτύπωση</button>
                             <button class="btn btn-secondary" id="tt-ics" title="Εξαγωγή .ics για Google/Apple Calendar (διάλεξε πρώτα καθηγητή ή μαθητή στο φίλτρο)" style="margin-right:0.5rem">📆 ICS</button>
@@ -241,6 +242,8 @@ const TimetableView = {
             // χωράει από την Παλέτα, σε ΝΕΟ πρόγραμμα (το τρέχον δεν αλλάζει).
             document.getElementById('tt-fill').addEventListener('click', () =>
                 this._openFillGaps(solutionId, solution, container));
+            document.getElementById('tt-publish').addEventListener('click', () =>
+                this._openPublish(solutionId));
 
             // Slots passed to the grid. For "student" view we pre-filter
             // to only the slots whose class the selected student attends;
@@ -698,6 +701,47 @@ const TimetableView = {
                 Toast.error(`Δεν έγινε: ${err.message}`);
             }
         }, { saveText: '🧩 Εκτέλεση' });
+    },
+
+    /** 📢 Δημοσίευση: προεπισκόπηση ανά καθηγητή → επιβεβαίωση → στιγμιότυπο. */
+    async _openPublish(solutionId) {
+        Modal.open('📢 Δημοσίευση προγράμματος',
+            '<div class="loading-spinner"><div class="spinner"></div></div>', null, { hideFooter: true, wide: true });
+        let preview;
+        try {
+            preview = await API.solver.publishPreview(solutionId);
+        } catch (err) {
+            Modal.close();
+            Toast.error(err.message);
+            return;
+        }
+        const nothingNew = !preview.first && !preview.teachers.length;
+        Modal.open('📢 Δημοσίευση προγράμματος', TimetableHelpers.buildPublishHtml(preview),
+            nothingNew ? null : () => this._confirmPublish(solutionId),
+            { wide: true, hideFooter: nothingNew, saveText: '📢 Δημοσίευση' });
+        document.querySelectorAll('#modal-body .pub-copy').forEach(btn =>
+            btn.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(preview.teachers[Number(btn.dataset.idx)].message);
+                    Toast.success('Αντιγράφηκε.');
+                } catch (_) {
+                    Toast.error('Η αντιγραφή δεν επιτρέπεται εδώ — επίλεξε το κείμενο χειροκίνητα.');
+                }
+            }));
+    },
+
+    async _confirmPublish(solutionId) {
+        const note = document.getElementById('pub-note')?.value || '';
+        const notify = !!document.getElementById('pub-telegram')?.checked;
+        try {
+            const res = await API.solver.publish(solutionId, { note, notify_telegram: notify });
+            Modal.close();
+            Toast.success(notify
+                ? `✅ Δημοσιεύτηκε — ${res.teachers_notified} μηνύματα έρχονται στο Telegram σε λίγα λεπτά.`
+                : `✅ Δημοσιεύτηκε (${res.teachers_notified} καθηγητές).`);
+        } catch (err) {
+            Toast.error(err.message);
+        }
     },
 
     /** 🕘 Ιστορικό αλλαγών με «αναίρεση μέχρι εδώ». */
