@@ -133,6 +133,9 @@ const API = {
             API.delete(`/lessons/${id}${force ? '?force=true' : ''}`),
         impact: (id) => API.get(`/lessons/${id}/impact`),
         trimUnplaced: (id) => API.post(`/lessons/${id}/trim-unplaced`),
+        paletteReview: (termId = null) =>
+            API.get(`/lessons/palette-review${termId != null ? `?term_id=${termId}` : ''}`),
+        paletteCleanup: (body) => API.post('/lessons/palette-cleanup', body),
         importFromTerm: (sourceTermId, lessonIds) =>
             API.post('/lessons/import-from-term',
                 { source_term_id: sourceTermId, lesson_ids: lessonIds }),

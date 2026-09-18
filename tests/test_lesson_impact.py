@@ -195,3 +195,60 @@ def test_delete_without_placed_hours_needs_no_force(client):
     _slots(client, sol, lesson, placed=0, unplaced=2)
     assert client.delete(f"/api/lessons/{lesson.id}").status_code == 204
     assert client.session.query(Lesson).filter(Lesson.id == lesson.id).first() is None
+
+
+# ─── 🧹 μαζικό καθάρισμα Παλέτας ──────────────────────────────────────
+
+
+@pytest.fixture()
+def cleanup_env(client):
+    """l1: περισσεύει 1 ώρα (trim)· l2: μόνο Παλέτα (delete)· l3: τις κρατά
+    άλλο πρόγραμμα (keep)· l4: όλες τοποθετημένες (εκτός λίστας)·
+    l5: ώρες Παλέτας μόνο σε ΑΡΧΕΙΟΘΕΤΗΜΕΝΟ πρόγραμμα (εκτός λίστας)."""
+    from backend.models import TimetableSolution as TS
+    import datetime as _dt
+
+    c = client
+    a, b = _solution(c, "Α"), _solution(c, "Β")
+    old = _solution(c, "Παλιό")
+    old.archived_at = _dt.datetime(2026, 9, 18)
+    c.session.commit()
+    l1, l2, l3, l4, l5 = _lesson(c, 4), _lesson(c, 2), _lesson(c, 3), _lesson(c, 2), _lesson(c, 1)
+    _slots(c, a, l1, placed=3, unplaced=1)
+    _slots(c, b, l1, placed=1, unplaced=3)
+    _slots(c, a, l2, unplaced=2)
+    _slots(c, a, l3, unplaced=3)
+    _slots(c, b, l3, placed=3)
+    _slots(c, a, l4, placed=2)
+    _slots(c, old, l5, unplaced=1)
+    assert c.session.query(TS).count() == 3
+    return c, {"l1": l1.id, "l2": l2.id, "l3": l3.id, "l4": l4.id, "l5": l5.id, "a": a.id, "b": b.id}
+
+
+def test_palette_review_suggests_only_safe_actions(cleanup_env):
+    c, ids = cleanup_env
+    review = c.get("/api/lessons/palette-review?term_id=1").json()
+    by = {i["lesson_id"]: i for i in review["items"]}
+    assert set(by) == {ids["l1"], ids["l2"], ids["l3"]}          # όχι l4 (όλα μέσα), όχι l5 (αρχείο)
+    assert by[ids["l1"]]["suggestion"] == "trim" and by[ids["l1"]]["trim"]["would_remove"] == 1
+    assert by[ids["l2"]]["suggestion"] == "delete"
+    assert by[ids["l3"]]["suggestion"] == "keep"
+    assert [i["suggestion"] for i in review["items"]] == ["trim", "delete", "keep"]
+    assert review["totals"] == {"lessons": 3, "palette_hours": 9, "trim_hours": 1, "deletable": 1}
+
+
+def test_palette_cleanup_never_touches_placed_hours(cleanup_env):
+    c, ids = cleanup_env
+    res = c.post("/api/lessons/palette-cleanup", json={
+        "trim_ids": [ids["l1"], ids["l3"]], "delete_ids": [ids["l2"], ids["l3"], 999]}).json()
+    assert (res["trimmed"], res["deleted"]) == (1, 1)
+    assert res["hours_removed"] == 2                             # 1 ώρα × 2 προγράμματα Παλέτας
+    skipped = {s["lesson_id"]: s["reason"] for s in res["skipped"]}
+    assert "Δεν περισσεύουν" in skipped[ids["l3"]] or "τοποθετημένες" in skipped[ids["l3"]]
+    assert "Δεν βρέθηκε" in skipped[999]
+
+    assert _counts(c, ids["a"], ids["l1"]) == (3, 0)             # τοποθετημένες ανέγγιχτες
+    assert _counts(c, ids["b"], ids["l1"]) == (1, 2)
+    assert c.session.query(Lesson).filter(Lesson.id == ids["l2"]).first() is None
+    assert _counts(c, ids["b"], ids["l3"]) == (3, 0)             # το l3 δεν σβήστηκε
+    assert c.session.query(Lesson).filter(Lesson.id == ids["l3"]).first() is not None

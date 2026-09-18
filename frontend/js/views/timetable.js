@@ -740,6 +740,11 @@ const TimetableView = {
      * το μάθημα ΠΡΙΝ ο χρήστης σβήσει ώρες, και προσφέρει τις δύο ασφαλείς
      * ενέργειες (καθάρισμα Παλέτας / διαγραφή μαθήματος με επιβεβαίωση).
      */
+    /** 🧹 Μαζικό καθάρισμα Παλέτας (ίδιοι κανόνες ασφαλείας με το 🔍). */
+    openPaletteCleanup() {
+        PaletteCleanupModal.open(() => this.reloadAfterLessonChange());
+    },
+
     inspectLesson(lessonId) {
         LessonImpactModal.open(lessonId, () => this.reloadAfterLessonChange());
     },

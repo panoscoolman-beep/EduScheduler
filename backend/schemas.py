@@ -355,6 +355,14 @@ class SlotSwapRequest(BaseModel):
     slot_b_id: int
 
 
+class PaletteCleanupRequest(BaseModel):
+    """Μαζικό καθάρισμα Παλέτας: ποια μαθήματα-κάρτες να «κοπούν» στις
+    τοποθετημένες ώρες και ποια να διαγραφούν (μόνο όσα δεν έχουν ΚΑΜΙΑ
+    τοποθετημένη ώρα — ο server το ξαναελέγχει)."""
+    trim_ids: list[int] = Field(default_factory=list)
+    delete_ids: list[int] = Field(default_factory=list)
+
+
 class SolutionRename(BaseModel):
     """Μετονομασία προγράμματος (λύσης) — αλλάζει ΜΟΝΟ το όνομα."""
     name: str = Field(..., max_length=200)

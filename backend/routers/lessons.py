@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom
-from backend.services.lesson_impact import lesson_impact
+from backend.services.lesson_impact import lesson_impact, palette_review
 from backend.schemas import (
+    PaletteCleanupRequest,
     LessonCreate,
     LessonResponse,
     LessonTermImportRequest,
@@ -94,6 +95,49 @@ def distribution_suggestions(
             }
             for s in splits
         ],
+    }
+
+
+@router.get("/palette-review")
+def get_palette_review(term_id: int | None = None, db: Session = Depends(get_db)):
+    """🧹 Όλα τα μαθήματα-κάρτες με ώρες στην Παλέτα + ασφαλής πρόταση για
+    το καθένα (trim / delete / keep). Read-only. Default: το ενεργό σενάριο."""
+    return palette_review(db, term_id if term_id is not None else get_active_term_id(db))
+
+
+@router.post("/palette-cleanup")
+def apply_palette_cleanup(data: PaletteCleanupRequest, db: Session = Depends(get_db)):
+    """Εφαρμογή του καθαρίσματος. Κάθε μάθημα ΞΑΝΑΕΛΕΓΧΕΤΑΙ εδώ (τα δεδομένα
+    μπορεί να άλλαξαν από την προεπισκόπηση):
+      • trim: μόνο αν ακόμα περισσεύουν ώρες — ποτέ τοποθετημένη ώρα·
+      • delete: μόνο αν δεν υπάρχει ΚΑΜΙΑ τοποθετημένη ώρα σε κανένα πρόγραμμα.
+    Ό,τι δεν είναι ασφαλές παραλείπεται με αιτία."""
+    trimmed, hours_removed, deleted, skipped = 0, 0, 0, []
+    for lesson_id in dict.fromkeys(int(i) for i in data.trim_ids):
+        report = lesson_impact(db, lesson_id)
+        if report is None:
+            skipped.append({"lesson_id": lesson_id, "reason": "Δεν βρέθηκε."})
+        elif not report["trim"]["can_trim"]:
+            skipped.append({"lesson_id": lesson_id, "reason": "Δεν περισσεύουν πια ώρες."})
+        else:
+            hours_removed += _apply_trim(db, lesson_id, report["trim"]["trim_to"])
+            trimmed += 1
+    for lesson_id in dict.fromkeys(int(i) for i in data.delete_ids):
+        report = lesson_impact(db, lesson_id)
+        if report is None:
+            skipped.append({"lesson_id": lesson_id, "reason": "Δεν βρέθηκε."})
+        elif report["delete"]["placed_total"]:
+            skipped.append({"lesson_id": lesson_id,
+                            "reason": "Έχει τοποθετημένες ώρες — διάγραψέ το από το 🔍 αν το θες."})
+        else:
+            db.delete(db.query(Lesson).filter(Lesson.id == lesson_id).first())
+            db.commit()
+            deleted += 1
+    return {
+        "trimmed": trimmed, "hours_removed": hours_removed, "deleted": deleted, "skipped": skipped,
+        "message": (f"Αφαιρέθηκαν {hours_removed} ώρες από την Παλέτα ({trimmed} μαθήματα) και "
+                    f"διαγράφηκαν {deleted} μαθήματα χωρίς τοποθετημένες ώρες. Καμία τοποθετημένη "
+                    "ώρα δεν πειράχτηκε."),
     }
 
 
@@ -191,6 +235,15 @@ def lesson_impact_report(lesson_id: int, db: Session = Depends(get_db)):
     return report
 
 
+def _apply_trim(db: Session, lesson_id: int, trim_to: int) -> int:
+    """Ώρες/εβδ. → trim_to και συγχρονισμός· σβήνονται ΜΟΝΟ ώρες Παλέτας."""
+    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    lesson.periods_per_week = trim_to
+    db.commit()
+    sync = sync_lesson_slot_count(db, lesson_id)
+    return sum(int(s.get("removed", 0)) for s in sync.get("synced", []))
+
+
 @router.post("/{lesson_id}/trim-unplaced")
 def trim_unplaced_hours(lesson_id: int, db: Session = Depends(get_db)):
     """Κράτα μόνο τις ώρες που χρησιμοποιούνται: οι ώρες/εβδομάδα πέφτουν στις
@@ -212,11 +265,7 @@ def trim_unplaced_hours(lesson_id: int, db: Session = Depends(get_db)):
             "impact": report,
         })
 
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
-    lesson.periods_per_week = trim["trim_to"]
-    db.commit()
-    sync = sync_lesson_slot_count(db, lesson_id)
-    removed = sum(int(s.get("removed", 0)) for s in sync.get("synced", []))
+    removed = _apply_trim(db, lesson_id, trim["trim_to"])
     return {
         "lesson_id": lesson_id,
         "periods_per_week": trim["trim_to"],

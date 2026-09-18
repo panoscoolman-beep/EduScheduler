@@ -934,6 +934,9 @@ const TimetableHelpers = {
             <div class="card mt-lg lesson-palette" style="border-left: 4px solid ${done ? 'var(--success, #10B981)' : 'var(--primary, #3B82F6)'};">
                 <div class="card-header" style="cursor:pointer;" onclick="TimetableView.togglePalette()">
                     <h2 class="card-title">🎨 Παλέτα Μαθημάτων — ${totals.hours_placed}/${totals.hours_total} ώρες τοποθετημένες${done ? ' ✅' : ''}</h2>
+                    ${totals.hours_remaining > 0 ? `<button class="btn btn-secondary btn-sm" id="palette-cleanup"
+                            onclick="event.stopPropagation(); TimetableView.openPaletteCleanup()"
+                            title="Δες τι περισσεύει στην Παλέτα και καθάρισέ το με ασφάλεια">🧹 Καθάρισμα</button>` : ''}
                     <button class="btn btn-secondary btn-sm" id="palette-toggle"
                             onclick="event.stopPropagation(); TimetableView.togglePalette()">
                         ${ui.collapsed ? '▸ Εμφάνιση' : '▾ Απόκρυψη'}
