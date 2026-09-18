@@ -322,6 +322,53 @@ const TimetableHelpers = {
                 <div style="max-height:400px; overflow:auto"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
     },
 
+    /** 🕳 Γραμμές της αναφοράς κενών για μαθητές ή καθηγητές, με φίλτρα. */
+    filterGapRows(report, kind, onlyGaps, query) {
+        const rows = (report && report[kind === 'teacher' ? 'teachers' : 'students']) || [];
+        const q = (query || '').trim().toLocaleLowerCase('el');
+        return rows.filter(r => (!onlyGaps || r.gap_total > 0) &&
+            (!q || `${r.name} ${r.grade || ''}`.toLocaleLowerCase('el').includes(q)));
+    },
+
+    buildGapsTableHtml(rows, kind) {
+        const esc = TimetableHelpers.esc;
+        if (!rows.length) return '<p class="text-muted">✅ Κανένα κενό με αυτά τα φίλτρα.</p>';
+        const body = rows.map(r => {
+            const gaps = r.gaps.map(g => `
+                <div class="gap-line">${esc(g.day_name)} ${esc(g.from)}–${esc(g.to)}
+                    <small>(${g.hours} ${g.hours === 1 ? 'ώρα' : 'ώρες'})</small>
+                    <button class="btn btn-secondary btn-sm gap-suggest" data-kind="${kind}"
+                            data-id="${r.id}" data-day="${g.day}">💡 Πρόταση</button>
+                    <div class="gap-suggestions" data-for="${kind}-${r.id}-${g.day}"></div>
+                </div>`).join('');
+            return `<tr>
+                        <td><b>${esc(r.name)}</b>${r.grade ? `<br><small>${esc(r.grade)}</small>` : ''}</td>
+                        <td>${r.weekly_hours}</td><td>${r.days}</td>
+                        <td>${r.gap_total ? `<b>${r.gap_total}</b>` : '0'}</td>
+                        <td>${gaps || '<span class="text-muted">—</span>'}</td>
+                    </tr>`;
+        }).join('');
+        return `<table class="data-table"><thead><tr>
+                    <th>${kind === 'teacher' ? 'Καθηγητής' : 'Μαθητής'}</th><th>Ώρες/εβδ.</th>
+                    <th>Μέρες</th><th>Κενά</th><th>Πού</th></tr></thead><tbody>${body}</tbody></table>`;
+    },
+
+    buildGapSuggestionsHtml(list) {
+        const esc = TimetableHelpers.esc;
+        if (!list || !list.length) {
+            return `<small class="text-muted">Καμία μετακίνηση μίας ώρας δεν κλείνει αυτό το κενό χωρίς
+                    να χαλάσει κάτι άλλο — δοκίμασε σύρσιμο με τα 🎯 κελιά.</small>`;
+        }
+        return list.map((s, i) => {
+            const effects = s.effects.map(e => `${esc(e.name)} ${e.delta > 0 ? '+' : ''}${e.delta}`).join(', ');
+            return `<div class="gap-suggestion" style="margin:0.25rem 0 0.25rem 1rem">
+                        🔀 <b>${esc(s.lesson)}</b>: ${esc(s.from)} → ${esc(s.to)}
+                        <small>(κενά ${s.gap_delta}: ${effects})</small>
+                        <button class="btn btn-primary btn-sm gap-apply" data-idx="${i}">Εφαρμογή</button>
+                    </div>`;
+        }).join('');
+    },
+
     /** 📢 mailto: με έτοιμο θέμα/κείμενο — ανοίγει το δικό σου email, δεν στέλνει μόνο του. */
     publishMailto(teacher) {
         if (!teacher || !teacher.email) return '';

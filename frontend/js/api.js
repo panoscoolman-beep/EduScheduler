@@ -181,6 +181,9 @@ const API = {
             API.post(`/solver/solutions/${solutionId}/slots/swap`,
                 { slot_a_id: slotAId, slot_b_id: slotBId }),
         history: (solutionId, limit = 20) => API.get(`/solver/solutions/${solutionId}/history?limit=${limit}`),
+        gaps: (solutionId) => API.get(`/solver/solutions/${solutionId}/gaps`),
+        gapSuggestions: (solutionId, kind, personId, day) =>
+            API.get(`/solver/solutions/${solutionId}/gaps/suggestions?kind=${kind}&person_id=${personId}&day=${day}`),
         publishPreview: (solutionId) => API.get(`/publications/preview/${solutionId}`),
         publish: (solutionId, data) => API.post(`/publications/solutions/${solutionId}`, data),
         undoTo: (solutionId, entryId) =>

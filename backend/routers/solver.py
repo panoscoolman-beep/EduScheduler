@@ -41,6 +41,7 @@ from backend.schemas import (
 from backend.services.feasibility import check_feasibility
 from backend.services.solution_diff import compute_diff
 from backend.services.violations_report import compute_violations
+from backend.services import gaps_report
 
 router = APIRouter()
 
@@ -69,6 +70,33 @@ def solution_violations(solution_id: int, db: Session = Depends(get_db)):
     if report is None:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
     return report
+
+
+def _solution_or_404(db: Session, solution_id: int) -> TimetableSolution:
+    sol = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    if sol is None:
+        raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    return sol
+
+
+@router.get("/solutions/{solution_id}/gaps")
+def solution_gaps(solution_id: int, db: Session = Depends(get_db)):
+    """🕳 Ώρες/εβδομάδα και κενά ανά μαθητή και καθηγητή."""
+    _solution_or_404(db, solution_id)
+    return gaps_report.gaps_report(db, solution_id)
+
+
+@router.get("/solutions/{solution_id}/gaps/suggestions")
+def solution_gap_suggestions(
+    solution_id: int,
+    kind: str = Query(..., pattern="^(student|teacher)$"),
+    person_id: int = Query(...),
+    day: int = Query(..., ge=0, le=6),
+    db: Session = Depends(get_db),
+):
+    """💡 Μετακινήσεις μίας ώρας που κλείνουν το κενό χωρίς νέες συγκρούσεις."""
+    _solution_or_404(db, solution_id)
+    return gaps_report.suggestions(db, solution_id, kind, person_id, day)
 
 
 @router.get("/readiness")

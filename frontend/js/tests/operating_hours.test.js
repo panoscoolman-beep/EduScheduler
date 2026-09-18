@@ -202,3 +202,35 @@ test('buildPublishHtml: επηρεαζόμενοι, escaping, Παλέτα, «τ
         previous: { solution_name: 'Α', published_at: '' } });
     assert.ok(none.includes('Δεν άλλαξε τίποτα') && !none.includes('pub-telegram'));
 });
+
+const GAP_REPORT = {
+    students: [
+        { id: 1, name: 'Παππάς Νίκος', grade: 'Β΄ Λυκείου', weekly_hours: 6, days: 2, gap_total: 2,
+          gaps: [{ day: 1, day_name: 'Τρίτη', from: '17:00', to: '19:00', hours: 2 }] },
+        { id: 2, name: 'Άλφα <b>', grade: 'Γ΄ Λυκείου', weekly_hours: 4, days: 2, gap_total: 0, gaps: [] },
+    ],
+    teachers: [{ id: 9, name: 'Τ', grade: '', weekly_hours: 10, days: 3, gap_total: 0, gaps: [] }],
+};
+
+test('filterGapRows: μόνο με κενά, αναζήτηση σε όνομα/τάξη, καθηγητές', () => {
+    assert.deepEqual(H.filterGapRows(GAP_REPORT, 'student', true, '').map(r => r.id), [1]);
+    assert.deepEqual(H.filterGapRows(GAP_REPORT, 'student', false, 'γ΄ λυκ').map(r => r.id), [2]);
+    assert.deepEqual(H.filterGapRows(GAP_REPORT, 'student', false, 'ΠΑΠΠΆΣ').map(r => r.id), [1]);  // κεφαλαία + τελικό ς
+    assert.equal(H.filterGapRows(GAP_REPORT, 'teacher', false, '').length, 1);
+    assert.deepEqual(H.filterGapRows(null, 'student', true, ''), []);
+});
+
+test('buildGapsTableHtml: 💡 ανά κενό με σωστά data-*, escaping', () => {
+    const html = H.buildGapsTableHtml(GAP_REPORT.students, 'student');
+    assert.ok(html.includes('data-kind="student"') && html.includes('data-id="1"') && html.includes('data-day="1"'));
+    assert.ok(html.includes('Τρίτη 17:00–19:00') && html.includes('2 ώρες'));
+    assert.ok(html.includes('Άλφα &lt;b&gt;'));
+    assert.ok(H.buildGapsTableHtml([], 'student').includes('Κανένα κενό'));
+});
+
+test('buildGapSuggestionsHtml: επιπτώσεις με πρόσημο ή «καμία μετακίνηση»', () => {
+    const html = H.buildGapSuggestionsHtml([{ lesson: 'ΦΥΣΙΚΗ (Β2)', from: 'Τρίτη 19:00', to: 'Τρίτη 17:00',
+        gap_delta: -1, effects: [{ name: 'Νίκος', delta: -2 }, { name: 'Τ2', delta: 1 }] }]);
+    assert.ok(html.includes('Νίκος -2, Τ2 +1') && html.includes('data-idx="0"'));
+    assert.ok(H.buildGapSuggestionsHtml([]).includes('Καμία μετακίνηση'));
+});

@@ -81,7 +81,8 @@ const TimetableView = {
                             <button class="btn btn-secondary" id="tt-fill" title="Κράτα ΟΛΑ όσα έχεις βάλει και άφησε τον solver να τοποθετήσει τις ώρες της Παλέτας — σε νέο πρόγραμμα" style="margin-right:0.5rem">🧩 Γέμισε τα κενά</button>
                             <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
                             <button class="btn btn-secondary" id="tt-diff" title="Slot-level διαφορές με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε" style="margin-right:0.25rem">🔀 Τι άλλαξε;</button>
-                            <button class="btn btn-secondary" id="tt-violations" title="Γιατί αυτό το score; Κενά καθηγητών, αργές ώρες, φόρτος" style="margin-right:0.5rem">⚖️ Ποιότητα</button>
+                            <button class="btn btn-secondary" id="tt-violations" title="Γιατί αυτό το score; Κενά καθηγητών, αργές ώρες, φόρτος" style="margin-right:0.25rem">⚖️ Ποιότητα</button>
+                            <button class="btn btn-secondary" id="tt-gaps" title="Ώρες/εβδομάδα και κενά κάθε μαθητή και καθηγητή — με προτάσεις διόρθωσης" style="margin-right:0.5rem">🕳 Κενά</button>
                             <button class="btn btn-primary" id="tt-publish" title="Δημοσίευση: ποιοι καθηγητές επηρεάζονται και το μήνυμα για τον καθένα" style="margin-right:0.25rem">📢 Δημοσίευση</button>
                             <button class="btn btn-secondary" id="tt-bulk-export" title="Όλα τα προγράμματα μαζί: εκτύπωση με μία σελίδα ανά καθηγητή/τμήμα, ή Excel" style="margin-right:0.25rem">📦 Μαζική εξαγωγή</button>
                             <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση: με επιλεγμένο καθηγητή/μαθητή ανοίγει καθαρή σελίδα εκτύπωσης" style="margin-right:0.25rem">🖨️ Εκτύπωση</button>
@@ -244,6 +245,8 @@ const TimetableView = {
                 this._openFillGaps(solutionId, solution, container));
             document.getElementById('tt-publish').addEventListener('click', () =>
                 this._openPublish(solutionId));
+            document.getElementById('tt-gaps').addEventListener('click', () =>
+                this._openGaps(solutionId, container));
 
             // Slots passed to the grid. For "student" view we pre-filter
             // to only the slots whose class the selected student attends;
@@ -701,6 +704,70 @@ const TimetableView = {
                 Toast.error(`Δεν έγινε: ${err.message}`);
             }
         }, { saveText: '🧩 Εκτέλεση' });
+    },
+
+    /** 🕳 Κενά ανά μαθητή/καθηγητή, με 💡 προτάσεις που εφαρμόζονται (και αναιρούνται). */
+    async _openGaps(solutionId, container) {
+        Modal.open('🕳 Κενά & ώρες ανά εβδομάδα',
+            '<div class="loading-spinner"><div class="spinner"></div></div>', null, { hideFooter: true, wide: true });
+        let report;
+        try {
+            report = await API.solver.gaps(solutionId);
+        } catch (err) {
+            Modal.close();
+            Toast.error(err.message);
+            return;
+        }
+        const body = document.getElementById('modal-body');
+        if (!body) return;
+        body.innerHTML = `
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-bottom:0.5rem">
+                <select class="form-select" id="gaps-kind" style="width:auto">
+                    <option value="student">🎓 Μαθητές (${report.totals.student_gaps} ώρες κενά)</option>
+                    <option value="teacher">👤 Καθηγητές (${report.totals.teacher_gaps} ώρες κενά)</option>
+                </select>
+                <input class="form-input" id="gaps-search" placeholder="Αναζήτηση ονόματος/τάξης" style="width:auto; flex:1">
+                <label><input type="checkbox" id="gaps-only" checked> μόνο με κενά</label>
+            </div>
+            <div id="gaps-table" style="max-height:60vh; overflow:auto"></div>`;
+        const draw = () => {
+            const kind = document.getElementById('gaps-kind').value;
+            const rows = TimetableHelpers.filterGapRows(report, kind,
+                document.getElementById('gaps-only').checked, document.getElementById('gaps-search').value);
+            document.getElementById('gaps-table').innerHTML = TimetableHelpers.buildGapsTableHtml(rows, kind);
+        };
+        ['gaps-kind', 'gaps-only'].forEach(id => document.getElementById(id).addEventListener('change', draw));
+        document.getElementById('gaps-search').addEventListener('input', draw);
+        document.getElementById('gaps-table').addEventListener('click', (e) => {
+            const btn = e.target.closest('.gap-suggest');
+            if (btn) this._showGapSuggestions(solutionId, container, btn);
+        });
+        draw();
+    },
+
+    async _showGapSuggestions(solutionId, container, btn) {
+        const { kind, id, day } = btn.dataset;
+        const box = document.querySelector(`.gap-suggestions[data-for="${kind}-${id}-${day}"]`);
+        box.innerHTML = '<small>⏳ ψάχνω…</small>';
+        try {
+            const list = await API.solver.gapSuggestions(solutionId, kind, id, day);
+            box.innerHTML = TimetableHelpers.buildGapSuggestionsHtml(list);
+            box.querySelectorAll('.gap-apply').forEach(b => b.addEventListener('click', async () => {
+                const s = list[Number(b.dataset.idx)];
+                try {
+                    await API.solver.updateSlot(solutionId, s.slot_id,
+                        { day_of_week: s.day_of_week, period_id: s.period_id });
+                    Toast.success(`✅ ${s.lesson}: ${s.from} → ${s.to} (αναίρεση με Ctrl+Z)`);
+                    await this.render(container);
+                    await this._openGaps(solutionId, container);
+                } catch (err) {
+                    Toast.error(err.message);
+                }
+            }));
+        } catch (err) {
+            box.innerHTML = '';
+            Toast.error(err.message);
+        }
     },
 
     /** 📢 Δημοσίευση: προεπισκόπηση ανά καθηγητή → επιβεβαίωση → στιγμιότυπο. */
