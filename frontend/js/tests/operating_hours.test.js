@@ -127,3 +127,18 @@ test('Σάββατο με δικό του ωράριο: πρωινά κελιά 
     const cell = document.querySelector('td.droppable-cell[data-day="1"][data-period="1"]');
     assert.ok(cell && cell.querySelector('[data-slot-id="9"]'));
 });
+
+test('buildReadinessHtml: έτοιμο / προειδοποιήσεις με ονόματα / μόνο πληροφορίες', () => {
+    assert.match(H.buildReadinessHtml({ ok: true, checks: [] }), /όλα έτοιμα/);
+    const html = H.buildReadinessHtml({ ok: false, checks: [
+        { key: 'students_without_class', level: 'warning', title: 'Μαθητές χωρίς κανένα τμήμα',
+          hint: 'Δεν θα μπουν στο πρόγραμμα.', count: 17, names: ['Β <Μαρία>', 'Γ Ελένη'] },
+        { key: 'term_without_dates', level: 'info', title: 'Χωρίς ημερομηνίες', hint: 'ICS', count: 1, names: [] },
+    ] });
+    assert.match(html, /υπάρχουν εκκρεμότητες/);
+    assert.match(html, /⚠️ <b>Μαθητές χωρίς κανένα τμήμα<\/b> \(17\)/);
+    assert.match(html, /Β &lt;Μαρία&gt;, Γ Ελένη … και άλλοι 15/);
+    assert.match(html, /ℹ️ <b>Χωρίς ημερομηνίες<\/b>/);
+    assert.match(H.buildReadinessHtml({ ok: true, checks: [
+        { key: 'x', level: 'info', title: 'Τ', hint: 'h', count: 1, names: [] }] }), /μπορείς να προχωρήσεις/);
+});

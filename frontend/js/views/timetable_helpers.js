@@ -292,6 +292,29 @@ const TimetableHelpers = {
         return hit ? hit.classroom_id : null;
     },
 
+    /** «📋 Έλεγχος δεδομένων» της σελίδας Δημιουργίας — pure HTML. */
+    buildReadinessHtml(report) {
+        const esc = TimetableHelpers.esc;
+        const checks = (report && report.checks) || [];
+        if (!checks.length) {
+            return '<div class="readiness readiness-ok">📋 Έλεγχος δεδομένων: ✅ όλα έτοιμα.</div>';
+        }
+        const items = checks.map(c => {
+            const icon = c.level === 'warning' ? '⚠️' : 'ℹ️';
+            const count = c.names && c.names.length ? ` (${c.count})` : '';
+            const more = c.count > (c.names || []).length ? ` … και άλλοι ${c.count - c.names.length}` : '';
+            const names = c.names && c.names.length
+                ? `<details><summary>Δες ποιοι</summary><small>${c.names.map(esc).join(', ')}${more}</small></details>`
+                : '';
+            return `<li class="readiness-${c.level}">${icon} <b>${esc(c.title)}</b>${count}
+                        <br><small class="text-muted">${esc(c.hint)}</small>${names}</li>`;
+        }).join('');
+        const head = report.ok
+            ? '📋 Έλεγχος δεδομένων: μόνο πληροφορίες — μπορείς να προχωρήσεις.'
+            : '📋 Έλεγχος δεδομένων: υπάρχουν εκκρεμότητες πριν από τη δημιουργία.';
+        return `<div class="readiness"><p><b>${head}</b></p><ul>${items}</ul></div>`;
+    },
+
     timeToMinutes(hhmm) {
         const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm ?? '').trim());
         if (!m) return null;

@@ -1521,3 +1521,10 @@ td.closed-cell {
     background: repeating-linear-gradient(135deg, rgba(148,163,184,0.06) 0 6px, transparent 6px 12px);
     cursor: not-allowed;
 }
+
+/* «📋 Έλεγχος δεδομένων» στη Δημιουργία */
+.readiness { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 0.6rem 0.9rem; }
+.readiness ul { margin: 0.4rem 0 0 1rem; }
+.readiness li { margin-bottom: 0.4rem; }
+.readiness-ok { color: var(--accent-emerald, #10B981); }
+.readiness-warning b { color: var(--accent-amber, #F59E0B); }

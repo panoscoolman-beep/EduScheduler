@@ -49,6 +49,8 @@ const GenerateView = {
                     </p>
                 </div>
 
+                <div id="gen-readiness" style="margin-bottom:var(--space-md); text-align:left; max-width:600px; margin-left:auto; margin-right:auto;"></div>
+
                 <div style="display:flex; gap:var(--space-sm); justify-content:center; flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-lg" id="gen-feasibility">
                         🔍 Έλεγχος Εφικτότητας
@@ -81,8 +83,20 @@ const GenerateView = {
         `;
 
         document.getElementById('gen-start').addEventListener('click', () => this._startGeneration());
+        this._loadReadiness();
         document.getElementById('gen-feasibility').addEventListener('click', () => this._runFeasibilityCheck());
         this._loadSolutions();
+    },
+
+    /** «📋 Έλεγχος δεδομένων» — τρέχει αυτόματα (read-only, ελαφρύ). */
+    async _loadReadiness() {
+        const box = document.getElementById('gen-readiness');
+        if (!box) return;
+        try {
+            box.innerHTML = TimetableHelpers.buildReadinessHtml(await API.solver.readiness());
+        } catch (err) {
+            box.innerHTML = '';                    // βοηθητικό — ποτέ δεν μπλοκάρει τη δημιουργία
+        }
     },
 
     async _runFeasibilityCheck() {

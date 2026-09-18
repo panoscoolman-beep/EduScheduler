@@ -163,6 +163,7 @@ const API = {
         updateSlot: (solutionId, slotId, data) => API.put(`/solver/solutions/${solutionId}/slots/${slotId}`, data),
         compare: (ids) => API.get(`/solver/compare?ids=${ids.join(',')}`),
         feasibilityCheck: () => API.get('/solver/feasibility-check'),
+        readiness: () => API.get('/solver/readiness'),
         syncLessonSlots: (solutionId, lessonId) =>
             API.post(`/solver/solutions/${solutionId}/lessons/${lessonId}/sync-slots`, {}),
         placementMap: (solutionId, slotId) =>

@@ -70,6 +70,15 @@ def solution_violations(solution_id: int, db: Session = Depends(get_db)):
     return report
 
 
+@router.get("/readiness")
+def data_readiness(term_id: int | None = None, db: Session = Depends(get_db)):
+    """«📋 Έλεγχος δεδομένων»: μαθητές χωρίς τμήμα, μαθήματα για κανέναν,
+    σενάριο χωρίς ημερομηνίες κ.λπ. Read-only· default: το ενεργό σενάριο."""
+    from backend.services.readiness import readiness
+
+    return readiness(db, term_id if term_id is not None else get_active_term_id(db))
+
+
 @router.get("/feasibility-check", response_model=FeasibilityReportResponse)
 def feasibility_check(term_id: int | None = None, db: Session = Depends(get_db)):
     """Run a fast pre-solve feasibility analysis without invoking CP-SAT.
