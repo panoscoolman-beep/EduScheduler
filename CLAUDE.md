@@ -79,7 +79,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 `Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
 (βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
 `lifespan` στο `backend/main.py`). Head στις 2026-09-18:
-`e1f5a7c3b9d2_solution_publications.py`. Το `tests/test_alembic_single_head.py`
+`f3a9c1d7e5b2_publication_email_state.py`. Το `tests/test_alembic_single_head.py`
 κόβει διπλό revision id / δεύτερο head πριν φτάσει στο deploy.
 
 **Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
@@ -110,7 +110,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 | `timetable_slots` | Το παραγόμενο πρόγραμμα — ποια ώρα/μέρα/αίθουσα τι μάθημα |
 | `timetable_solutions` | Solver runs — multiple "what-if" λύσεις. `archived_at` = αρχειοθετημένο πρόγραμμα: μένει ακέραιο αλλά βγαίνει από τη λίστα, από τον parking-lot sync και από τον έλεγχο «🔍 Τι επηρεάζει;» (POST /solver/solutions/{id}/archive\|unarchive) |
 | `school_settings` | Global ρυθμίσεις. `visible_from`/`visible_to` («HH:MM») = ωράριο λειτουργίας (+ `saturday_from`/`saturday_to` για το Σάββατο· τα κελιά εκτός ωραρίου της μέρας εμφανίζονται «κλειστά»): κρύβει ώρες εκτός από πλέγμα/εκτυπώσεις/Excel — ποτέ ώρα με τοποθετημένο μάθημα (⏰)· δεσμεύει ΚΑΙ τον solver από 18/9 (H0: κανένα μάθημα εκτός ωραρίου της μέρας, εκτός από κλειδωμένα· `services/operating_hours.py::closed_cells`). PUT = μερική ενημέρωση (`exclude_unset`) |
-| `solution_publications` | 📢 Δημοσιεύσεις προγράμματος (`services/publication.py`, `/api/publications`): αυτοτελές snapshot + έτοιμο μήνυμα ανά επηρεαζόμενο καθηγητή («τι άλλαξε για σένα» σε σχέση με την προηγούμενη δημοσίευση του σεναρίου). Το bot του CRM διαβάζει την ουρά `pending-telegram` ανά 5' και τα στέλνει ΜΟΝΟ στον ιδιοκτήτη για προώθηση |
+| `solution_publications` | 📢 Δημοσιεύσεις προγράμματος (`services/publication.py`, `/api/publications`): αυτοτελές snapshot + έτοιμο μήνυμα ανά επηρεαζόμενο καθηγητή («τι άλλαξε για σένα» σε σχέση με την προηγούμενη δημοσίευση του σεναρίου). Το bot του CRM διαβάζει την ουρά `pending-telegram` ανά 5' και στέλνει ΜΙΑ σύνοψη με κουμπί ανά καθηγητή ΜΟΝΟ στον ιδιοκτήτη. Email (επιλογή παραληπτών κάθε φορά, `email_state`): background task → CRM `POST /api/eds-mail/teacher-schedule` (HTML πίνακας + PDF + .ics από το Gmail του φροντιστηρίου)· `POST /api/publications/{id}/emails` για την τελευταία δημοσίευση, `…/preview/{sid}/test-email` για δοκιμή |
 | `terms` | Σενάρια ωραρίου — scope για lessons/availability/solutions (term_id NOT NULL παντού), προαιρετικά start/end dates για ICS |
 
 > ⚠️ **Η διαγραφή γραμμής στο `periods` είναι καταστροφική.** Τα FK προς

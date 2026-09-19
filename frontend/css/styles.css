@@ -1207,6 +1207,22 @@ a:hover { color: var(--accent-blue-hover); }
     }
 }
 
+/* ── 📢 Δημοσίευση ─────────────────────────────────────── */
+.pub-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0.5rem 0; }
+.pub-list { max-height: 42vh; overflow: auto; border: 1px solid var(--border-default); border-radius: 8px; }
+.pub-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; border-top: 1px solid var(--border-subtle); }
+.pub-row:first-child { border-top: 0; }
+.pub-pick { white-space: nowrap; padding-top: 2px; cursor: pointer; }
+.pub-details { flex: 1; min-width: 0; }
+.pub-details summary { cursor: pointer; }
+.pub-message { white-space: pre-wrap; font-size: 0.82rem; overflow-wrap: anywhere; }
+.pub-badge { font-size: 0.72rem; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border-strong); }
+.pub-changed { border-color: #d97706; color: #f59e0b; }
+.pub-new { border-color: #2563eb; color: #60a5fa; }
+.pub-test { margin-top: 0.6rem; }
+.pub-test-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 0.4rem 0; }
+.pub-test-row .form-select, .pub-test-row .form-input { width: auto; flex: 1; min-width: 160px; }
+
 /* ── 🔄 Νέα έκδοση ──────────────────────────────────────── */
 .version-banner {
     position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2000;

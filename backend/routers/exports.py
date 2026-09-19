@@ -310,7 +310,22 @@ def export_ics(
 ):
     """Weekly-recurring iCalendar feed for one teacher's or student's
     timetable. Import the file into Google Calendar / Outlook / Apple
-    Calendar — each lesson becomes a weekly repeating event.
+    Calendar — each lesson becomes a weekly repeating event."""
+    body = build_ics(db, solution_id, teacher_id, student_id)
+    return Response(
+        content=body,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="timetable_{teacher_id or student_id}.ics"'
+            )
+        },
+    )
+
+
+def build_ics(db: Session, solution_id: int, teacher_id: int | None = None,
+              student_id: int | None = None) -> str:
+    """Το κείμενο .ics (κοινό για το κουμπί εξαγωγής και τα email Δημοσίευσης).
 
     Αν το σενάριο της λύσης έχει start/end dates, τα events αγκυρώνονται
     στην έναρξη, σταματούν στη λήξη (RRULE UNTIL) και εξαιρούν τις
@@ -414,16 +429,7 @@ def export_ics(
         lines += event
 
     lines.append("END:VCALENDAR")
-    body = "\r\n".join(lines) + "\r\n"
-    return Response(
-        content=body,
-        media_type="text/calendar; charset=utf-8",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="timetable_{teacher_id or student_id}.ics"'
-            )
-        },
-    )
+    return "\r\n".join(lines) + "\r\n"
 
 
 # ---------------------------------------------------------------------------

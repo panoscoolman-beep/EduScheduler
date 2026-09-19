@@ -181,28 +181,6 @@ test('fillGapsCounts: τοποθετημένες vs Παλέτα', () => {
     assert.deepEqual(H.fillGapsCounts(null), { placed: 0, palette: 0 });
 });
 
-test('publishMailto: μόνο με email, κωδικοποιημένο κείμενο', () => {
-    assert.equal(H.publishMailto({ email: '' }), '');
-    const url = H.publishMailto({ email: 'g@x.gr', message: 'Δευτέρα 16:00 & <b>' });
-    assert.ok(url.startsWith('mailto:g%40x.gr?subject='));
-    assert.ok(url.includes(encodeURIComponent('Δευτέρα 16:00 & <b>')));
-});
-
-test('buildPublishHtml: επηρεαζόμενοι, escaping, Παλέτα, «τίποτα νέο»', () => {
-    const t = { teacher: '<Γ>', hours: 3, email: '', message: 'x<script>',
-                changes: { moved: [{}], added: [], removed: [{}] } };
-    const html = H.buildPublishHtml({ first: false, unplaced: 2, teachers: [t],
-        previous: { solution_name: 'ΧΕΙΜ', published_at: '2026-09-18T10:00:00' } });
-    assert.ok(html.includes('&lt;Γ&gt;') && !html.includes('<script>'));
-    assert.ok(html.includes('2 αλλαγές') && html.includes('2 ώρες είναι ακόμα στην Παλέτα'));
-    assert.ok(html.includes('id="pub-telegram"') && html.includes('χωρίς email'));
-    const first = H.buildPublishHtml({ first: true, unplaced: 0, teachers: [{ ...t, changes: null }] });
-    assert.ok(first.includes('Πρώτη δημοσίευση') && first.includes('νέο πρόγραμμα'));
-    const none = H.buildPublishHtml({ first: false, unplaced: 0, teachers: [],
-        previous: { solution_name: 'Α', published_at: '' } });
-    assert.ok(none.includes('Δεν άλλαξε τίποτα') && !none.includes('pub-telegram'));
-});
-
 const GAP_REPORT = {
     students: [
         { id: 1, name: 'Παππάς Νίκος', grade: 'Β΄ Λυκείου', weekly_hours: 6, days: 2, gap_total: 2,

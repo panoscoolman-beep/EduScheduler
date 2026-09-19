@@ -96,6 +96,7 @@ def env():
     app.dependency_overrides[get_db] = override_db
     client = TestClient(app)
     client.s, client.sol, client.slot, client.p2 = s, sol, slot, p2
+    client.teacher_id = t.id
     yield client
     s.close()
 
@@ -155,3 +156,102 @@ def test_recreated_card_at_same_hours_is_not_a_change():
     assert ch[1]["added"] == [] and ch[1]["removed"] == []
     assert [(m["from"]["start"], m["to"]["start"]) for m in ch[1]["moved"]] == [("18:00", "19:00")]
     assert svc.teacher_changes(prev, [dict(e, lesson_id=99) for e in prev]) == {}
+
+
+# --- 📨 Telegram μορφή + email ---------------------------------------------------
+
+def test_telegram_format_is_compact_escaped_and_lists_changes_first():
+    prev = [_e(1, 10, 1, "17:00", "18:00", label="Χ<b> (Β2)")]
+    cur = [dict(_e(1, 10, 3, "18:00", "19:00", label="Χ<b> (Β2)"), subject="Χ<b>", klass="Β2", room_short="Α3")]
+    (m,) = svc.build_messages(prev, cur)
+    t = m["telegram"]
+    assert t.index("Αλλαγές") < t.index("<b>Πέμπτη</b>")
+    assert "Τρι 17:00 → Πεμ 18:00" in t and "<code>18–19</code> Χ&lt;b&gt; · Α3" in t
+    assert "<i>Β2</i>" in t and "<b>Χ" not in t
+
+
+def test_unchanged_teachers_are_listed_but_not_marked_changed():
+    prev = [_e(1, 10, 1, "17:00", "18:00"), _e(2, 20, 2, "16:00", "17:00", teacher="Κ")]
+    cur = [_e(1, 10, 3, "18:00", "19:00"), _e(2, 20, 2, "16:00", "17:00", teacher="Κ")]
+    msgs = svc.build_messages(prev, cur)
+    assert [(m["teacher_id"], m["changed"]) for m in msgs] == [(1, True), (2, False)]
+    assert "Καμία αλλαγή" in msgs[1]["message"] and "Καμία αλλαγή" in msgs[1]["telegram"]
+
+
+def _publish_with_email(env, monkeypatch, sender):
+    monkeypatch.setattr(pub_router, "_send_emails_job",
+                        lambda pid: svc.send_emails(env.s, pid, sender))
+    return env.post(f"/api/publications/solutions/{env.sol.id}",
+                    json={"email_teacher_ids": [env.teacher_id]})
+
+
+def test_publish_sends_selected_emails_with_ics_and_records_status(env, monkeypatch):
+    sent = []
+    res = _publish_with_email(env, monkeypatch, lambda p: (sent.append(p), (True, None))[1])
+    assert res.status_code == 200, res.text
+    (p,) = sent
+    assert p["to"] == "g@example.com" and p["first"] is True and p["test"] is False
+    assert p["entries"] == [{"day": 0, "start": "16:00", "end": "17:00", "subject": "ΦΥΣΙΚΗ",
+                             "klass": "Β2", "room": "Αίθ. Α"}]
+    assert "BEGIN:VCALENDAR" in p["ics"]
+    detail = env.get(f"/api/publications/{res.json()['id']}").json()
+    assert detail["email_state"] == "done" and detail["emails"]["sent"] == 1
+    assert detail["messages"][0]["email"]["status"] == "sent"
+    assert "change_lines" not in detail["messages"][0]
+
+
+def test_failed_email_is_recorded_and_telegram_waits_while_sending(env, monkeypatch):
+    res = _publish_with_email(env, monkeypatch, lambda p: (False, "SMTP down"))
+    d = env.get(f"/api/publications/{res.json()['id']}").json()
+    assert d["emails"] == {"requested": 1, "sent": 0, "failed": 1, "pending": 0}
+    assert d["messages"][0]["email"]["error"] == "SMTP down"
+    assert len(env.get("/api/publications/pending-telegram").json()) == 1   # done → σύνοψη φεύγει
+    from backend.models import SolutionPublication
+    pub = env.s.get(SolutionPublication, res.json()["id"])
+    pub.email_state = "sending"
+    env.s.commit()
+    assert env.get("/api/publications/pending-telegram").json() == []       # περιμένει τα email
+
+
+def test_test_email_goes_only_to_given_address_and_publishes_nothing(env, monkeypatch):
+    sent = []
+    monkeypatch.setattr(pub_router.crm_mail, "send_teacher_schedule",
+                        lambda p: (sent.append(p), (True, None))[1])
+    res = env.post(f"/api/publications/preview/{env.sol.id}/test-email",
+                   json={"teacher_id": env.teacher_id, "to": "me@example.com"})
+    assert res.status_code == 200, res.text
+    assert sent[0]["to"] == "me@example.com" and sent[0]["test"] is True
+    assert env.get("/api/publications").json() == []
+    bad = env.post(f"/api/publications/preview/{env.sol.id}/test-email",
+                   json={"teacher_id": env.teacher_id, "to": "not-an-email"})
+    assert bad.status_code == 422
+    monkeypatch.setattr(pub_router.crm_mail, "send_teacher_schedule", lambda p: (False, "SMTP down"))
+    fail = env.post(f"/api/publications/preview/{env.sol.id}/test-email",
+                    json={"teacher_id": env.teacher_id, "to": "me@example.com"})
+    assert fail.status_code == 502 and "SMTP down" in fail.json()["detail"]
+
+
+def test_emails_for_existing_latest_publication_only(env, monkeypatch):
+    sent = []
+    monkeypatch.setattr(pub_router, "_send_emails_job",
+                        lambda pid: svc.send_emails(env.s, pid, lambda p: (sent.append(p), (True, None))[1]))
+    first = env.post(f"/api/publications/solutions/{env.sol.id}", json={}).json()   # χωρίς email
+    assert first["emails"]["requested"] == 0 and sent == []
+    res = env.post(f"/api/publications/{first['id']}/emails", json={"teacher_ids": [env.teacher_id]})
+    assert res.status_code == 200, res.text
+    assert [p["to"] for p in sent] == ["g@example.com"] and sent[0]["first"] is True
+    assert env.get(f"/api/publications/{first['id']}").json()["emails"]["sent"] == 1
+    # νεότερη δημοσίευση → η παλιά δεν στέλνει πια (θα ήταν ξεπερασμένο πρόγραμμα)
+    env.slot.period_id = env.p2.id
+    env.s.commit()
+    env.post(f"/api/publications/solutions/{env.sol.id}", json={})
+    old = env.post(f"/api/publications/{first['id']}/emails", json={"teacher_ids": [env.teacher_id]})
+    assert old.status_code == 409 and old.json()["detail"]["code"] == "not_latest"
+    assert env.post("/api/publications/999/emails", json={"teacher_ids": [1]}).status_code == 404
+
+
+def test_emails_need_someone_with_an_address(env, monkeypatch):
+    monkeypatch.setattr(pub_router, "_send_emails_job", lambda pid: None)
+    pub = env.post(f"/api/publications/solutions/{env.sol.id}", json={}).json()
+    res = env.post(f"/api/publications/{pub['id']}/emails", json={"teacher_ids": [12345]})
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "no_recipients"

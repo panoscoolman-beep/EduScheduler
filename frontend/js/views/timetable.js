@@ -770,45 +770,9 @@ const TimetableView = {
         }
     },
 
-    /** 📢 Δημοσίευση: προεπισκόπηση ανά καθηγητή → επιβεβαίωση → στιγμιότυπο. */
-    async _openPublish(solutionId) {
-        Modal.open('📢 Δημοσίευση προγράμματος',
-            '<div class="loading-spinner"><div class="spinner"></div></div>', null, { hideFooter: true, wide: true });
-        let preview;
-        try {
-            preview = await API.solver.publishPreview(solutionId);
-        } catch (err) {
-            Modal.close();
-            Toast.error(err.message);
-            return;
-        }
-        const nothingNew = !preview.first && !preview.teachers.length;
-        Modal.open('📢 Δημοσίευση προγράμματος', TimetableHelpers.buildPublishHtml(preview),
-            nothingNew ? null : () => this._confirmPublish(solutionId),
-            { wide: true, hideFooter: nothingNew, saveText: '📢 Δημοσίευση' });
-        document.querySelectorAll('#modal-body .pub-copy').forEach(btn =>
-            btn.addEventListener('click', async () => {
-                try {
-                    await navigator.clipboard.writeText(preview.teachers[Number(btn.dataset.idx)].message);
-                    Toast.success('Αντιγράφηκε.');
-                } catch (_) {
-                    Toast.error('Η αντιγραφή δεν επιτρέπεται εδώ — επίλεξε το κείμενο χειροκίνητα.');
-                }
-            }));
-    },
-
-    async _confirmPublish(solutionId) {
-        const note = document.getElementById('pub-note')?.value || '';
-        const notify = !!document.getElementById('pub-telegram')?.checked;
-        try {
-            const res = await API.solver.publish(solutionId, { note, notify_telegram: notify });
-            Modal.close();
-            Toast.success(notify
-                ? `✅ Δημοσιεύτηκε — ${res.teachers_notified} μηνύματα έρχονται στο Telegram σε λίγα λεπτά.`
-                : `✅ Δημοσιεύτηκε (${res.teachers_notified} καθηγητές).`);
-        } catch (err) {
-            Toast.error(err.message);
-        }
+    /** 📢 Δημοσίευση — βλ. components/publish_modal.js. */
+    _openPublish(solutionId) {
+        return PublishModal.open(solutionId);
     },
 
     /** 🕘 Ιστορικό αλλαγών με «αναίρεση μέχρι εδώ». */

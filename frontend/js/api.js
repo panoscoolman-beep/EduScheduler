@@ -186,6 +186,9 @@ const API = {
             API.get(`/solver/solutions/${solutionId}/gaps/suggestions?kind=${kind}&person_id=${personId}&day=${day}`),
         publishPreview: (solutionId) => API.get(`/publications/preview/${solutionId}`),
         publish: (solutionId, data) => API.post(`/publications/solutions/${solutionId}`, data),
+        publishTestEmail: (solutionId, data) => API.post(`/publications/preview/${solutionId}/test-email`, data),
+        publication: (id) => API.get(`/publications/${id}`),
+        publicationEmails: (id, data) => API.post(`/publications/${id}/emails`, data),
         undoTo: (solutionId, entryId) =>
             API.post(`/solver/solutions/${solutionId}/history/undo-to/${entryId}`, {}),
         unplaceBulk: (solutionId, body) => API.post(`/solver/solutions/${solutionId}/unplace-bulk`, body),

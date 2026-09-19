@@ -417,6 +417,7 @@ class SolutionPublication(Base):
     messages_json = Column(Text, nullable=False)   # [{teacher_id, teacher, message}]
     notify_telegram = Column(Boolean, nullable=False, default=False)
     telegram_sent_at = Column(DateTime, nullable=True)
+    email_state = Column(String(20), nullable=True)   # None | sending | done
 
 
 class TimetableSlotHistory(Base):
