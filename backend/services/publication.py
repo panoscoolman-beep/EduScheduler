@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from collections import defaultdict
 
 from datetime import timedelta
@@ -98,28 +99,39 @@ def _position(e: dict):
 def teacher_changes(previous: list[dict], current: list[dict]) -> dict[int, dict]:
     """Αλλαγές ανά καθηγητή (μόνο όσοι άλλαξαν).
 
-    Κλειδί (καθηγητής, «μάθημα (τμήμα)») — ό,τι βλέπει ο καθηγητής, όχι το
-    εσωτερικό id της κάρτας: κάρτα που σβήστηκε και ξαναφτιάχτηκε στις ίδιες
-    ώρες ΔΕΝ βγάζει ψεύτικο «➖ καταργείται / ➕ νέα ώρα». Μάθημα που άλλαξε
-    καθηγητή βγαίνει ➖ στον παλιό και ➕ στον νέο."""
-    def by_key(entries):
-        grouped: dict[tuple, list[dict]] = defaultdict(list)
+    Ταυτότητα ώρας = (θέση, μάθημα) — ΟΧΙ το id ή το όνομα της κάρτας: έτσι
+    ούτε η μετονομασία τμήματος ούτε μια κάρτα που σβήστηκε και ξαναφτιάχτηκε
+    στις ίδιες ώρες βγάζουν ψεύτικο «➖ καταργείται / ➕ νέα ώρα». Ό,τι μένει
+    ζευγαρώνεται ανά μάθημα και γίνεται «μετακίνηση».
+    """
+    def by_teacher(entries):
+        grouped: dict[int, list[dict]] = defaultdict(list)
         for e in entries:
-            grouped[(e["teacher_id"], e["label"])].append(e)
+            grouped[e["teacher_id"]].append(e)
         return grouped
 
-    prev, cur = by_key(previous), by_key(current)
+    prev, cur = by_teacher(previous), by_teacher(current)
     out: dict[int, dict] = {}
-    for key in sorted(set(prev) | set(cur)):
-        before = {_position(e): e for e in prev.get(key, [])}
-        after = {_position(e): e for e in cur.get(key, [])}
-        moved, removed, added, _same = pair_changes(before, after)
-        if not (moved or removed or added):
+    for tid in sorted(set(prev) | set(cur)):
+        before = {(_position(e), _subject_of(e)): e for e in prev.get(tid, [])}
+        after = {(_position(e), _subject_of(e)): e for e in cur.get(tid, [])}
+        gone_keys = sorted(before.keys() - after.keys())
+        new_keys = sorted(after.keys() - before.keys())
+        if not (gone_keys or new_keys):
             continue
-        bucket = out.setdefault(key[0], {"moved": [], "added": [], "removed": []})
-        bucket["moved"] += [{"from": before[f], "to": after[t]} for f, t in moved]
-        bucket["removed"] += [before[p] for p in removed]
-        bucket["added"] += [after[p] for p in added]
+        gone_by_subject: dict[str, list[dict]] = defaultdict(list)
+        for key in gone_keys:
+            gone_by_subject[key[1]].append(before[key])
+        moved, added = [], []
+        for key in new_keys:
+            same_subject = gone_by_subject.get(key[1])
+            if same_subject:
+                moved.append({"from": same_subject.pop(0), "to": after[key]})
+            else:
+                added.append(after[key])
+        removed = [e for rest in gone_by_subject.values() for e in rest]
+        out[tid] = {"moved": moved, "added": added,
+                    "removed": sorted(removed, key=_entry_order)}
     return out
 
 
@@ -197,7 +209,12 @@ def _short_when(e: dict) -> str:
 
 
 def _subject_of(e: dict) -> str:
-    return e.get("subject") or e["label"]
+    """Το μάθημα χωρίς το τμήμα. Παλιά στιγμιότυπα (πριν τις 20/9) έχουν μόνο
+    `label` τύπου «ΦΥΣΙΚΗ Β (ΤΜΗΜΑ)» — κόβουμε την παρένθεση ώστε να
+    συγκρίνονται σωστά με τα νέα."""
+    if e.get("subject"):
+        return e["subject"]
+    return re.sub(r"\s*\([^()]*\)\s*$", "", e.get("label", "")) or e.get("label", "")
 
 
 def _klass_of(e: dict) -> str:

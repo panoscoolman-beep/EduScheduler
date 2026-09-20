@@ -53,7 +53,9 @@ def test_first_publication_messages_everyone_with_merged_blocks():
     (m,) = svc.build_messages(None, cur)
     assert m["changes"] is None and m["hours"] == 3
     assert "Τι άλλαξε" not in m["message"]
-    assert "  16:00–18:00 ΦΥΣΙΚΗ (Β2) · Α" in m["message"]   # συνεχόμενες ώρες = ένα μπλοκ
+    assert "  16:00–18:00 ΦΥΣΙΚΗ · Α" in m["message"]        # συνεχόμενες ώρες = ένα μπλοκ
+    with_students = svc.build_messages(None, [dict(e, students=["Νίκος Π."]) for e in cur])[0]
+    assert "      Νίκος Π." in with_students["message"]       # 👥 ονόματα αντί για τμήμα
     assert m["message"].index("Δευτέρα") < m["message"].index("Τετάρτη")
 
 
