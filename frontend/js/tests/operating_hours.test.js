@@ -212,3 +212,11 @@ test('buildGapSuggestionsHtml: επιπτώσεις με πρόσημο ή «κ�
     assert.ok(html.includes('Νίκος -2, Τ2 +1') && html.includes('data-idx="0"'));
     assert.ok(H.buildGapSuggestionsHtml([]).includes('Καμία μετακίνηση'));
 });
+
+test('lessonIdsByStudent: κάρτες ανά μαθητή (και κενό roster)', () => {
+    const m = H.lessonIdsByStudent({ '10': [1, 2], '11': [2], '12': [] });
+    assert.deepEqual([...m.get(1)], [10]);
+    assert.deepEqual([...m.get(2)].sort(), [10, 11]);
+    assert.equal(m.get(3), undefined);
+    assert.equal(H.lessonIdsByStudent(null).size, 0);
+});

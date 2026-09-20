@@ -150,3 +150,11 @@ def test_gaps_and_student_export_follow_the_roster(env):
     env.s.commit()
     ics2 = env.get(f"/api/exports/ics?solution_id={env.sol.id}&student_id={env.ignatis.id}").text
     assert ics2.count("BEGIN:VEVENT") == 1
+
+
+def test_rosters_endpoint_feeds_the_grid_filter(env):
+    lesson_roster.set_roster(env.s, env.lb, [env.dimitra.id, env.ignatis.id])
+    env.s.commit()
+    body = env.get("/api/lessons/rosters").json()
+    assert body["rosters"] == {str(env.la.id): [env.ignatis.id],
+                               str(env.lb.id): sorted([env.dimitra.id, env.ignatis.id])}

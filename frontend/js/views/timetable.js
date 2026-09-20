@@ -42,24 +42,25 @@ const TimetableView = {
             const solutionId = TimetableHelpers.defaultSolutionId(
                 solutions, App._currentSolutionId);
             const archiveBtn = TimetableHelpers.archiveButtonState(solutions, solutionId);
-            const [solution, students, lessons] = await Promise.all([
+            const [solution, students, lessons, rosterData] = await Promise.all([
                 API.solver.getSolution(solutionId),
                 API.students.list().catch(() => []),
                 // Τροφοδοτεί την Παλέτα Μαθημάτων (ppw + μαθήματα χωρίς slots).
                 API.lessons.list().catch(() => []),
+                // 👥 Ποιοι παρακολουθούν κάθε κάρτα (εξαιρέσεις/προσθήκες).
+                API.lessons.rosters().catch(() => ({ rosters: {} })),
             ]);
             this._lessons = lessons;
+            const lessonsByStudent = TimetableHelpers.lessonIdsByStudent(rosterData.rosters);
 
             // Extract unique values for filters
             const classNames = TimetableHelpers.uniqueValues(solution.slots, 'class_name');
             const teacherNames = TimetableHelpers.uniqueValues(solution.slots, 'teacher_name');
             const roomNames = TimetableHelpers.uniqueValues(solution.slots, 'classroom_name');
 
-            // Student dropdown shows "Last First" labels. Each label maps
-            // to the set of class_ids the student is enrolled in, so the
-            // grid can filter slots whose lesson belongs to those classes.
+            // Student dropdown shows "Last First" labels· το φιλτράρισμα
+            // γίνεται με τις ΚΑΡΤΕΣ που παρακολουθεί ο μαθητής (lessonsByStudent).
             const {
-                classIdsByLabel: studentByLabel,
                 idByLabel: studentIdByLabel,
                 sortedNames: studentNames,
             } = TimetableHelpers.buildStudentLabelMaps(students);
@@ -248,20 +249,18 @@ const TimetableView = {
             document.getElementById('tt-gaps').addEventListener('click', () =>
                 this._openGaps(solutionId, container));
 
-            // Slots passed to the grid. For "student" view we pre-filter
-            // to only the slots whose class the selected student attends;
-            // the grid itself doesn't know about students. "all" shows
-            // every slot across every class the students collectively
-            // touch — not super useful but consistent with other views.
+            // Slots passed to the grid. Στην προβολή «μαθητής» κρατάμε μόνο
+            // τις ώρες των καρτών που παρακολουθεί ΠΡΑΓΜΑΤΙΚΑ (π.χ. το ένα
+            // δίωρο Φυσικής το κάνει σε άλλο τμήμα).
             const slotsForView = (viewType, filterValue) => {
                 if (viewType !== 'student' || !filterValue || filterValue === 'all') {
                     return solution.slots;
                 }
-                const allowedClassIds = studentByLabel.get(filterValue);
-                if (!allowedClassIds || allowedClassIds.size === 0) {
+                const lessonIds = lessonsByStudent.get(studentIdByLabel.get(filterValue));
+                if (!lessonIds || lessonIds.size === 0) {
                     return [];
                 }
-                return solution.slots.filter(s => allowedClassIds.has(s.class_id));
+                return solution.slots.filter(s => lessonIds.has(s.lesson_id));
             };
 
             // Dispatch to the right renderer. The two "overview" view types

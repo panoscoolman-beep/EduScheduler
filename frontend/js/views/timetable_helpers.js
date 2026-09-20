@@ -322,6 +322,22 @@ const TimetableHelpers = {
                 <div style="max-height:400px; overflow:auto"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
     },
 
+    /**
+     * 👥 {lesson_id: [student_ids]} → Map(student_id → Set(lesson_id)).
+     * Το πλέγμα φιλτράρει ανά μαθητή με βάση τις ΚΑΡΤΕΣ που παρακολουθεί
+     * (τμήμα + προσθήκες − εξαιρέσεις), όχι με βάση το τμήμα.
+     */
+    lessonIdsByStudent(rosters) {
+        const out = new Map();
+        Object.entries(rosters || {}).forEach(([lessonId, students]) => {
+            (students || []).forEach(sid => {
+                if (!out.has(sid)) out.set(sid, new Set());
+                out.get(sid).add(Number(lessonId));
+            });
+        });
+        return out;
+    },
+
     /** 🕳 Γραμμές της αναφοράς κενών για μαθητές ή καθηγητές, με φίλτρα. */
     filterGapRows(report, kind, onlyGaps, query) {
         const rows = (report && report[kind === 'teacher' ? 'teachers' : 'students']) || [];

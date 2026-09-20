@@ -139,6 +139,7 @@ const API = {
         create: (data) => API.post('/lessons/', data),
         update: (id, data, force = false) => API.put(`/lessons/${id}${force ? '?force=true' : ''}`, data),
         students: (id) => API.get(`/lessons/${id}/students`),
+        rosters: () => API.get('/lessons/rosters'),
         setStudents: (id, data, force = false) =>
             API.put(`/lessons/${id}/students${force ? '?force=true' : ''}`, data),
         delete: (id, force = false) =>

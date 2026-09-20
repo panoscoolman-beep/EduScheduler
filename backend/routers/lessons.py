@@ -18,7 +18,7 @@ from backend.schemas import (
     LessonResponse,
     LessonTermImportRequest,
 )
-from backend.services.term_context import get_active_term_id
+from backend.services.term_context import get_active_term_id, resolve_term_id
 from backend.services.parking_lot_sync import (
     add_lesson_to_open_solutions,
     sync_lesson_slot_count,
@@ -100,6 +100,17 @@ def distribution_suggestions(
             for s in splits
         ],
     }
+
+
+@router.get("/rosters")
+def lesson_rosters(term_id: int | None = None, db: Session = Depends(get_db)):
+    """{lesson_id: [student_ids]} για όλο το σενάριο — το πλέγμα φιλτράρει ανά
+    μαθητή με βάση ΑΥΤΟ (όχι το τμήμα), ώστε να φαίνονται οι εξαιρέσεις/προσθήκες."""
+    tid = resolve_term_id(db, term_id)
+    lessons = db.query(Lesson).filter(Lesson.term_id == tid).all()
+    return {"term_id": tid,
+            "rosters": {str(lid): sorted(sids)
+                        for lid, sids in lesson_roster.roster_map(db, lessons).items()}}
 
 
 @router.get("/palette-review")
