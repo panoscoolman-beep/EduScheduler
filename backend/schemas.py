@@ -346,6 +346,11 @@ class TimetableSlotUpdate(BaseModel):
     is_locked: bool | None = None
 
 
+class LessonRosterUpdate(BaseModel):
+    """👥 Ποιοι μαθητές παρακολουθούν μια κάρτα (τελική λίστα, όχι διαφορές)."""
+    attending: list[int] = Field(default_factory=list, max_length=200)
+
+
 class LessonTermImportRequest(BaseModel):
     """Επιλεκτική εισαγωγή μαθημάτων-καρτών από άλλο σενάριο στο ενεργό."""
     source_term_id: int

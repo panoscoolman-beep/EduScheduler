@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom, TimetableSlot
 from backend.services import lesson_change_guard as change_guard
+from backend.services import lesson_roster
 from backend.services import slot_history as slot_history_svc
 from backend.services.lesson_impact import lesson_impact, palette_review
 from backend.schemas import (
+    LessonRosterUpdate,
     PaletteCleanupRequest,
     LessonCreate,
     LessonResponse,
@@ -241,6 +243,39 @@ def update_lesson(lesson_id: int, data: LessonCreate, force: bool = False, db: S
         .first()
     )
     return _enrich_lesson(lesson)
+
+
+@router.get("/{lesson_id}/students")
+def lesson_students(lesson_id: int, db: Session = Depends(get_db)):
+    """👥 Ποιοι παρακολουθούν αυτή την κάρτα: μαθητές του τμήματος (με ✓ ή
+    εξαίρεση) και πρόσθετοι από άλλα τμήματα."""
+    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+    return {"lesson_id": lesson.id,
+            "class_name": lesson.school_class.name if lesson.school_class else "",
+            "students": lesson_roster.roster_detail(db, lesson)}
+
+
+@router.put("/{lesson_id}/students")
+def set_lesson_students(lesson_id: int, data: LessonRosterUpdate, force: bool = False,
+                        db: Session = Depends(get_db)):
+    """Ορίζει ποιοι παρακολουθούν την κάρτα. 409 αν κάποιος νέος μαθητής έχει
+    ήδη μάθημα εκείνη την ώρα (προχωρά με `?force=true`)."""
+    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+    conflicts = lesson_roster.roster_conflicts(db, lesson, data.attending)
+    if conflicts and not force:
+        raise HTTPException(status_code=409, detail={
+            "code": "roster_conflicts",
+            "requires_force": True,
+            "message": lesson_roster.conflicts_message(conflicts),
+            "conflicts": conflicts,
+        })
+    result = lesson_roster.set_roster(db, lesson, data.attending)
+    db.commit()
+    return {**result, "students": lesson_roster.roster_detail(db, lesson)}
 
 
 @router.get("/{lesson_id}/impact")

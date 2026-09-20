@@ -23,6 +23,7 @@ from backend.models import (
     TeacherAvailability,
     TimetableSlot,
 )
+from backend.services import lesson_roster
 from backend.services import placement_conflicts as pc
 from backend.services.placement_conflicts import PlacementConflict
 
@@ -265,39 +266,34 @@ def resolve_and_validate_target_room(
             )
 
     # 5. Student availability
-    enrolled_student_ids: list[int] = []
-    if slot.lesson.class_id:
-        enrolled_student_ids = [
-            e.student_id for e in db.query(StudentClassEnrollment.student_id)
-            .filter(StudentClassEnrollment.class_id == slot.lesson.class_id)
-            .all()
-        ]
-        if enrolled_student_ids:
-            student_unav_q = (
-                db.query(StudentAvailability.student_id)
-                .filter(
-                    StudentAvailability.student_id.in_(enrolled_student_ids),
-                    StudentAvailability.day_of_week == data.day_of_week,
-                    StudentAvailability.period_id == data.period_id,
-                    StudentAvailability.status == "unavailable",
-                )
+    # Λίστα της ΚΑΡΤΑΣ (τμήμα + προσθήκες − εξαιρέσεις) — βλ. services/lesson_roster.py
+    enrolled_student_ids: list[int] = sorted(lesson_roster.students_of(db, slot.lesson))
+    if enrolled_student_ids:
+        student_unav_q = (
+            db.query(StudentAvailability.student_id)
+            .filter(
+                StudentAvailability.student_id.in_(enrolled_student_ids),
+                StudentAvailability.day_of_week == data.day_of_week,
+                StudentAvailability.period_id == data.period_id,
+                StudentAvailability.status == "unavailable",
             )
-            if solution_term_id is not None:
-                student_unav_q = student_unav_q.filter(
-                    StudentAvailability.term_id == solution_term_id
-                )
-            unav_ids = [sid for (sid,) in student_unav_q.all()]
-            if unav_ids:
-                names = _student_names(db, unav_ids)
-                many = len(names) > 1
-                raise blocked_by(
-                    pc.STUDENT_UNAVAILABLE,
-                    (f"Οι μαθητές {pc.join_names(names)} του τμήματος {me['class_name']} έχουν"
-                     if many else
-                     f"Ο μαθητής {pc.join_names(names)} του τμήματος {me['class_name']} έχει")
-                    + f" δηλώσει κώλυμα {where}.",
-                    student_ids=unav_ids,
-                )
+        )
+        if solution_term_id is not None:
+            student_unav_q = student_unav_q.filter(
+                StudentAvailability.term_id == solution_term_id
+            )
+        unav_ids = [sid for (sid,) in student_unav_q.all()]
+        if unav_ids:
+            names = _student_names(db, unav_ids)
+            many = len(names) > 1
+            raise blocked_by(
+                pc.STUDENT_UNAVAILABLE,
+                (f"Οι μαθητές {pc.join_names(names)} του τμήματος {me['class_name']} έχουν"
+                 if many else
+                 f"Ο μαθητής {pc.join_names(names)} του τμήματος {me['class_name']} έχει")
+                + f" δηλώσει κώλυμα {where}.",
+                student_ids=unav_ids,
+            )
 
     # 6. Shared-student conflict (H7) — two different classes that share a
     # student must not run at the same (day, period). The solver enforces
@@ -307,35 +303,24 @@ def resolve_and_validate_target_room(
     # ΟΛΟΥΣ αυτούς τους ελέγχους σε bulk — αν προστεθεί έλεγχος εδώ,
     # πρόσθεσέ τον και εκεί (τα agreement tests το κλειδώνουν).
     if enrolled_student_ids:
-        other_slots_by_class = {
-            s.lesson.class_id: s
-            for s in conflict_query
-            .filter(Lesson.class_id.isnot(None), Lesson.class_id != slot.lesson.class_id)
-            .all()
-        }
-        if other_slots_by_class:
-            clash = (
-                db.query(StudentClassEnrollment.student_id, StudentClassEnrollment.class_id)
-                .filter(
-                    StudentClassEnrollment.class_id.in_(other_slots_by_class.keys()),
-                    StudentClassEnrollment.student_id.in_(enrolled_student_ids),
-                )
-                .first()
+        others = conflict_query.filter(Lesson.id != slot.lesson_id).all()
+        rosters = lesson_roster.roster_map(db, [o.lesson for o in others if o.lesson])
+        mine = set(enrolled_student_ids)
+        for other in others:
+            shared = sorted(mine & rosters.get(other.lesson_id, set()))
+            if not shared:
+                continue
+            info = pc.describe_slot(db, other)
+            student = db.query(Student).filter(Student.id == shared[0]).first()
+            raise blocked_by(
+                pc.SHARED_STUDENT,
+                f"Κοινός μαθητής: ο/η {pc.student_display(student)} είναι και στο "
+                f"{info['class_name']}, που έχει {info['subject']}"
+                + (f" με {info['teacher']}" if info['teacher'] else "")
+                + f" {where} (θα έπρεπε να είναι σε δύο τμήματα ταυτόχρονα).",
+                other,
+                student_id=shared[0],
             )
-            if clash:
-                student_id, other_class_id = clash
-                other = other_slots_by_class[other_class_id]
-                info = pc.describe_slot(db, other)
-                student = db.query(Student).filter(Student.id == student_id).first()
-                raise blocked_by(
-                    pc.SHARED_STUDENT,
-                    f"Κοινός μαθητής: ο/η {pc.student_display(student)} είναι και στο "
-                    f"{info['class_name']}, που έχει {info['subject']}"
-                    + (f" με {info['teacher']}" if info['teacher'] else "")
-                    + f" {where} (θα έπρεπε να είναι σε δύο τμήματα ταυτόχρονα).",
-                    other,
-                    student_id=student_id,
-                )
 
     return target_room
 
@@ -410,6 +395,7 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
             Lesson.teacher_id,
             Lesson.class_id,
             Lesson.subject_id,
+            Lesson.id.label("lesson_id"),
         )
         .join(Lesson)
         .filter(
@@ -433,9 +419,9 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
     class_busy: dict = {}
     rooms_busy: dict = {}     # cell -> {room_id}
     room_holder: dict = {}    # cell -> {room_id: class short_name}
-    classes_at: dict = {}     # cell -> {class_id}
-    slot_of_class_at: dict = {}  # (cell, class_id) -> describe dict
-    for sid, day, pid, room_id, t_id, c_id, subj_id in others:
+    lessons_at: dict = {}        # cell -> {lesson_id} (άλλες κάρτες εκεί)
+    slot_of_lesson_at: dict = {}  # (cell, lesson_id) -> describe dict
+    for sid, day, pid, room_id, t_id, c_id, subj_id, other_lesson_id in others:
         cell = (day, pid)
         info = _who(sid, room_id, t_id, c_id, subj_id)
         if lesson.teacher_id and t_id == lesson.teacher_id:
@@ -445,9 +431,9 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
         if room_id is not None:
             rooms_busy.setdefault(cell, set()).add(room_id)
             room_holder.setdefault(cell, {})[room_id] = info["class_name"] or info["subject"]
-        if c_id is not None and c_id != lesson.class_id:
-            classes_at.setdefault(cell, set()).add(c_id)
-            slot_of_class_at.setdefault((cell, c_id), info)
+        if other_lesson_id != lesson.id:
+            lessons_at.setdefault(cell, set()).add(other_lesson_id)
+            slot_of_lesson_at.setdefault((cell, other_lesson_id), info)
 
     # Κώλυμα καθηγητή (scoped στο σενάριο της λύσης — βλ. check 4).
     teacher_unav: set = set()
@@ -463,13 +449,7 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
         teacher_unav = {(d, p) for d, p in q.all()}
 
     # Κωλύματα εγγεγραμμένων μαθητών (check 5) + κοινοί μαθητές για H7.
-    enrolled_student_ids: list[int] = []
-    if lesson.class_id:
-        enrolled_student_ids = [
-            sid for (sid,) in db.query(StudentClassEnrollment.student_id)
-            .filter(StudentClassEnrollment.class_id == lesson.class_id)
-            .all()
-        ]
+    enrolled_student_ids: list[int] = sorted(lesson_roster.students_of(db, lesson))
     student_names: dict = {}
     if enrolled_student_ids:
         student_names = {
@@ -491,19 +471,15 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
         for d, p, sid in q.all():
             student_unav.setdefault((d, p), []).append(sid)
 
-    shared_by_class: dict = {}  # other class_id -> [student_id] κοινοί
-    if enrolled_student_ids and classes_at:
-        all_other_class_ids = set().union(*classes_at.values())
-        rows = (
-            db.query(StudentClassEnrollment.class_id, StudentClassEnrollment.student_id)
-            .filter(
-                StudentClassEnrollment.class_id.in_(all_other_class_ids),
-                StudentClassEnrollment.student_id.in_(enrolled_student_ids),
-            )
-            .all()
-        )
-        for cid, sid in rows:
-            shared_by_class.setdefault(cid, []).append(sid)
+    shared_by_lesson: dict = {}  # other lesson_id -> [student_id] κοινοί
+    if enrolled_student_ids and lessons_at:
+        other_ids = set().union(*lessons_at.values())
+        other_lessons = db.query(Lesson).filter(Lesson.id.in_(other_ids)).all()
+        mine = set(enrolled_student_ids)
+        for other_id, students in lesson_roster.roster_map(db, other_lessons).items():
+            shared = sorted(mine & students)
+            if shared:
+                shared_by_lesson[other_id] = shared
 
     # Αποδεκτές αίθουσες — καθρέφτης του pick_default_classroom:
     # μάθημα με special room απαιτεί αίθουσα του τύπου (ή τη δική του
@@ -547,15 +523,15 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
                 ids = student_unav[cell]
                 reason = f"Κώλυμα μαθητή: {_names(ids)}"
                 short = f"🎓 {_names(ids[:1])}" + (f" +{len(ids) - 1}" if len(ids) > 1 else "")
-            elif shared_by_class and (classes_at.get(cell, set()) & shared_by_class.keys()):
-                other_cid = next(iter(classes_at[cell] & shared_by_class.keys()))
-                b = slot_of_class_at.get((cell, other_cid), {})
-                sids = shared_by_class[other_cid]
+            elif shared_by_lesson and (lessons_at.get(cell, set()) & shared_by_lesson.keys()):
+                other_lid = next(iter(lessons_at[cell] & shared_by_lesson.keys()))
+                b = slot_of_lesson_at.get((cell, other_lid), {})
+                sids = shared_by_lesson[other_lid]
                 code, blocking = pc.SHARED_STUDENT, b or None
-                reason = (f"Κοινός μαθητής {_names(sids)} με το {class_names.get(other_cid, '')}"
+                reason = (f"Κοινός μαθητής {_names(sids)} με το {b.get('class_name', '')}"
                           + (f" ({b['subject']}" + (f", {b['teacher']}" if b.get('teacher') else "") + ")"
                              if b else ""))
-                short = f"👥 {class_names.get(other_cid, '')}"
+                short = f"👥 {b.get('class_name', '')}"
             elif not (acceptable_rooms - rooms_busy.get(cell, set())):
                 code = pc.ROOMS_EXHAUSTED
                 holders = room_holder.get(cell, {})

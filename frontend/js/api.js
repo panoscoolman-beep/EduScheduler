@@ -138,6 +138,9 @@ const API = {
         get: (id) => API.get(`/lessons/${id}`),
         create: (data) => API.post('/lessons/', data),
         update: (id, data, force = false) => API.put(`/lessons/${id}${force ? '?force=true' : ''}`, data),
+        students: (id) => API.get(`/lessons/${id}/students`),
+        setStudents: (id, data, force = false) =>
+            API.put(`/lessons/${id}/students${force ? '?force=true' : ''}`, data),
         delete: (id, force = false) =>
             API.delete(`/lessons/${id}${force ? '?force=true' : ''}`),
         impact: (id) => API.get(`/lessons/${id}/impact`),

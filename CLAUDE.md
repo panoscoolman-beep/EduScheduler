@@ -79,7 +79,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 `Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
 (βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
 `lifespan` στο `backend/main.py`). Head στις 2026-09-18:
-`f3a9c1d7e5b2_publication_email_state.py`. Το `tests/test_alembic_single_head.py`
+`a7b3e2d9c4f1_lesson_student_overrides.py`. Το `tests/test_alembic_single_head.py`
 κόβει διπλό revision id / δεύτερο head πριν φτάσει στο deploy.
 
 **Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
@@ -105,6 +105,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 | `periods` | Διδακτικές ώρες της ημέρας (1η Ώρα 08:00–09:00, 2η Ώρα…): name, short_name, start_time, end_time, is_break, sort_order. **Όχι** ακαδημαϊκές περίοδοι (αυτές στο EDS είναι τα `terms`/σενάρια) |
 | `constraints` | Hard/soft constraints με βαρύτητες |
 | `student_class_enrollments` | M:N — ποιοι μαθητές σε ποιο τμήμα |
+| `lesson_student_overrides` | 👥 Μαθητές ανά ΚΑΡΤΑ (`services/lesson_roster.py`): 'remove' = μαθητής του τμήματος που ΔΕΝ έρχεται σε αυτή την κάρτα, 'add' = μαθητής από άλλο τμήμα. Χρησιμοποιείται από solver (H7/H8/H10), enforcer+χάρτη του drag&drop, 🕳 κενά, εκτυπώσεις/ICS μαθητή. Χωρίς εγγραφές = ό,τι λέει το τμήμα |
 | `student_availability` | Πότε ένας μαθητής **δεν** μπορεί |
 | `teacher_availability` | Πότε ένας καθηγητής **δεν** μπορεί |
 | `timetable_slots` | Το παραγόμενο πρόγραμμα — ποια ώρα/μέρα/αίθουσα τι μάθημα |

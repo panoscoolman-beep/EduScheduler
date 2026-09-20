@@ -42,7 +42,8 @@ from backend.models import (
     TimetableSlot,
     TimetableSolution,
 )
-from backend.services import greek_holidays, operating_hours
+from backend.services import greek_holidays
+from backend.services import lesson_roster, operating_hours
 from backend.services.student_filters import StudentFilter
 
 router = APIRouter()
@@ -101,13 +102,10 @@ def _load_filtered_slots(
         if not student:
             raise HTTPException(status_code=404, detail="Ο μαθητής δεν βρέθηκε")
         label = f"{student.first_name} {student.last_name}"
-        class_ids = [
-            e.class_id
-            for e in db.query(StudentClassEnrollment)
-            .filter(StudentClassEnrollment.student_id == student_id)
-            .all()
-        ]
-        slots = query.filter(Lesson.class_id.in_(class_ids)).all() if class_ids else []
+        # Ό,τι παρακολουθεί ΠΡΑΓΜΑΤΙΚΑ (τμήμα + προσθήκες − εξαιρέσεις).
+        term_lessons = db.query(Lesson).filter(Lesson.term_id == solution.term_id).all()
+        lesson_ids = lesson_roster.lesson_ids_for_student(db, student_id, term_lessons)
+        slots = query.filter(Lesson.id.in_(lesson_ids)).all() if lesson_ids else []
 
     return solution, slots, label
 

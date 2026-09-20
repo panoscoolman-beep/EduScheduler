@@ -306,6 +306,28 @@ class Lesson(Base):
     )
 
 
+class LessonStudentOverride(Base):
+    """👥 Εξαιρέσεις/προσθήκες μαθητών σε ΜΙΑ κάρτα μαθήματος.
+
+    Κανονικά τη λίστα τη δίνει το τμήμα. Όταν ένας μαθητής κάνει π.χ. το ένα
+    δίωρο Φυσικής σε άλλο τμήμα, δηλώνεται εδώ: 'remove' στην κάρτα που δεν
+    παρακολουθεί, 'add' στην κάρτα του άλλου τμήματος. Έτσι ο solver και οι
+    έλεγχοι συγκρούσεων ξέρουν πού πραγματικά βρίσκεται.
+    """
+
+    __tablename__ = "lesson_student_overrides"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    mode = Column(String(10), nullable=False)   # add | remove
+
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "student_id", name="uq_lesson_student_override"),
+        CheckConstraint("mode IN ('add', 'remove')", name="ck_override_mode"),
+    )
+
+
 class Constraint(Base):
     """A scheduling constraint (hard or soft)."""
 

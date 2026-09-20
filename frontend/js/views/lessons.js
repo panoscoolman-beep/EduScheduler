@@ -45,6 +45,11 @@ const LessonsView = {
             ],
             apiService: API.lessons,
             entityName: 'Μαθήματα-Κάρτες',
+            customActions: [{
+                id: 'roster', icon: '👥',
+                title: 'Ποιοι μαθητές παρακολουθούν αυτή την κάρτα (εξαιρέσεις/προσθήκες)',
+                handler: (item) => LessonRosterModal.open(item, () => table.loadData()),
+            }],
             formBuilder: (item) => self._buildForm(item),
             formParser: () => self._parseForm(),
             onFormReady: () => self._wireValidation(),

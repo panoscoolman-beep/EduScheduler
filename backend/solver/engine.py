@@ -18,6 +18,7 @@ from backend.models import (
     TimetableSolution, TimetableSlot, SchoolSettings,
     StudentClassEnrollment, StudentAvailability
 )
+from backend.services import lesson_roster
 from backend.services.operating_hours import closed_cells
 
 logger = logging.getLogger(__name__)
@@ -281,13 +282,12 @@ class TimetableSolver:
             self._lessons_by_teacher.setdefault(lesson.teacher_id, []).append(lesson)
             self._lessons_by_class.setdefault(lesson.class_id, []).append(lesson)
 
-        # Build _lessons_by_student
-        class_to_lessons = self._lessons_by_class
-        for enrollment in self.enrollments:
-            student_id = enrollment.student_id
-            class_id = enrollment.class_id
-            if class_id in class_to_lessons:
-                self._lessons_by_student.setdefault(student_id, []).extend(class_to_lessons[class_id])
+        # Ποιοι μαθητές σε ποια ΚΑΡΤΑ: τμήμα + προσθήκες − εξαιρέσεις
+        # (π.χ. «το ένα δίωρο Φυσικής το κάνει σε άλλο τμήμα»).
+        self._roster = lesson_roster.roster_map(self.db, self.lessons)
+        for lesson in self.lessons:
+            for student_id in self._roster.get(lesson.id, ()):  # noqa: PERF401
+                self._lessons_by_student.setdefault(student_id, []).append(lesson)
 
         for avail in self.availabilities:
             self._unavailable.add((avail.teacher_id, avail.day_of_week, avail.period_id))
@@ -302,9 +302,7 @@ class TimetableSolver:
         αίθουσα από την «καρφωμένη» της κάρτας έκανε όλο το Lock & Regenerate /
         Γέμισε τα κενά infeasible ή μετακινούσε σιωπηλά την ώρα."""
         lesson_by_id = {l.id: l for l in self.lessons}
-        students_of_class: dict[int, set[int]] = {}
-        for e in self.enrollments:
-            students_of_class.setdefault(e.class_id, set()).add(e.student_id)
+        roster = getattr(self, "_roster", None) or lesson_roster.roster_map(self.db, self.lessons)
         all_rooms = {r.id: r for r in self.db.query(Classroom).all()}
         self._kept_cells = {(e.get("lesson_id"), e.get("day_of_week"), e.get("period_id"))
                             for e in self.locked_assignments}
@@ -327,7 +325,7 @@ class TimetableSolver:
             key = (lesson.teacher_id, day)
             self._locked_teacher_day[key] = self._locked_teacher_day.get(key, 0) + 1
             self._locked_teacher_days.setdefault(lesson.teacher_id, set()).add(day)
-            for sid in students_of_class.get(lesson.class_id, ()):
+            for sid in roster.get(lesson.id, ()):
                 self._locked_student_days.setdefault(sid, set()).add(day)
 
     def _get_available_rooms(self, lesson: Lesson) -> list[Classroom]:
@@ -578,9 +576,13 @@ class TimetableSolver:
                 self.model.Add(sum(days_working_vars) <= max(
                     teacher.max_days_per_week, len(self._locked_teacher_days.get(teacher.id, ()))))
 
-        # H10: Student Max Days Per Week
-        for enrollment in self.enrollments:
-            student = enrollment.student
+        # H10: Student Max Days Per Week (μόνο όσοι έχουν πραγματικά μαθήματα)
+        from backend.models import Student as _Student
+
+        student_ids = list(self._lessons_by_student)
+        students = (self.db.query(_Student).filter(_Student.id.in_(student_ids)).all()
+                    if student_ids else [])
+        for student in students:
             if student.max_days_per_week and student.max_days_per_week < self.days_per_week:
                 student_lessons = self._lessons_by_student.get(student.id, [])
                 if not student_lessons:

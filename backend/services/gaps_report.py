@@ -17,9 +17,8 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session, joinedload
 
-from backend.models import (
-    Lesson, Period, Student, StudentClassEnrollment, Teacher, TimetableSlot,
-)
+from backend.models import Lesson, Period, Student, Teacher, TimetableSlot
+from backend.services import lesson_roster
 from backend.services import placement_conflicts as pc
 from backend.services.slot_placement import build_placement_map
 
@@ -89,12 +88,12 @@ class _Context:
     periods: list[Period]
     index: dict[int, int]                      # period_id → δείκτης
     placed: list[_Placed]
-    class_students: dict[int, set[int]]
+    roster: dict[int, set[int]]        # lesson_id → μαθητές (βλ. lesson_roster)
     cells: dict[tuple[str, int], set[Cell]] = field(default_factory=dict)
     slots_of: dict[tuple[str, int], list[_Placed]] = field(default_factory=dict)
 
     def people_of(self, p: _Placed) -> list[tuple[str, int]]:
-        return [("teacher", p.teacher_id)] + [("student", s) for s in self.class_students.get(p.class_id, ())]
+        return [("teacher", p.teacher_id)] + [("student", s) for s in self.roster.get(p.lesson_id, ())]
 
 
 def _load(db: Session, solution_id: int) -> _Context:
@@ -117,13 +116,8 @@ def _load(db: Session, solution_id: int) -> _Context:
         placed.append(_Placed(s.id, l.id, l.teacher_id, l.class_id,
                               f"{subject} ({klass})" if klass else subject,
                               s.day_of_week, s.period_id, bool(s.is_locked)))
-    class_ids = {p.class_id for p in placed}
-    class_students: dict[int, set[int]] = defaultdict(set)
-    if class_ids:
-        for cid, sid in (db.query(StudentClassEnrollment.class_id, StudentClassEnrollment.student_id)
-                         .filter(StudentClassEnrollment.class_id.in_(class_ids)).all()):
-            class_students[cid].add(sid)
-    ctx = _Context(periods, index, placed, class_students)
+    lessons = db.query(Lesson).filter(Lesson.id.in_({p.lesson_id for p in placed})).all() if placed else []
+    ctx = _Context(periods, index, placed, lesson_roster.roster_map(db, lessons))
     for p in placed:
         cell = (p.day, index[p.period_id])
         for person in ctx.people_of(p):
