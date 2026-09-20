@@ -51,6 +51,9 @@ def snapshot_entries(db: Session, solution_id: int) -> list[dict]:
         .all()
     )
     periods = {p.id: p for p in db.query(Period).all()}
+    # 👥 Ονόματα μαθητών ανά κάρτα (αυτόματα) — ο καθηγητής βλέπει ΠΟΙΟΥΣ έχει.
+    from backend.services import lesson_roster
+    roster_names = lesson_roster.display_names(db, list({s.lesson for s in slots if s.lesson}))
     rooms = {r.id: r.name for r in db.query(Classroom).all()}
     room_shorts = {r.id: (r.short_name or r.name) for r in db.query(Classroom).all()}
     teachers = {t.id: t.name for t in db.query(Teacher).all()}
@@ -73,6 +76,7 @@ def snapshot_entries(db: Session, solution_id: int) -> list[dict]:
             "room": rooms.get(s.classroom_id, "") if s.classroom_id else "",
             "subject": subject,
             "klass": klass,
+            "students": roster_names.get(lesson.id, []),
             "room_short": room_shorts.get(s.classroom_id, "") if s.classroom_id else "",
         })
     return sorted(out, key=_entry_order)
@@ -159,7 +163,10 @@ def schedule_lines(entries: list[dict]) -> list[str]:
         if b["day"] != day:
             day = b["day"]
             lines.append(_DAYS[day] if 0 <= day < 7 else str(day))
-        lines.append(f"  {b['start']}–{b['end']} {b['label']}{_room(b)}")
+        lines.append(f"  {b['start']}–{b['end']} {_subject_of(b)}{_room(b)}")
+        who = _klass_of(b)
+        if who:
+            lines.append(f"      {who}")
     return lines
 
 
@@ -194,7 +201,8 @@ def _subject_of(e: dict) -> str:
 
 
 def _klass_of(e: dict) -> str:
-    return e.get("klass", "")
+    """Ποιοι είναι μέσα: ονόματα μαθητών (αυτόματα)· αν λείπουν, το τμήμα."""
+    return ", ".join(e.get("students") or []) or e.get("klass", "")
 
 
 def telegram_message(teacher: str, entries: list[dict], changes: dict | None, hours: int) -> str:

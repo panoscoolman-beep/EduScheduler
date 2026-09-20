@@ -158,3 +158,22 @@ def test_rosters_endpoint_feeds_the_grid_filter(env):
     body = env.get("/api/lessons/rosters").json()
     assert body["rosters"] == {str(env.la.id): [env.ignatis.id],
                                str(env.lb.id): sorted([env.dimitra.id, env.ignatis.id])}
+
+
+def test_names_follow_the_card_everywhere(env):
+    """Τα ονόματα βγαίνουν αυτόματα και ακολουθούν εξαιρέσεις/προσθήκες:
+    κάρτες, πρόγραμμα (slots) και εκτύπωση καθηγητή."""
+    from backend.services import lesson_roster as lr
+
+    assert lr.display_names(env.s, [env.la, env.lb]) == {
+        env.la.id: ["ΙΓΝΑΤΗΣ Μ."], env.lb.id: ["ΔΗΜΗΤΡΑ Π."]}
+    lr.set_roster(env.s, env.lb, [env.dimitra.id, env.ignatis.id])
+    env.s.commit()
+    lessons = env.get("/api/lessons/").json()
+    by_id = {l["id"]: l for l in lessons}
+    assert by_id[env.lb.id]["students"] == ["ΙΓΝΑΤΗΣ Μ.", "ΔΗΜΗΤΡΑ Π."]   # αλφαβητικά ανά επώνυμο
+    assert by_id[env.lb.id]["students_count"] == 2
+    slots = {s["lesson_id"]: s for s in env.get(f"/api/solver/solutions/{env.sol.id}").json()["slots"]}
+    assert slots[env.lb.id]["students"] == ["ΙΓΝΑΤΗΣ Μ.", "ΔΗΜΗΤΡΑ Π."]
+    page = env.get(f"/api/exports/print?solution_id={env.sol.id}&teacher_id={env.lb.teacher_id}").text
+    assert "ΙΓΝΑΤΗΣ Μ." in page and "ΤΜΗΜΑ Β" not in page

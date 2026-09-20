@@ -21,6 +21,16 @@ const LessonsView = {
     _periods: [],
     _teachingPeriodsPerDay: 0,
 
+    /** 👥 Κελί «Μαθητές»: πλήθος + ονόματα (αυτόματα από τη λίστα της κάρτας). */
+    _studentsCell(row) {
+        const names = row.students || [];
+        if (!names.length) return '<span class="text-muted">—</span>';
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const shown = names.slice(0, 4).map(esc).join(', ');
+        const more = names.length > 4 ? ` <b>+${names.length - 4}</b>` : '';
+        return `<span title="${esc(names.join(', '))}"><b>${names.length}</b> · ${shown}${more}</span>`;
+    },
+
     async render(container) {
         const self = this;
 
@@ -39,6 +49,10 @@ const LessonsView = {
                 { key: 'subject_name', label: 'Μάθημα' },
                 { key: 'teacher_name', label: 'Καθηγητής' },
                 { key: 'class_name', label: 'Τάξη' },
+                {
+                    key: 'students', label: 'Μαθητές',
+                    render: (v, row) => LessonsView._studentsCell(row),
+                },
                 { key: 'classroom_name', label: 'Αίθουσα', render: v => v || '—αυτόματη—' },
                 { key: 'periods_per_week', label: 'Ώρες/Εβδ' },
                 { key: 'distribution', label: 'Blocks', render: v => v || '<span class="text-muted">όλα 1ωρα</span>' },

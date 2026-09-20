@@ -184,18 +184,27 @@ def _class_label(school_class, mode: str) -> str:
     return name or short
 
 
+def _roster_names(db: Session, slots: list[TimetableSlot]) -> dict[int, list[str]]:
+    """👥 {lesson_id: ονόματα} για τα slots μιας σελίδας — ένα query."""
+    return lesson_roster.display_names(db, list({s.lesson for s in slots if s.lesson}))
+
+
 def _slot_cell_parts(
-    slot: TimetableSlot, detail_kind: str, class_label: str = "full"
+    slot: TimetableSlot, detail_kind: str, class_label: str = "full",
+    names: dict[int, list[str]] | None = None,
 ) -> tuple[str, str, str]:
     """(subject, detail, room) strings for one slot cell.
 
     detail_kind: τι δείχνουμε κάτω από το μάθημα — 'class' στα προγράμματα
     καθηγητών, 'teacher' στα προγράμματα τμημάτων/μαθητών/αιθουσών.
+    Στα προγράμματα καθηγητών δείχνουμε τα ΟΝΟΜΑΤΑ των μαθητών της κάρτας
+    (αυτόματα)· χωρίς λίστα, πέφτουμε πίσω στο όνομα τμήματος.
     class_label: full|short|both — μορφή του τμήματος (βλ. CLASS_LABEL_MODES)."""
     lesson = slot.lesson
     subject = (lesson.subject.short_name or lesson.subject.name) if lesson.subject else "—"
     if detail_kind == "class":
-        detail = _class_label(lesson.school_class, class_label)
+        who = ", ".join((names or {}).get(slot.lesson_id, []))
+        detail = who or _class_label(lesson.school_class, class_label)
     else:
         detail = (lesson.teacher.short_name or lesson.teacher.name) if lesson.teacher else ""
     room = slot.classroom.name if slot.classroom else ""
@@ -208,13 +217,14 @@ def _grid_table_html(
     days: list[int],
     detail_kind: str,
     class_label: str = "full",
+    names: dict[int, list[str]] | None = None,
 ) -> str:
     """The weekly grid <table> used by both single and bulk print."""
     grid: dict[tuple[int, int], list[str]] = {}
     for slot in slots:
         if slot.day_of_week is None:
             continue
-        subject, detail, room = _slot_cell_parts(slot, detail_kind, class_label)
+        subject, detail, room = _slot_cell_parts(slot, detail_kind, class_label, names)
         cell = f"<b>{escape(subject)}</b>"
         if detail:
             cell += f"<br><small>{escape(detail)}</small>"
@@ -503,7 +513,8 @@ def export_print(
 
         sections_html = []
         for label, entity_slots in _bulk_sections(db, solution_id, group_by):
-            table = _grid_table_html(entity_slots, teaching_periods, days, detail_kind, class_label)
+            table = _grid_table_html(entity_slots, teaching_periods, days, detail_kind, class_label,
+                                     _roster_names(db, entity_slots))
             sections_html.append(
                 "<section class='entity'>"
                 f"<h1>📅 Εβδομαδιαίο Πρόγραμμα — {escape(label)}</h1>"
@@ -534,7 +545,8 @@ def export_print(
     teaching_periods = _teaching_periods(db, solution_id)
     days = _days_for_school(db)
     detail_kind = "class" if teacher_id is not None else "teacher"
-    table = _grid_table_html(slots, teaching_periods, days, detail_kind, class_label)
+    table = _grid_table_html(slots, teaching_periods, days, detail_kind, class_label,
+                             _roster_names(db, slots))
     toolbar = (
         _class_label_toolbar(class_label, f"solution_id={solution_id}&teacher_id={teacher_id}")
         if teacher_id is not None else ""
@@ -614,6 +626,7 @@ def export_xlsx(
     used_titles: set[str] = set()
 
     for label, entity_slots in _bulk_sections(db, solution_id, group_by):
+        xlsx_names = _roster_names(db, entity_slots)
         ws = wb.create_sheet(_safe_sheet_title(label, used_titles))
         header = ["Ώρα"] + [_GREEK_DAYS[d] for d in days]
         ws.append(header)
@@ -626,7 +639,7 @@ def export_xlsx(
         for slot in entity_slots:
             if slot.day_of_week is None:
                 continue
-            subject_short, detail, room = _slot_cell_parts(slot, detail_kind)
+            subject_short, detail, room = _slot_cell_parts(slot, detail_kind, "full", xlsx_names)
             lesson = slot.lesson
             subject_full = lesson.subject.name if lesson.subject else subject_short
             text = subject_full

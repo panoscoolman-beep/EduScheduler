@@ -220,3 +220,11 @@ test('lessonIdsByStudent: κάρτες ανά μαθητή (και κενό rost
     assert.equal(m.get(3), undefined);
     assert.equal(H.lessonIdsByStudent(null).size, 0);
 });
+
+test('studentsLabel: ονόματα κάρτας με «+N» και fallback', () => {
+    const G = require('../components/timetable-grid.js');
+    assert.equal(G.studentsLabel({ students: ['Ιγνάτης Μ.', 'Δήμητρα Π.'] }), 'Ιγνάτης Μ., Δήμητρα Π.');
+    assert.equal(G.studentsLabel({ students: ['Α Α.', 'Β Β.', 'Γ Γ.', 'Δ Δ.', 'Ε Ε.'] }), 'Α Α., Β Β., Γ Γ. +2');
+    assert.equal(G.studentsLabel({ students: [] }), '');
+    assert.equal(G.studentsLabel({}), '');
+});

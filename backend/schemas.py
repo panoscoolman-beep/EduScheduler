@@ -278,6 +278,9 @@ class LessonResponse(LessonBase):
     teacher_name: str | None = None
     class_name: str | None = None
     classroom_name: str | None = None
+    # 👥 Αυτόματα από τη λίστα της κάρτας (services/lesson_roster.display_names)
+    students: list[str] = []
+    students_count: int = 0
 
     class Config:
         from_attributes = True
@@ -330,6 +333,7 @@ class TimetableSlotResponse(BaseModel):
     class_id: int | None = None
     class_name: str | None = None
     class_short: str | None = None
+    students: list[str] = []          # 👥 ονόματα της κάρτας (αυτόματα)
     classroom_name: str | None = None
 
     class Config:

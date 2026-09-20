@@ -3,6 +3,18 @@
  */
 const TimetableGrid = {
     DAY_NAMES: ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'],
+    STUDENTS_IN_CELL: 3,
+
+    /**
+     * 👥 Ονόματα μαθητών της κάρτας για το κελί: «Ιγνάτης Μ., Δήμητρα Π. +2».
+     * Έρχονται έτοιμα από το backend (lesson_roster) — καμία χειροκίνητη λίστα.
+     */
+    studentsLabel(slot, max = TimetableGrid.STUDENTS_IN_CELL) {
+        const names = (slot && slot.students) || [];
+        if (!names.length) return '';
+        const shown = names.slice(0, max).join(', ');
+        return names.length > max ? `${shown} +${names.length - max}` : shown;
+    },
 
     // Ωράριο λειτουργίας {from, to} από τις Ρυθμίσεις (το ορίζει το TimetableView).
     operatingWindow: null,
@@ -77,8 +89,10 @@ const TimetableGrid = {
                         line2 = slot.teacher_short || slot.teacher_name;
                         line3 = slot.classroom_name;
                     } else if (viewType === 'teacher') {
+                        // Ο καθηγητής θέλει να ξέρει ΠΟΙΟΥΣ έχει — ονόματα
+                        // μαθητών της κάρτας (αυτόματα), αλλιώς το τμήμα.
                         line1 = slot.subject_short || slot.subject_name;
-                        line2 = slot.class_short || slot.class_name;
+                        line2 = TimetableGrid.studentsLabel(slot) || slot.class_short || slot.class_name;
                         line3 = slot.classroom_name;
                     } else if (viewType === 'student') {
                         // Student: priority is subject + which class
@@ -254,7 +268,7 @@ const TimetableGrid = {
                         const bgLight = this._hexToRgba(bg, 0.18);
                         const line1 = slot.subject_short || slot.subject_name || '';
                         const line2 = axis === 'teacher'
-                            ? (slot.class_short || slot.class_name || '')
+                            ? (TimetableGrid.studentsLabel(slot) || slot.class_short || slot.class_name || '')
                             : (slot.teacher_short || slot.teacher_name || '');
                         const locked = !!slot.is_locked;
                         const lockIcon = locked ? '🔒' : '🔓';

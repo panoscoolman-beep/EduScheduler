@@ -42,6 +42,7 @@ from backend.services.feasibility import check_feasibility
 from backend.services.solution_diff import compute_diff
 from backend.services.violations_report import compute_violations
 from backend.services import gaps_report
+from backend.services import lesson_roster
 
 router = APIRouter()
 
@@ -418,6 +419,10 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
+    # 👥 Ονόματα μαθητών ανά κάρτα, αυτόματα (ένα query, όχι per-slot).
+    roster_names = lesson_roster.display_names(
+        db, list({s.lesson for s in slots if s.lesson}))
+
     enriched_slots = []
     for slot in slots:
         lesson = slot.lesson
@@ -442,6 +447,7 @@ def get_solution(solution_id: int, db: Session = Depends(get_db)):
             class_name=lesson.school_class.name if lesson.school_class else None,
             class_short=lesson.school_class.short_name if lesson.school_class else None,
             classroom_name=slot.classroom.name if slot.classroom else None,
+            students=roster_names.get(lesson.id, []),
         ))
 
     return TimetableSolutionResponse(

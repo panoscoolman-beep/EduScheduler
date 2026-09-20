@@ -39,6 +39,33 @@ def roster_map(db: Session, lessons: list[Lesson]) -> dict[int, set[int]]:
             for l in lessons}
 
 
+def short_name(first_name: str, last_name: str) -> str:
+    """«Ιγνάτης Μ.» — όνομα + αρχικό επιθέτου: χωράει στο πλέγμα και ξεχωρίζει
+    τους συνονόματους."""
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    if not first:
+        return last            # χωρίς μικρό όνομα δείχνουμε το επώνυμο ολόκληρο
+    return f"{first} {last[0]}." if last else first
+
+
+def display_names(db: Session, lessons: list[Lesson]) -> dict[int, list[str]]:
+    """{lesson_id: ["Ιγνάτης Μ.", …]} — αλφαβητικά (επώνυμο, όνομα).
+
+    Παράγονται ΑΥΤΟΜΑΤΑ από τη λίστα της κάρτας, ώστε να μη γράφονται
+    ονόματα στο χέρι στο όνομα του τμήματος."""
+    from backend.models import Student
+
+    rosters = roster_map(db, lessons)
+    ids = set().union(*rosters.values()) if rosters else set()
+    students = (db.query(Student).filter(Student.id.in_(ids))
+                .order_by(Student.last_name, Student.first_name).all()) if ids else []
+    order = {s.id: i for i, s in enumerate(students)}
+    label = {s.id: short_name(s.first_name, s.last_name) for s in students}
+    return {lid: [label[sid] for sid in sorted(sids & set(label), key=lambda x: order[x])]
+            for lid, sids in rosters.items()}
+
+
 def students_of(db: Session, lesson: Lesson) -> set[int]:
     return roster_map(db, [lesson]).get(lesson.id, set())
 

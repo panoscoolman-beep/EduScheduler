@@ -27,8 +27,8 @@ from backend.services.parking_lot_sync import (
 router = APIRouter()
 
 
-def _enrich_lesson(lesson: Lesson) -> dict:
-    """Add human-readable names from related entities."""
+def _enrich_lesson(lesson: Lesson, names: list[str] | None = None) -> dict:
+    """Add human-readable names from related entities (+ 👥 μαθητές της κάρτας)."""
     data = {
         "id": lesson.id,
         "subject_id": lesson.subject_id,
@@ -42,6 +42,8 @@ def _enrich_lesson(lesson: Lesson) -> dict:
         "teacher_name": lesson.teacher.name if lesson.teacher else None,
         "class_name": lesson.school_class.name if lesson.school_class else None,
         "classroom_name": lesson.classroom.name if lesson.classroom else None,
+        "students": names or [],
+        "students_count": len(names or []),
     }
     return data
 
@@ -67,7 +69,8 @@ def list_lessons(term_id: int | None = None, db: Session = Depends(get_db)):
         )
         .all()
     )
-    return [_enrich_lesson(l) for l in lessons]
+    names = lesson_roster.display_names(db, lessons)
+    return [_enrich_lesson(l, names.get(l.id)) for l in lessons]
 
 
 # IMPORTANT: This route must be declared BEFORE `/{lesson_id}` so
@@ -171,7 +174,7 @@ def get_lesson(lesson_id: int, db: Session = Depends(get_db)):
     )
     if not lesson:
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
-    return _enrich_lesson(lesson)
+    return _enrich_lesson(lesson, lesson_roster.display_names(db, [lesson]).get(lesson.id))
 
 
 @router.post("/", response_model=LessonResponse, status_code=201)
@@ -208,7 +211,7 @@ def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
         .filter(Lesson.id == lesson.id)
         .first()
     )
-    return _enrich_lesson(lesson)
+    return _enrich_lesson(lesson, lesson_roster.display_names(db, [lesson]).get(lesson.id))
 
 
 @router.put("/{lesson_id}", response_model=LessonResponse)
@@ -253,7 +256,7 @@ def update_lesson(lesson_id: int, data: LessonCreate, force: bool = False, db: S
         .filter(Lesson.id == lesson_id)
         .first()
     )
-    return _enrich_lesson(lesson)
+    return _enrich_lesson(lesson, lesson_roster.display_names(db, [lesson]).get(lesson.id))
 
 
 @router.get("/{lesson_id}/students")

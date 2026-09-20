@@ -281,28 +281,40 @@ def _teacher_print(client, **extra):
     )
 
 
-def test_teacher_print_defaults_to_full_class_name(client):
+def test_teacher_print_shows_the_students_of_the_card(client):
+    """Στο πρόγραμμα καθηγητή μπαίνουν ΑΥΤΟΜΑΤΑ τα ονόματα των μαθητών
+    (όνομα + αρχικό επιθέτου) αντί για το όνομα τμήματος."""
     res = _teacher_print(client)
     assert res.status_code == 200
-    assert "Α1 Λυκείου" in res.text          # πλήρες όνομα (= ονόματα παιδιών)
-    assert "<small>Α1</small>" not in res.text  # όχι η συντομογραφία μόνη της
+    assert "Νίκη Κ." in res.text
+    assert "Α1 Λυκείου" not in res.text and "<small>Α1</small>" not in res.text
     assert "Τμήμα ως:" in res.text and "class_label=short" in res.text
 
 
-def test_teacher_print_short_and_both(client):
+def test_class_label_still_applies_to_cards_without_students(client):
+    """Κάρτα χωρίς μαθητές → πέφτουμε πίσω στο όνομα τμήματος (και στη μορφή του)."""
+    from backend.models import StudentClassEnrollment
+
+    client.session.query(StudentClassEnrollment).delete()
+    client.session.commit()
+    assert "Α1 Λυκείου" in _teacher_print(client).text
     short = _teacher_print(client, class_label="short").text
     assert "<small>Α1</small>" in short and "Α1 Λυκείου" not in short
-    both = _teacher_print(client, class_label="both").text
-    assert "Α1 Λυκείου (Α1)" in both
+    assert "Α1 Λυκείου (Α1)" in _teacher_print(client, class_label="both").text
 
 
 def test_class_label_rejects_unknown_value(client):
     assert _teacher_print(client, class_label="nope").status_code == 400
 
 
-def test_bulk_teachers_print_respects_class_label(client):
+def test_bulk_teachers_print_shows_students_then_class_label(client):
+    from backend.models import StudentClassEnrollment
+
     base = f"/api/exports/print?solution_id={client.sol.id}&all=teachers"
-    assert "Α1 Λυκείου" in client.get(base).text                       # default full
+    assert "Νίκη Κ." in client.get(base).text                          # ονόματα μαθητών
+    client.session.query(StudentClassEnrollment).delete()
+    client.session.commit()
+    assert "Α1 Λυκείου" in client.get(base).text                       # χωρίς μαθητές → τμήμα
     assert "Α1 Λυκείου" not in client.get(base + "&class_label=short").text
     assert "Τμήμα ως:" in client.get(base).text
 
