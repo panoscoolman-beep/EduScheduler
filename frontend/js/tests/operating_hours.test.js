@@ -228,3 +228,17 @@ test('studentsLabel: ονόματα κάρτας με «+N» και fallback', (
     assert.equal(G.studentsLabel({ students: [] }), '');
     assert.equal(G.studentsLabel({}), '');
 });
+
+test('studentsBlockHtml: σύντομα ονόματα, πλήρης λίστα, escaping, άδειο', () => {
+    const G = require('../components/timetable-grid.js');
+    const quick = G.studentsBlockHtml(['Ιγνάτης Μ.', 'Δήμητρα Π.']);
+    assert.ok(quick.includes('Μαθητές (2)') && quick.includes('φορτώνει πλήρη λίστα'));
+    assert.ok(quick.includes('<li>Ιγνάτης Μ.</li>'));
+    const full = G.studentsBlockHtml([
+        { name: 'Μουτάφης <Ι>', from_class: true },
+        { name: 'Πασβούρη Δ.', from_class: false },
+    ], { full: true });
+    assert.ok(full.includes('Μαθητές (2)') && !full.includes('φορτώνει'));
+    assert.ok(full.includes('Μουτάφης &lt;Ι&gt;') && full.includes('(από άλλο τμήμα)'));
+    assert.ok(G.studentsBlockHtml([]).includes('Κανένας μαθητής'));
+});

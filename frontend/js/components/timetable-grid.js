@@ -363,6 +363,49 @@ const TimetableGrid = {
         }
     },
 
+    esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    },
+
+    /**
+     * 👥 Ποιοι είναι στο τμήμα ΑΥΤΗΣ της ώρας. Πρώτα δείχνουμε τα σύντομα
+     * ονόματα που ήρθαν με το slot (άμεσα), μετά τα πλήρη από το API.
+     */
+    studentsBlockHtml(students, { full = false } = {}) {
+        const esc = TimetableGrid.esc;
+        const list = students || [];
+        if (!list.length) {
+            return '<p class="text-muted">👥 Κανένας μαθητής σε αυτή την κάρτα.</p>';
+        }
+        const names = list.map(s => (typeof s === 'string'
+            ? esc(s)
+            : `${esc(s.name)}${s.from_class ? '' : ' <small class="text-muted">(από άλλο τμήμα)</small>'}`));
+        const note = full ? '' : ' <small class="text-muted">— φορτώνει πλήρη λίστα…</small>';
+        return `<p style="margin-bottom:0.25rem">👥 <strong>Μαθητές (${list.length})</strong>${note}</p>
+                <ol class="slot-students">${names.map(n => `<li>${n}</li>`).join('')}</ol>`;
+    },
+
+    async loadRoster(lessonId) {
+        const box = document.getElementById('slot-students');
+        if (!box || !lessonId) return;
+        try {
+            const data = await API.lessons.students(lessonId);
+            const attending = (data.students || []).filter(s => s.attends);
+            box.innerHTML = TimetableGrid.studentsBlockHtml(attending, { full: true })
+                + `<button class="btn btn-secondary btn-sm" style="margin-top:0.35rem"
+                           onclick="TimetableGrid.editRoster(${lessonId})">👥 Αλλαγή μαθητών</button>`;
+        } catch (err) {
+            box.innerHTML += `<small class="text-muted">Η πλήρης λίστα δεν φορτώθηκε: ${TimetableGrid.esc(err.message)}</small>`;
+        }
+    },
+
+    editRoster(lessonId) {
+        Modal.close();
+        LessonRosterModal.open({ id: lessonId, subject_name: '', periods_per_week: '' },
+                               () => TimetableView.render(document.getElementById('content-area')));
+    },
+
     showDetails(el) {
         let slot;
         try {
@@ -382,15 +425,17 @@ const TimetableGrid = {
             : '';
         const content = `
             <div style="font-size:1.1rem; padding-bottom: 1rem;">
-                <p style="margin-bottom:0.5rem">📚 <strong>Μάθημα:</strong> ${slot.subject_name || slot.subject_short || '-'}</p>
-                <p style="margin-bottom:0.5rem">👨‍🏫 <strong>Καθηγητής:</strong> ${slot.teacher_name || slot.teacher_short || '-'}</p>
-                <p style="margin-bottom:0.5rem">🎓 <strong>Τάξη:</strong> ${slot.class_name || slot.class_short || '-'}</p>
-                <p style="margin-bottom:0.5rem">🏫 <strong>Αίθουσα:</strong> ${slot.classroom_name || '-'}</p>
+                <p style="margin-bottom:0.5rem">📚 <strong>Μάθημα:</strong> ${TimetableGrid.esc(slot.subject_name || slot.subject_short || '-')}</p>
+                <p style="margin-bottom:0.5rem">👨‍🏫 <strong>Καθηγητής:</strong> ${TimetableGrid.esc(slot.teacher_name || slot.teacher_short || '-')}</p>
+                <p style="margin-bottom:0.5rem">🎓 <strong>Τάξη:</strong> ${TimetableGrid.esc(slot.class_name || slot.class_short || '-')}</p>
+                <p style="margin-bottom:0.5rem">🏫 <strong>Αίθουσα:</strong> ${TimetableGrid.esc(slot.classroom_name || '-')}</p>
                 <p style="margin-bottom:0.5rem">📅 <strong>Ημέρα:</strong> ${slot.is_unplaced ? '🅿️ Στην Παλέτα (μη τοποθετημένο)' : (days[slot.day_of_week] ?? '-')}</p>
+                <div id="slot-students" style="margin:0.75rem 0">${TimetableGrid.studentsBlockHtml(slot.students)}</div>
                 ${unplaceBtn}
             </div>
         `;
         Modal.open("Πληροφορίες Μαθήματος", content, () => Modal.close(), { saveText: "Κλείσιμο", saveClass: "btn-secondary" });
+        TimetableGrid.loadRoster(slot.lesson_id);
     },
 
     /** «🅿️ Αφαίρεση» από το info modal — κλείσε και εκτέλεσε. */
