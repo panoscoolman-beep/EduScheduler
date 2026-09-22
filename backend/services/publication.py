@@ -76,6 +76,7 @@ def snapshot_entries(db: Session, solution_id: int) -> list[dict]:
             "end": period.end_time,
             "room": rooms.get(s.classroom_id, "") if s.classroom_id else "",
             "subject": subject,
+            "color": (lesson.subject.color if lesson.subject else None) or "#3B82F6",
             "klass": klass,
             "students": roster_names.get(lesson.id, []),
             "room_short": room_shorts.get(s.classroom_id, "") if s.classroom_id else "",
@@ -433,7 +434,8 @@ def email_payload(*, to: str, teacher: str, title: str, note: str | None, change
         "to": to, "teacher": teacher, "title": title, "note": note or "", "changes": changes,
         "first": first, "test": test, "ics": ics or "",
         "entries": [{"day": e["day"], "start": e["start"], "end": e["end"],
-                     "subject": _subject_of(e), "klass": _klass_of(e), "room": e["room"]}
+                     "subject": _subject_of(e), "klass": _klass_of(e), "room": e["room"],
+                     "color": e.get("color") or "#3B82F6"}
                     for e in sorted(entries, key=_entry_order)],
     }
 

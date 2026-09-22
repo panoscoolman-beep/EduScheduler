@@ -184,6 +184,28 @@ def _class_label(school_class, mode: str) -> str:
     return name or short
 
 
+def blend_with_white(color: str | None, alpha: float = 0.16) -> str:
+    """Χρώμα μαθήματος → απαλή απόχρωση για χαρτί/Excel (ανάμειξη με λευκό).
+
+    Στην εκτύπωση δεν υπάρχει διαφάνεια, οπότε το «γέμισμα 16%» πρέπει να
+    υπολογιστεί εδώ· έτσι το χαρτί κρατά τα ίδια χρώματα με την οθόνη χωρίς
+    να «πνίγει» το κείμενο."""
+    value = (color or "").lstrip("#")
+    if len(value) != 6:
+        return "#FFFFFF"
+    try:
+        r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return "#FFFFFF"
+    mix = lambda c: round(c * alpha + 255 * (1 - alpha))  # noqa: E731
+    return "#{:02X}{:02X}{:02X}".format(mix(r), mix(g), mix(b))
+
+
+def _subject_color(slot: TimetableSlot) -> str:
+    lesson = slot.lesson
+    return (lesson.subject.color if lesson and lesson.subject else None) or "#3B82F6"
+
+
 def _roster_names(db: Session, slots: list[TimetableSlot]) -> dict[int, list[str]]:
     """👥 {lesson_id: ονόματα} για τα slots μιας σελίδας — ένα query."""
     return lesson_roster.display_names(db, list({s.lesson for s in slots if s.lesson}))
@@ -225,18 +247,21 @@ def _grid_table_html(
         if slot.day_of_week is None:
             continue
         subject, detail, room = _slot_cell_parts(slot, detail_kind, class_label, names)
-        cell = f"<b>{escape(subject)}</b>"
+        color = _subject_color(slot)
+        cell = (f"<div class='cell' style='background:{blend_with_white(color)};"
+                f"border-left:4px solid {color}'>"
+                f"<b>{escape(subject)}</b>")
         if detail:
             cell += f"<br><small>{escape(detail)}</small>"
         if room:
             cell += f"<br><small>🏫 {escape(room)}</small>"
-        grid.setdefault((slot.day_of_week, slot.period_id), []).append(cell)
+        grid.setdefault((slot.day_of_week, slot.period_id), []).append(cell + "</div>")
 
     header_cells = "".join(f"<th>{_GREEK_DAYS[d]}</th>" for d in days)
     rows_html = []
     for p in teaching_periods:
         cells = "".join(
-            f"<td>{'<hr>'.join(grid.get((d, p.id), [])) or ''}</td>" for d in days
+            f"<td>{''.join(grid.get((d, p.id), [])) or ''}</td>" for d in days
         )
         rows_html.append(
             f"<tr><th class='time'>{escape(p.start_time)}–{escape(p.end_time)}</th>{cells}</tr>"
@@ -258,7 +283,12 @@ _PRINT_CSS = """
             font-size: 12px; vertical-align: top; }
   thead th { background: #003366; color: white; }
   th.time { background: #eef2f7; white-space: nowrap; }
-  td hr { border: none; border-top: 1px dashed #bbb; margin: 4px 0; }
+  td { padding: 3px; }
+  /* Κελί μαθήματος: απαλό χρώμα του μαθήματος + έντονη γραμμή αριστερά, ίδιο
+     μοτίβο με την οθόνη. Τα χρώματα τυπώνονται μόνο με «Background graphics». */
+  td .cell { border-radius: 4px; padding: 4px 6px; text-align: left; }
+  td .cell + .cell { margin-top: 3px; }
+  @media print { td .cell { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   section.entity { page-break-after: always; }
   section.entity:last-of-type { page-break-after: auto; }
   @media print {
@@ -636,9 +666,14 @@ def export_xlsx(
             cell.alignment = wrap
 
         grid: dict[tuple[int, int], list[str]] = {}
+        # Χρώμα κελιού = χρώμα μαθήματος (απαλό), ίδιο με οθόνη/εκτύπωση.
+        # Με πολλά μαθήματα στο ίδιο κελί κρατάμε του πρώτου.
+        colors: dict[tuple[int, int], str] = {}
         for slot in entity_slots:
             if slot.day_of_week is None:
                 continue
+            colors.setdefault((slot.day_of_week, slot.period_id),
+                              blend_with_white(_subject_color(slot)))
             subject_short, detail, room = _slot_cell_parts(slot, detail_kind, "full", xlsx_names)
             lesson = slot.lesson
             subject_full = lesson.subject.name if lesson.subject else subject_short
@@ -659,6 +694,10 @@ def export_xlsx(
                 _cell_text(grid.get((d, p.id), [])) for d in days
             ]
             ws.append(row)
+            for i, d in enumerate(days):
+                tint = colors.get((d, p.id))
+                if tint:
+                    ws.cell(row=ws.max_row, column=i + 2).fill = PatternFill("solid", fgColor=tint[1:])
         for row_cells in ws.iter_rows(min_row=2):
             for cell in row_cells:
                 cell.alignment = wrap

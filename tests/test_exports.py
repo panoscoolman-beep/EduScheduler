@@ -508,3 +508,32 @@ def test_students_print_rejects_unknown_sort_and_survives_empty_school(client):
     client.session.commit()
     body = client.get("/api/exports/students/print").text
     assert "0 μαθητές" in body and "Δεν υπάρχουν μαθητές" in body
+
+
+def test_blend_with_white_and_coloured_print_cells(client):
+    """🎨 Το χρώμα του μαθήματος περνά σε εκτύπωση (απαλό γέμισμα + γραμμή)."""
+    from backend.routers.exports import blend_with_white
+
+    assert blend_with_white("#3B82F6", 0.16) == "#E0EBFE"
+    assert blend_with_white("#000000", 1) == "#000000"
+    assert blend_with_white(None) == "#FFFFFF" and blend_with_white("#zzz") == "#FFFFFF"
+
+    subject = client.session.query(Subject).first()
+    subject.color = "#10B981"
+    client.session.commit()
+    page = _teacher_print(client).text
+    assert "border-left:4px solid #10B981" in page and "background:#D9F4EB" in page
+
+
+def test_xlsx_cells_get_the_subject_tint(client):
+    from openpyxl import load_workbook
+
+    subject = client.session.query(Subject).first()
+    subject.color = "#F59E0B"
+    client.session.commit()
+    res = client.get(f"/api/exports/xlsx?solution_id={client.sol.id}&all=teachers")
+    assert res.status_code == 200
+    wb = load_workbook(io.BytesIO(res.content))
+    fills = {c.fill.fgColor.rgb for row in wb[wb.sheetnames[0]].iter_rows(min_row=2)
+             for c in row if c.value}
+    assert any(str(f).endswith("FDEFD8") for f in fills)      # #F59E0B στο 16%

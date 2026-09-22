@@ -194,7 +194,7 @@ def test_publish_sends_selected_emails_with_ics_and_records_status(env, monkeypa
     (p,) = sent
     assert p["to"] == "g@example.com" and p["first"] is True and p["test"] is False
     assert p["entries"] == [{"day": 0, "start": "16:00", "end": "17:00", "subject": "ΦΥΣΙΚΗ",
-                             "klass": "Β2", "room": "Αίθ. Α"}]
+                             "klass": "Β2", "room": "Αίθ. Α", "color": "#000000"}]
     assert "BEGIN:VCALENDAR" in p["ics"]
     detail = env.get(f"/api/publications/{res.json()['id']}").json()
     assert detail["email_state"] == "done" and detail["emails"]["sent"] == 1
