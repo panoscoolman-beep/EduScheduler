@@ -182,3 +182,37 @@ def conflicts_message(conflicts: list[dict]) -> str:
     more = f" και άλλα {len(conflicts) - 4}" if len(conflicts) > 4 else ""
     return (f"{len(conflicts)} επικαλύψεις με ώρες που ήδη έχουν οι μαθητές: {first}{more}. "
             "Αν συνεχίσεις, μπαίνουν έτσι κι αλλιώς (θα φαίνονται ως σύγκρουση στο πρόγραμμα).")
+
+
+def prune_after_enrollment_change(db: Session, class_id: int, *,
+                                  added: set[int] = frozenset(),
+                                  removed: set[int] = frozenset()) -> int:
+    """Καθαρίζει εξαιρέσεις/προσθήκες που έπαψαν να έχουν νόημα όταν αλλάζουν
+    οι μαθητές ενός τμήματος (χωρίς commit). Επιστρέφει πόσες σβήστηκαν.
+
+    • Έφυγε από το τμήμα → σβήνεται το «δεν κάνει αυτή την κάρτα» (αλλιώς αν
+      ξαναμπεί, θα έλειπε σιωπηλά από την κάρτα).
+    • Μπήκε στο τμήμα → σβήνεται το «κάνει ΚΑΙ αυτή την κάρτα» (πλέον το
+      κάνει έτσι κι αλλιώς ως μέλος του τμήματος)."""
+    if not (added or removed):
+        return 0
+    lesson_ids = [lid for (lid,) in db.query(Lesson.id).filter(Lesson.class_id == class_id).all()]
+    if not lesson_ids:
+        return 0
+    n = 0
+    for students, mode in ((removed, REMOVE), (added, ADD)):
+        if students:
+            n += (db.query(LessonStudentOverride)
+                  .filter(LessonStudentOverride.lesson_id.in_(lesson_ids),
+                          LessonStudentOverride.student_id.in_(list(students)),
+                          LessonStudentOverride.mode == mode)
+                  .delete(synchronize_session=False))
+    return n
+
+
+def clear_overrides(db: Session, lesson_id: int) -> int:
+    """Σβήνει όλες τις εξαιρέσεις/προσθήκες μιας κάρτας (χωρίς commit) — π.χ.
+    όταν αλλάζει τμήμα: ήταν γραμμένες για το παλιό τμήμα."""
+    return (db.query(LessonStudentOverride)
+            .filter(LessonStudentOverride.lesson_id == lesson_id)
+            .delete(synchronize_session=False))

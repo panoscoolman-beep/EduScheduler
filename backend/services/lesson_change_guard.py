@@ -14,6 +14,7 @@ from backend.models import (
     Lesson, Period, SchoolClass, Student, StudentAvailability, StudentClassEnrollment, Subject,
     Teacher, TeacherAvailability, TimetableSlot, TimetableSolution,
 )
+from backend.services import lesson_roster
 from backend.services import placement_conflicts as pc
 
 
@@ -59,11 +60,6 @@ def change_conflicts(db: Session, lesson: Lesson, new_teacher_id: int, new_class
                                   StudentAvailability.status == "unavailable",
                                   StudentAvailability.term_id == lesson.term_id).all()):
             student_unav.setdefault((d, p), set()).add(sid)
-    enrollments: dict[int, set[int]] = {}
-    if new_students:
-        for cid, sid in (db.query(StudentClassEnrollment.class_id, StudentClassEnrollment.student_id)
-                         .filter(StudentClassEnrollment.student_id.in_(new_students)).all()):
-            enrollments.setdefault(cid, set()).add(sid)
 
     def student_names(ids) -> str:
         rows = db.query(Student).filter(Student.id.in_(ids)).all()
@@ -88,9 +84,12 @@ def change_conflicts(db: Session, lesson: Lesson, new_teacher_id: int, new_class
                 reason = f"κώλυμα του/της {teacher.name if teacher else 'καθηγητή'}"
         if reason is None and class_changed:
             busy = next((o for o, l in others if l.class_id == new_class_id), None)
+            # Ποιοι είναι στις ΑΛΛΕΣ κάρτες εκείνη την ώρα: η λίστα κάθε κάρτας
+            # (τμήμα + προσθήκες − εξαιρέσεις), όχι σκέτο το τμήμα της.
             shared = set()
-            for _o, l in others:
-                shared |= enrollments.get(l.class_id, set())
+            if new_students:
+                for students in lesson_roster.roster_map(db, [l for _o, l in others]).values():
+                    shared |= new_students & students
             if busy is not None:
                 reason = f"το τμήμα {new_class.name if new_class else ''} έχει ήδη {_describe(db, busy)}"
             elif shared:

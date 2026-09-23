@@ -209,6 +209,20 @@ def resolve_and_validate_target_room(
                 other,
             )
 
+    # 2β. Μέγιστες ώρες/μέρα του καθηγητή (ίδιος κανόνας με τον solver). Μπλοκάρει
+    # μόνο κίνηση που ΠΡΟΣΘΕΤΕΙ ώρα στη μέρα — μετακίνηση μέσα στην ίδια μέρα
+    # επιτρέπεται πάντα (ακόμα κι αν η μέρα είναι ήδη πάνω από το όριο).
+    limit_hit = teacher_day_limit_hit(db, slot, data.day_of_week, extra_exclude_slot_id)
+    if limit_hit:
+        count, limit = limit_hit
+        raise blocked_by(
+            pc.TEACHER_DAY_LIMIT,
+            f"Ο καθηγητής {me['teacher'] or ''} έχει ήδη {count} ώρες "
+            f"{pc.GREEK_DAYS[data.day_of_week]} (όριο {limit}/μέρα). Αν το θέλεις, "
+            "αύξησε το «μέγιστες ώρες/μέρα» στα στοιχεία του καθηγητή.",
+            teacher_id=slot.lesson.teacher_id,
+        )
+
     # 3. Classroom conflict. Ρητό classroom_id στο body σημαίνει «θέλω ΑΥΤΗ
     # την αίθουσα», οπότε το conflict παραμένει σκληρό σφάλμα. Χωρίς ρητή
     # επιλογή (το drag&drop στέλνει μόνο μέρα/ώρα) η κατειλημμένη αίθουσα δεν
@@ -325,6 +339,31 @@ def resolve_and_validate_target_room(
     return target_room
 
 
+def teacher_day_limit_hit(db: Session, slot: TimetableSlot, day: int,
+                          extra_exclude_slot_id: int | None = None) -> tuple[int, int] | None:
+    """(ώρες που έχει ήδη, όριο) αν η τοποθέτηση του `slot` τη μέρα `day`
+    ξεπερνά το «μέγιστες ώρες/μέρα» του καθηγητή· αλλιώς None.
+
+    Δεν μπλοκάρει μετακίνηση μέσα στην ίδια μέρα (δεν προσθέτει ώρα)."""
+    lesson = slot.lesson
+    teacher = lesson.teacher if lesson else None
+    limit = getattr(teacher, "max_periods_per_day", None)
+    if not limit:
+        return None
+    if not slot.is_unplaced and slot.day_of_week == day:
+        return None
+    q = (db.query(TimetableSlot).join(Lesson)
+         .filter(TimetableSlot.solution_id == slot.solution_id,
+                 TimetableSlot.id != slot.id,
+                 TimetableSlot.is_unplaced == False,  # noqa: E712
+                 TimetableSlot.day_of_week == day,
+                 Lesson.teacher_id == lesson.teacher_id))
+    if extra_exclude_slot_id is not None:
+        q = q.filter(TimetableSlot.id != extra_exclude_slot_id)
+    count = q.count()
+    return (count, int(limit)) if count >= limit else None
+
+
 def _student_names(db: Session, student_ids: list[int]) -> list[str]:
     rows = (
         db.query(Student)
@@ -415,6 +454,7 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
             "classroom": room_names.get(room_id, "") if room_id is not None else "",
         }
 
+    teacher_day_count: dict = {}  # day -> ώρες του καθηγητή (εκτός του slot που σύρεται)
     teacher_busy: dict = {}   # cell -> describe dict of the blocking slot
     class_busy: dict = {}
     rooms_busy: dict = {}     # cell -> {room_id}
@@ -426,6 +466,7 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
         info = _who(sid, room_id, t_id, c_id, subj_id)
         if lesson.teacher_id and t_id == lesson.teacher_id:
             teacher_busy.setdefault(cell, info)
+            teacher_day_count[day] = teacher_day_count.get(day, 0) + 1
         if lesson.class_id and c_id == lesson.class_id:
             class_busy.setdefault(cell, info)
         if room_id is not None:
@@ -497,6 +538,14 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
     def _names(ids: list[int]) -> str:
         return pc.join_names([student_names.get(i, "") for i in ids])
 
+    # Όριο ωρών/μέρα του καθηγητή (check 2β) — ίδια λογική με teacher_day_limit_hit.
+    day_limit = getattr(lesson.teacher, "max_periods_per_day", None) if lesson.teacher else None
+    full_days = {
+        d for d in range(days_count)
+        if day_limit and teacher_day_count.get(d, 0) >= day_limit
+        and (slot.is_unplaced or slot.day_of_week != d)
+    }
+
     cells = []
     for day in range(days_count):
         for p in periods:
@@ -514,6 +563,11 @@ def build_placement_map(db: Session, slot: TimetableSlot) -> dict:
                 reason = f"Το τμήμα {my_class} έχει ήδη {b['subject']}" + (
                     f" με {b['teacher']}" if b['teacher'] else "")
                 short = f"🏫 {b['subject']}"
+            elif day in full_days:
+                code = pc.TEACHER_DAY_LIMIT
+                reason = (f"Ο καθηγητής {my_teacher} έχει ήδη {teacher_day_count.get(day, 0)} ώρες "
+                          f"{pc.GREEK_DAYS[day]} (όριο {day_limit}/μέρα)")
+                short = f"⏳ {teacher_day_count.get(day, 0)}/{day_limit}"
             elif cell in teacher_unav:
                 code = pc.TEACHER_UNAVAILABLE
                 reason = f"Κώλυμα καθηγητή {my_teacher}"

@@ -29,6 +29,7 @@ NO_ROOM = "no_room"
 TEACHER_UNAVAILABLE = "teacher_unavailable"
 STUDENT_UNAVAILABLE = "student_unavailable"
 SHARED_STUDENT = "shared_student"
+TEACHER_DAY_LIMIT = "teacher_day_limit"
 
 MAX_NAMES = 3  # πόσα ονόματα μαθητών/αιθουσών γράφουμε πριν το «και N ακόμα»
 

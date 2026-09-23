@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.services import lesson_roster
 from backend.services import archive as archive_svc
 from backend.services import delete_guards as guards
 from backend.models import SchoolClass, Student, StudentClassEnrollment
@@ -71,6 +72,8 @@ def set_enrollments(db: Session, school_class: SchoolClass, student_ids: list[in
             db.delete(enrollment)
     for sid in wanted - current.keys():
         db.add(StudentClassEnrollment(student_id=sid, class_id=school_class.id))
+    lesson_roster.prune_after_enrollment_change(
+        db, school_class.id, added=wanted - current.keys(), removed=current.keys() - wanted)
     db.flush()
     db.refresh(school_class)
     sync_student_count(school_class)
@@ -163,6 +166,7 @@ def enroll_student(class_id: int, student_id: int, db: Session = Depends(get_db)
     _get_student_or_404(db, student_id)
     if student_id not in {e.student_id for e in school_class.enrollments}:
         db.add(StudentClassEnrollment(student_id=student_id, class_id=class_id))
+        lesson_roster.prune_after_enrollment_change(db, class_id, added={student_id})
         db.flush()
         db.refresh(school_class)
     sync_student_count(school_class)
@@ -179,6 +183,7 @@ def unenroll_student(class_id: int, student_id: int, db: Session = Depends(get_d
     for enrollment in list(school_class.enrollments):
         if enrollment.student_id == student_id:
             db.delete(enrollment)
+    lesson_roster.prune_after_enrollment_change(db, class_id, removed={student_id})
     db.flush()
     db.refresh(school_class)
     sync_student_count(school_class)

@@ -374,7 +374,7 @@ def test_student_overloaded_by_enrollments(db):
     report = check_feasibility(db)
     # Many things will be flagged, but the student error must be among them
     assert report.feasible is False
-    assert any(f"id={student.id}" in e and "36" in e for e in report.errors)
+    assert any("Π Παύλος" in e and "36" in e for e in report.errors)   # όνομα, όχι id
 
 
 def test_stats_contain_load_factor_and_per_teacher_load(db):

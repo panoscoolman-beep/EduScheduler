@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -9,6 +9,7 @@ from backend.schemas import (
     StudentAvailabilityResponse,
     StudentAvailabilityBulkUpdate
 )
+from backend.services import crm_student_notify as crm_notify
 from backend.services.term_context import get_active_term_id
 
 router = APIRouter()
@@ -51,7 +52,8 @@ def create_student(student_in: StudentCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{student_id}", response_model=StudentResponse)
-def update_student(student_id: int, student_in: StudentCreate, db: Session = Depends(get_db)):
+def update_student(student_id: int, student_in: StudentCreate, request: Request,
+                   background: BackgroundTasks, db: Session = Depends(get_db)):
     db_student = db.query(Student).filter(Student.id == student_id).first()
     if not db_student:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -61,6 +63,9 @@ def update_student(student_id: int, student_in: StudentCreate, db: Session = Dep
 
     db.commit()
     db.refresh(db_student)
+    # EduScheduler → CRM (αν το επιτρέπει ο τρόπος συγχρονισμού του μαθητή στο CRM).
+    if not crm_notify.came_from_crm(request.headers):
+        background.add_task(crm_notify.notify_student_changed, crm_notify.payload_for(db_student))
     return db_student
 
 

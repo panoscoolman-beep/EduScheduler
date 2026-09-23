@@ -177,3 +177,69 @@ def test_names_follow_the_card_everywhere(env):
     assert slots[env.lb.id]["students"] == ["ΙΓΝΑΤΗΣ Μ.", "ΔΗΜΗΤΡΑ Π."]
     page = env.get(f"/api/exports/print?solution_id={env.sol.id}&teacher_id={env.lb.teacher_id}").text
     assert "ΙΓΝΑΤΗΣ Μ." in page and "ΤΜΗΜΑ Β" not in page
+
+
+# ─── bugs 23/9: εξαιρέσεις που «ξεχνιούνταν» ───────────────────────────────
+
+def _override_rows(db):
+    from backend.models import LessonStudentOverride
+    return sorted((o.lesson_id, o.student_id, o.mode) for o in db.query(LessonStudentOverride).all())
+
+
+def _classes_client(env):
+    from backend.routers import classes as classes_router
+    app = FastAPI()
+    app.include_router(classes_router.router, prefix="/api/classes")
+    app.dependency_overrides[get_db] = lambda: (yield env.s)
+    return TestClient(app)
+
+
+def test_leaving_the_class_drops_the_stale_exclusion(env):
+    """Bug 4: αν ο μαθητής έφευγε από το τμήμα, το «δεν κάνει αυτή την κάρτα»
+    έμενε — και όταν ξανάμπαινε, έλειπε σιωπηλά από την κάρτα."""
+    lesson_roster.set_roster(env.s, env.la, [])            # ο Ιγνάτης εξαιρείται από την Α
+    env.s.commit()
+    assert _override_rows(env.s) == [(env.la.id, env.ignatis.id, "remove")]
+    cc = _classes_client(env)
+    cls_a = env.la.class_id
+    assert cc.delete(f"/api/classes/{cls_a}/students/{env.ignatis.id}").status_code == 200
+    assert _override_rows(env.s) == []
+    assert cc.post(f"/api/classes/{cls_a}/students/{env.ignatis.id}").status_code == 200
+    assert lesson_roster.students_of(env.s, env.la) == {env.ignatis.id}
+
+
+def test_joining_the_class_drops_the_redundant_addition(env):
+    lesson_roster.set_roster(env.s, env.la, [env.ignatis.id, env.dimitra.id])   # η Δήμητρα «προσθήκη»
+    env.s.commit()
+    assert _override_rows(env.s) == [(env.la.id, env.dimitra.id, "add")]
+    cc = _classes_client(env)
+    assert cc.post(f"/api/classes/{env.la.class_id}/students/{env.dimitra.id}").status_code == 200
+    assert _override_rows(env.s) == []
+    assert lesson_roster.students_of(env.s, env.la) == {env.ignatis.id, env.dimitra.id}
+
+
+def test_changing_the_class_of_a_card_clears_its_overrides(env):
+    """Bug 3: οι εξαιρέσεις ήταν γραμμένες για το ΠΑΛΙΟ τμήμα και «ακολουθούσαν»
+    την κάρτα στο νέο."""
+    lesson_roster.set_roster(env.s, env.la, [env.dimitra.id])   # −Ιγνάτης, +Δήμητρα
+    env.s.commit()
+    body = {"subject_id": env.la.subject_id, "teacher_id": env.la.teacher_id,
+            "class_id": env.lb.class_id, "periods_per_week": 1, "term_id": env.la.term_id}
+    r = env.put(f"/api/lessons/{env.la.id}?force=true", json=body)
+    assert r.status_code == 200, r.text
+    assert _override_rows(env.s) == []
+    assert lesson_roster.students_of(env.s, env.la) == {env.dimitra.id}
+
+
+def test_feasibility_counts_the_card_roster_not_just_the_class(env):
+    from backend.services import feasibility
+    report = feasibility.FeasibilityReport()
+    # Ο Ιγνάτης εξαιρείται από την Α και προστίθεται στη Β → 1 ώρα, όχι 2 ούτε 0.
+    lesson_roster.set_roster(env.s, env.la, [])
+    lesson_roster.set_roster(env.s, env.lb, [env.dimitra.id, env.ignatis.id])
+    env.s.commit()
+    rosters = lesson_roster.roster_map(env.s, [env.la, env.lb])
+    feasibility._check_student_load(report, lessons=[env.la, env.lb], enrollments=[],
+                                    student_unavail=[], days_per_week=1, n_periods=0,
+                                    rosters=rosters, student_names={env.ignatis.id: "ΜΟΥΤΑΦΗΣ ΙΓΝΑΤΗΣ"})
+    assert any("ΜΟΥΤΑΦΗΣ ΙΓΝΑΤΗΣ: εγγεγραμμένος σε 1 ώρες" in e for e in report.errors)

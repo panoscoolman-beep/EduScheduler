@@ -19,12 +19,14 @@ from backend.models import (
     Period,
     SchoolClass,
     SchoolSettings,
+    Student,
     StudentAvailability,
     StudentClassEnrollment,
     Subject,
     Teacher,
     TeacherAvailability,
 )
+from backend.services import lesson_roster
 from backend.services.term_context import get_active_term_id
 
 
@@ -194,6 +196,10 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
         student_unavail=student_unavail,
         days_per_week=days_per_week,
         n_periods=n_periods,
+        # 👥 Η λίστα ΚΑΘΕ κάρτας (τμήμα + προσθήκες − εξαιρέσεις), όπως ο solver.
+        rosters=lesson_roster.roster_map(db, lessons),
+        student_names={st.id: f"{st.last_name} {st.first_name}".strip()
+                       for st in db.query(Student).all()},
     )
 
     report.feasible = not report.errors
@@ -416,17 +422,26 @@ def _check_student_load(
     student_unavail: list[StudentAvailability],
     days_per_week: int,
     n_periods: int,
+    rosters: dict[int, set[int]] | None = None,
+    student_names: dict[int, str] | None = None,
 ) -> None:
     """Per-student: total weekly enrolled hours vs availability windows.
-    Useful για φροντιστήριο όπου μαθητές γράφονται σε πολλά τμήματα."""
-    lessons_by_class: dict[int, list[Lesson]] = defaultdict(list)
-    for l in lessons:
-        lessons_by_class[l.class_id].append(l)
+    Useful για φροντιστήριο όπου μαθητές γράφονται σε πολλά τμήματα.
 
+    `rosters` ({lesson_id: {student_id}}) = η λίστα κάθε κάρτας με τις
+    εξαιρέσεις/προσθήκες· χωρίς αυτό, μετράμε τα σκέτα τμήματα."""
     hours_by_student: dict[int, int] = defaultdict(int)
-    for e in enrollments:
-        for l in lessons_by_class.get(e.class_id, []):
-            hours_by_student[e.student_id] += l.periods_per_week
+    if rosters is not None:
+        for l in lessons:
+            for sid in rosters.get(l.id, ()):
+                hours_by_student[sid] += l.periods_per_week
+    else:
+        lessons_by_class: dict[int, list[Lesson]] = defaultdict(list)
+        for l in lessons:
+            lessons_by_class[l.class_id].append(l)
+        for e in enrollments:
+            for l in lessons_by_class.get(e.class_id, []):
+                hours_by_student[e.student_id] += l.periods_per_week
 
     unavail_by_student: dict[int, int] = defaultdict(int)
     for ua in student_unavail:
@@ -439,8 +454,9 @@ def _check_student_load(
             overloaded.append(
                 {"student_id": student_id, "required": required, "capacity": capacity}
             )
+            who = (student_names or {}).get(student_id) or f"id={student_id}"
             report.errors.append(
-                f"Μαθητής id={student_id}: εγγεγραμμένος σε {required} ώρες "
+                f"Μαθητής {who}: εγγεγραμμένος σε {required} ώρες "
                 f"αλλά η διαθεσιμότητά του επιτρέπει μόνο {capacity}"
             )
     report.stats["overloaded_students"] = overloaded

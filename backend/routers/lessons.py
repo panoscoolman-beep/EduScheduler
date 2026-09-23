@@ -230,8 +230,12 @@ def update_lesson(lesson_id: int, data: LessonCreate, force: bool = False, db: S
             "message": change_guard.conflicts_message(conflicts),
             "conflicts": conflicts,
         })
+    class_changed = data.class_id != lesson.class_id
     for key, value in data.model_dump().items():
         setattr(lesson, key, value)
+    if class_changed:
+        # Οι εξαιρέσεις/προσθήκες μαθητών ήταν γραμμένες για το ΠΑΛΙΟ τμήμα.
+        lesson_roster.clear_overrides(db, lesson.id)
     if conflicts:
         ids = [c["slot_id"] for c in conflicts]
         for slot in db.query(TimetableSlot).filter(TimetableSlot.id.in_(ids)).all():

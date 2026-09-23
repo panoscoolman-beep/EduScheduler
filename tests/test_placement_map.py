@@ -293,3 +293,44 @@ def test_agreement_with_drop_enforcer(env):
         json={"day_of_week": good["day"], "period_id": good["period_id"]},
     )
     assert res.status_code == 200, f"map said ok but PUT failed: {good}"
+
+
+# ─── ⏳ μέγιστες ώρες/μέρα του καθηγητή (bug: το drag&drop το αγνοούσε) ───
+
+def _limit_env(env, limit=1):
+    env.t1.max_periods_per_day = limit
+    env.s.commit()
+    # Ο Τ1 έχει ήδη 1 ώρα τη Δευτέρα (1η).
+    _slot(env, _lesson(env, env.t1, env.c2), day=0, period=env.p1, room=env.regular)
+
+
+def test_day_limit_greys_out_the_full_day_and_the_put_agrees(env):
+    _limit_env(env, limit=1)
+    slot = _slot(env, _lesson(env, env.t1, env.c1))       # από την Παλέτα
+    m = build_placement_map(env.s, slot)
+    cell = _cell(m, 0, env.p2)
+    assert not cell["ok"] and cell["code"] == "teacher_day_limit"
+    assert cell["short"] == "⏳ 1/1"
+    assert _cell(m, 1, env.p2)["ok"]
+
+    res = env.put(f"/api/solver/solutions/{env.sol.id}/slots/{slot.id}",
+                  json={"day_of_week": 0, "period_id": env.p2.id})
+    assert res.status_code == 400
+    assert "όριο 1/μέρα" in res.json()["detail"]
+    assert env.put(f"/api/solver/solutions/{env.sol.id}/slots/{slot.id}",
+                   json={"day_of_week": 1, "period_id": env.p2.id}).status_code == 200
+
+
+def test_moving_within_the_same_day_is_always_allowed(env):
+    """Μέρα ήδη πάνω από το όριο (π.χ. από παλιά): η αναδιάταξη μέσα στη μέρα
+    δεν προσθέτει ώρα, άρα δεν μπλοκάρεται."""
+    _limit_env(env, limit=1)
+    mine = _slot(env, _lesson(env, env.t1, env.c1), day=0, period=env.p2, room=env.lab)   # 2/1
+    m = build_placement_map(env.s, mine)
+    assert all(c["code"] != "teacher_day_limit" for c in m["cells"] if c["day"] == 0)
+
+
+def test_no_limit_means_no_check(env):
+    _limit_env(env, limit=None)
+    slot = _slot(env, _lesson(env, env.t1, env.c1))
+    assert _cell(build_placement_map(env.s, slot), 0, env.p2)["ok"]
