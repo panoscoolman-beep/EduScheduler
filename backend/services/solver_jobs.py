@@ -42,17 +42,29 @@ def _persist_solver_result(
     When `locked_assignments` is given (regenerate flow), placed slots that
     match a locked assignment keep is_locked=True so the user's pins survive
     into the new solution."""
-    solution.status = result.status
+    # Το CHECK ck_solution_status ΔΕΝ έχει 'timeout' (ο engine το βγάζει όταν
+    # το CP-SAT τελειώνει τον χρόνο χωρίς λύση). Αν γραφόταν αυτούσιο, το
+    # commit έσκαγε με CheckViolation και ο χρήστης έβλεπε «Solver crashed»
+    # αντί για τις συμβουλές του timeout. Αποθηκεύεται ως 'error' — το UI
+    # το δείχνει ήδη με το μήνυμα από το metadata["message"].
+    status = "error" if result.status == "timeout" else result.status
+    solution.status = status
     solution.score = result.score
     stats = dict(result.stats)
     if extra_stats:
         stats.update(extra_stats)
+    if status not in ("optimal", "feasible"):
+        # Το /solver/status διαβάζει το ελληνικό μήνυμα του engine από εδώ
+        # (timeout, αντιφατικοί περιορισμοί, «δεν υπάρχουν μαθήματα»…).
+        stats["message"] = result.message
+        if result.status != status:
+            stats["solver_status"] = result.status
 
     # When the solve is infeasible, attach the per-entity feasibility
     # reasons (overloaded teacher, missing lab, …) so the UI can explain
     # *why* instead of a generic "infeasible" — closing the loop the user
     # otherwise only gets from a manual "Έλεγχος Εφικτότητας".
-    if result.status == "infeasible":
+    if status == "infeasible":
         try:
             # Scoped στο σενάριο της λύσης — αλλιώς οι «λόγοι» θα
             # υπολογίζονταν πάνω στην ένωση όλων των σεναρίων.
@@ -69,7 +81,7 @@ def _persist_solver_result(
         for la in (locked_assignments or [])
     }
 
-    if result.status in ("optimal", "feasible"):
+    if status in ("optimal", "feasible"):
         for slot_data in result.slots:
             key = (
                 slot_data["lesson_id"], slot_data["day_of_week"],

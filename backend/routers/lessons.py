@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
-from backend.models import Lesson, Subject, Teacher, SchoolClass, Classroom, TimetableSlot
+from backend.models import (
+    Lesson, LessonStudentOverride, Subject, Teacher, SchoolClass, Classroom, TimetableSlot,
+)
 from backend.services import lesson_change_guard as change_guard
 from backend.services import lesson_roster
 from backend.services import slot_history as slot_history_svc
@@ -379,7 +381,8 @@ def import_lessons_from_term(data: LessonTermImportRequest, db: Session = Depend
     """Επιλεκτική εισαγωγή μαθημάτων-καρτών από άλλο σενάριο στο ΕΝΕΡΓΟ.
 
     Το αντίθετο του all-or-nothing clone: ο χρήστης διαλέγει ποια
-    μαθήματα «έρχονται». Αντιγράφονται τα ίδια πεδία με τον term cloner·
+    μαθήματα «έρχονται». Αντιγράφονται τα ίδια πεδία με τον term cloner (μαζί
+    με τις 👥 εξαιρέσεις μαθητών της κάρτας)·
     διπλότυπα (ίδιο μάθημα+καθηγητής+τμήμα στο ενεργό) παραλείπονται με
     αναφορά. Οι ώρες των νέων μαθημάτων πάνε στην Παλέτα των ανοιχτών
     λύσεων του ενεργού σεναρίου (parking-lot sync).
@@ -430,6 +433,14 @@ def import_lessons_from_term(data: LessonTermImportRequest, db: Session = Depend
         )
         db.add(new_lesson)
         db.flush()
+        # 👥 Οι εξαιρέσεις μαθητών της κάρτας έρχονται μαζί (όπως στο clone
+        # σεναρίου) — αλλιώς ο μαθητής «γυρίζει» στο τμήμα του στο νέο σενάριο.
+        for ov in db.query(LessonStudentOverride).filter(
+            LessonStudentOverride.lesson_id == src.id
+        ).all():
+            db.add(LessonStudentOverride(
+                lesson_id=new_lesson.id, student_id=ov.student_id, mode=ov.mode,
+            ))
         existing_triples.add(triple)
         created_ids.append(new_lesson.id)
     db.commit()
