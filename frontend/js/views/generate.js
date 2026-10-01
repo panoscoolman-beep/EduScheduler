@@ -331,7 +331,7 @@ const GenerateView = {
                                 ? 'soft'
                                 : 'hard';
                             const statusTitle = s.status === 'error'
-                                ? 'Ο solver διακόπηκε από restart του container — μη ολοκληρωμένη λύση. Διέγραψέ την και ξανατρέξε.'
+                                ? 'Ο solver δεν ολοκλήρωσε (λήξη χρόνου, σφάλμα ή restart του container) — δεν υπάρχει πρόγραμμα. Δες το μήνυμα στη δημιουργία, διέγραψέ την και ξανατρέξε.'
                                 : (s.status === 'generating'
                                     ? 'Ο solver έτρεχε όταν φόρτωσε η σελίδα — αν παραμένει ώρα, διέγραψέ την.'
                                     : '');

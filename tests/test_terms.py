@@ -19,9 +19,11 @@ from backend.database import Base, get_db
 from backend.models import (
     Classroom,
     Lesson,
+    LessonStudentOverride,
     Period,
     SchoolClass,
     SchoolSettings,
+    Student,
     Subject,
     Teacher,
     TeacherAvailability,
@@ -179,6 +181,81 @@ def test_clone_inherits_term_dates(client):
     body = res.json()
     assert body["start_date"] == "2026-09-07"
     assert body["end_date"] == "2027-05-28"
+
+
+def test_clone_copies_lesson_student_overrides(client):
+    """👥 Οι εξαιρέσεις μαθητών ανά κάρτα ('add'/'remove') περνούν στις ΝΕΕΣ
+    κάρτες του αντιγράφου — αλλιώς ο μαθητής που κάνει το ένα δίωρο σε άλλο
+    τμήμα θα «γύριζε» στο τμήμα του και ο solver θα έβλεπε λάθος συγκρούσεις."""
+    s = client.session
+    seed = _seed_catalog(s)
+    term = _seed_term_with_inputs(s, seed)
+    other_cls = SchoolClass(name="A2", short_name="A2")
+    st_out = Student(first_name="Μαρία", last_name="Παππά")
+    st_in = Student(first_name="Γιώργος", last_name="Λάμπρου")
+    s.add_all([other_cls, st_out, st_in])
+    s.commit()
+    src_a1 = s.query(Lesson).filter(Lesson.term_id == term.id).one()
+    src_a2 = Lesson(subject_id=seed["subject"].id, teacher_id=seed["teacher"].id,
+                    class_id=other_cls.id, periods_per_week=1, duration=1,
+                    term_id=term.id)
+    s.add(src_a2)
+    s.commit()
+    s.add_all([
+        LessonStudentOverride(lesson_id=src_a1.id, student_id=st_out.id, mode="remove"),
+        LessonStudentOverride(lesson_id=src_a2.id, student_id=st_out.id, mode="add"),
+        LessonStudentOverride(lesson_id=src_a2.id, student_id=st_in.id, mode="add"),
+    ])
+    s.commit()
+
+    res = client.post(f"/api/terms/{term.id}/clone",
+                      json={"name": "Αντίγραφο", "activate": False})
+    assert res.status_code == 201
+    new_id = res.json()["id"]
+
+    new_by_class = {
+        l.class_id: l.id
+        for l in s.query(Lesson).filter(Lesson.term_id == new_id).all()
+    }
+    assert set(new_by_class) == {seed["class"].id, other_cls.id}
+
+    def _overrides(lesson_id):
+        return sorted(
+            (o.student_id, o.mode)
+            for o in s.query(LessonStudentOverride)
+            .filter(LessonStudentOverride.lesson_id == lesson_id).all()
+        )
+
+    # Ίδιες εξαιρέσεις, δεμένες στις νέες κάρτες…
+    assert _overrides(new_by_class[seed["class"].id]) == [(st_out.id, "remove")]
+    assert _overrides(new_by_class[other_cls.id]) == sorted(
+        [(st_out.id, "add"), (st_in.id, "add")])
+    # …και η πηγή ανέγγιχτη.
+    assert _overrides(src_a1.id) == [(st_out.id, "remove")]
+    assert len(_overrides(src_a2.id)) == 2
+    assert s.query(LessonStudentOverride).count() == 6
+
+
+def test_clone_term_inputs_reports_override_count(client):
+    from backend.services.term_cloner import clone_term_inputs
+
+    s = client.session
+    seed = _seed_catalog(s)
+    term = _seed_term_with_inputs(s, seed)
+    student = Student(first_name="Ελένη", last_name="Κώστα")
+    s.add(student)
+    s.commit()
+    lesson = s.query(Lesson).filter(Lesson.term_id == term.id).one()
+    s.add(LessonStudentOverride(lesson_id=lesson.id, student_id=student.id, mode="remove"))
+    s.commit()
+
+    new_term = Term(name="Κλώνος", is_active=False)
+    s.add(new_term)
+    s.flush()
+    counts = clone_term_inputs(s, term.id, new_term)
+    s.commit()
+    assert counts["lessons"] == 1
+    assert counts["lesson_student_overrides"] == 1
 
 
 def test_update_term_rejects_inverted_dates(client):

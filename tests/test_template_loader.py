@@ -215,3 +215,61 @@ def test_apply_with_unknown_key_returns_fatal_error(db):
     result = tl.apply("does_not_exist", db)
     assert result.fatal_error is not None
     assert result.total_created == 0
+
+
+# ---------------------------------------------------------------------------
+# Encoding (W01): τα templates είναι ελληνικά — διαβάζονται πάντα ως utf-8,
+# ανεξάρτητα από το locale, και ένα χαλασμένο αρχείο παραλείπεται (όχι 500)
+# ---------------------------------------------------------------------------
+
+def test_templates_load_under_non_utf8_locale():
+    """Με locale ASCII (ή Windows cp1252) το read_text() χωρίς encoding
+    σκάει σε UnicodeDecodeError στα ελληνικά. Τρέχει σε subprocess γιατί το
+    locale encoding κλειδώνει στην εκκίνηση του interpreter."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = {
+        **os.environ,
+        "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0",
+        "LC_ALL": "C", "LANG": "C",
+        "PYTHONPATH": str(root),
+    }
+    script = (
+        "import json\n"
+        "from backend.services import template_loader as tl\n"
+        "keys = [t.key for t in tl.list_templates()]\n"
+        "labels = {k: tl._load_template(k)['label'] for k in keys}\n"
+        "print(json.dumps(labels))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script], cwd=root, env=env,
+        capture_output=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    labels = json.loads(proc.stdout)
+    assert {"frontistirio_lykeio", "gymnasio", "panellinies"} <= set(labels)
+    # Τα ελληνικά labels διαβάστηκαν σωστά (όχι mojibake).
+    for key, label in labels.items():
+        assert label == tl._load_template(key)["label"]
+
+
+def test_bad_template_files_are_skipped_not_raised(db, tmp_path, monkeypatch):
+    """Μη-utf-8 αρχείο ή χαλασμένο JSON: η λίστα το παραλείπει και το
+    preview/apply επιστρέφει φιλικό fatal_error — ποτέ 500."""
+    good = {"key": "good", "label": "Φροντιστήριο", "description": "Καλό"}
+    (tmp_path / "good.json").write_text(json.dumps(good, ensure_ascii=False),
+                                        encoding="utf-8")
+    (tmp_path / "latin.json").write_bytes(
+        '{"key": "latin", "label": "Λύκειο"}'.encode("cp1253"))
+    (tmp_path / "broken.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(tl, "TEMPLATES_DIR", tmp_path)
+
+    assert [t.key for t in tl.list_templates()] == ["good"]
+    assert tl.list_templates()[0].label == "Φροντιστήριο"
+    for key in ("latin", "broken"):
+        assert tl.preview(key, db).fatal_error is not None
+        assert tl.apply(key, db).fatal_error is not None

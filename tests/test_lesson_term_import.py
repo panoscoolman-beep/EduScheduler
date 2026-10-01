@@ -162,3 +162,35 @@ def test_import_rejects_same_or_missing_source_term(env):
     assert env.post("/api/lessons/import-from-term", json={
         "source_term_id": 99, "lesson_ids": [1],
     }).status_code == 404
+
+
+def test_import_carries_the_cards_student_overrides(env):
+    """👥 Εξαιρέσεις μαθητών της κάρτας (add/remove) έρχονται μαζί με το μάθημα."""
+    from backend.models import LessonStudentOverride, Student
+
+    st_out = Student(first_name="Α", last_name="Έξω")
+    st_in = Student(first_name="Β", last_name="Μέσα")
+    env.s.add_all([st_out, st_in])
+    env.s.commit()
+    src = env.make_lesson(term_id=2, subject=env.subj2, ppw=2)
+    env.s.add_all([
+        LessonStudentOverride(lesson_id=src.id, student_id=st_out.id, mode="remove"),
+        LessonStudentOverride(lesson_id=src.id, student_id=st_in.id, mode="add"),
+    ])
+    env.s.commit()
+
+    res = env.post("/api/lessons/import-from-term", json={
+        "source_term_id": 2, "lesson_ids": [src.id],
+    })
+    assert res.status_code == 200 and res.json()["created"] == 1
+
+    new_id = res.json()["lesson_ids"][0] if "lesson_ids" in res.json() else (
+        env.s.query(Lesson).filter(Lesson.term_id == 1, Lesson.subject_id == env.subj2.id).one().id
+    )
+    copied = {
+        (o.student_id, o.mode)
+        for o in env.s.query(LessonStudentOverride).filter(LessonStudentOverride.lesson_id == new_id)
+    }
+    assert copied == {(st_out.id, "remove"), (st_in.id, "add")}
+    # Της πηγής μένουν όπως ήταν
+    assert env.s.query(LessonStudentOverride).filter(LessonStudentOverride.lesson_id == src.id).count() == 2

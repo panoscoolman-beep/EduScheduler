@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_revision_ids_are_unique():
-    ids = [re.search(r'^revision[^=]*=\s*["\']([^"\']+)["\']', p.read_text(), re.M).group(1)
+    ids = [re.search(r'^revision[^=]*=\s*["\']([^"\']+)["\']', p.read_text(encoding="utf-8"), re.M).group(1)
            for p in (ROOT / "alembic" / "versions").glob("*.py")]
     assert len(ids) == len(set(ids)), sorted(i for i in ids if ids.count(i) > 1)
 

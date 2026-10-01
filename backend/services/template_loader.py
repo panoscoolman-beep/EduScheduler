@@ -76,8 +76,10 @@ def list_templates() -> list[TemplateSummary]:
         return out
     for path in sorted(TEMPLATES_DIR.glob("*.json")):
         try:
-            data = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
+            # Ρητό utf-8: τα templates είναι ελληνικά, και με locale encoding
+            # (Windows cp1252, C/ASCII locale) το read_text σκάει.
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):  # ValueError ⊇ JSONDecodeError, UnicodeDecodeError
             continue
         out.append(TemplateSummary(
             key=data.get("key", path.stem),
@@ -93,8 +95,8 @@ def _load_template(key: str) -> Optional[dict]:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
-    except json.JSONDecodeError:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):  # κακό JSON / μη-utf-8 → «δεν βρέθηκε», όχι 500
         return None
 
 

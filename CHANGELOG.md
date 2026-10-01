@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 2026-10-01 — Διορθώσεις από τον εξωτερικό έλεγχο (454 pytest + 143 JS, v=81)
+
+- **Timeout του solver:** η κατάσταση `timeout` δεν επιτρέπεται από το CHECK
+  `ck_solution_status`, οπότε κάθε timeout γινόταν «Solver crashed: CheckViolation» και
+  χανόταν η συμβουλή. Αποθηκεύεται πλέον ως `error` με το ελληνικό μήνυμα του engine
+  (`metadata.message`, `metadata.solver_status='timeout'`) — χωρίς αλλαγή schema. Το
+  μήνυμα του engine γράφεται πλέον για κάθε μη επιτυχές αποτέλεσμα. Το tooltip του
+  «⚠️ Σφάλμα» στη λίστα δεν λέει πια μόνο «restart του container».
+- **👥 Εξαιρέσεις μαθητών ανά κάρτα** (`lesson_student_overrides`) αντιγράφονται πλέον
+  στο clone σεναρίου (`term_cloner`) και στην «📚 Από άλλο σενάριο» εισαγωγή — πριν
+  χάνονταν και ο μαθητής «γύριζε» στο τμήμα του (λάθος συγκρούσεις H7).
+- `template_loader` / `test_alembic_single_head`: ρητό `encoding="utf-8"` (Windows).
+- `auth.py`: διορθωμένο docstring (fail-closed· δέχεται και Origin/Referer).
 ### 2026-09-10 — Τεκμηρίωση: διορθώσεις στο CLAUDE.md (μόνο docs)
 
 Καμία αλλαγή σε κώδικα/συμπεριφορά. Το `CLAUDE.md` περιγράφει πλέον σωστά:

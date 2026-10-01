@@ -1,6 +1,6 @@
 """Bearer-token middleware for the EduScheduler API.
 
-Threat model: this CRM runs on a Tailscale-internal network with a
+Threat model: EduScheduler runs on a Tailscale-internal network with a
 single tenant, so the realistic threat is *another service on the same
 Docker host* hitting the API by accident — not random internet traffic.
 The middleware therefore enforces a token only on the cross-service
@@ -9,13 +9,22 @@ without the user having to log in.
 
 Algorithm:
   1. Allow every non-/api/* path (static frontend assets).
-  2. Allow /api/healthz and /api/_meta — public diagnostic endpoints.
-  3. If `Sec-Fetch-Site: same-origin` is present → allow. Modern
-     browsers always set this header on fetch/XHR; server-to-server
-     callers (Python requests, curl, internal containers) don't.
-  4. Otherwise require `Authorization: Bearer <EDSCHEDULER_API_TOKEN>`.
-  5. If `EDSCHEDULER_API_TOKEN` env var is unset, fail open with a
-     log line — preserves dev workflow but warns loudly.
+  2. Allow /api/healthz — the only public API endpoint (`_PUBLIC_API_PATHS`).
+  3. Same-origin browser request → allow, on either signal:
+     a. `Sec-Fetch-Site: same-origin` (or `same-site`). Browsers send it
+        on fetch/XHR, but only to "potentially trustworthy" origins
+        (HTTPS or localhost) — not over plain HTTP on a Tailscale IP.
+     b. An `Origin` or `Referer` header whose host[:port] equals the
+        request's `Host` — covers that plain-HTTP case.
+     Both are client-settable headers: a non-browser caller can forge
+     them. The real perimeter is the host firewall (LAN blocked,
+     Tailscale only) + the bearer token for cross-service calls.
+  4. Otherwise require `Authorization: Bearer <EDSCHEDULER_API_TOKEN>`
+     (constant-time compare) → 401 if missing or wrong.
+  5. If `EDSCHEDULER_API_TOKEN` is unset/blank, fail CLOSED: every
+     request that reaches step 4 gets 503 + an error log line. The
+     same-origin SPA (step 3) keeps working; cross-service callers are
+     locked out until the env var is set.
 
 Korifi services that call into EduScheduler get the token via env var
 and add it to every outgoing request through
