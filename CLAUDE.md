@@ -78,8 +78,9 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 κάθε deploy εφαρμόζει αυτόματα όσες revisions λείπουν. Το
 `Base.metadata.create_all` **έχει αφαιρεθεί** — έκρυβε migrations που έλειπαν
 (βλ. `d7e8f9a0b1c2_slot_history_and_is_locked.py` και το docstring του
-`lifespan` στο `backend/main.py`). Head στις 2026-09-18:
-`a7b3e2d9c4f1_lesson_student_overrides.py`. Το `tests/test_alembic_single_head.py`
+`lifespan` στο `backend/main.py`). Head στις 2026-10-02:
+`d1e3f5a7b9c2_clean_nan_contact_fields.py` (πριν: `c9d2e4f6a8b1` τηλέφωνα 100 χαρακτήρες,
+`a7b3e2d9c4f1` εξαιρέσεις μαθητών). Το `tests/test_alembic_single_head.py`
 κόβει διπλό revision id / δεύτερο head πριν φτάσει στο deploy.
 
 **Αλλαγή schema = νέα Alembic revision**, ποτέ χειροκίνητο `ALTER TABLE` στο prod:
@@ -91,6 +92,12 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
    στο `upgrade()`, `DROP COLUMN IF EXISTS` στο `downgrade()`. Πρότυπο:
    `c3d4e5f6a7b8_student_grade.py`.
 4. Push σε `master` → CI → το entrypoint κάνει `alembic upgrade head`.
+
+**Rollback κώδικα πίσω από revisions:** πρώτα `docker exec edscheduler-backend alembic
+downgrade <παλιό head>` (π.χ. `a7b3e2d9c4f1` για τον κώδικα πριν από 2026-10-02) και
+μετά το push του revert — αλλιώς το entrypoint του παλιού κώδικα αποτυγχάνει με «Can't
+locate revision» και ο backend δεν ξεκινά. Τα downgrades είναι χωρίς απώλειες (δεν
+στενεύουν στήλες, δεν σβήνουν το `data_cleanup_log`).
 
 ### Tables
 
@@ -113,6 +120,7 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 | `school_settings` | Global ρυθμίσεις. `visible_from`/`visible_to` («HH:MM») = ωράριο λειτουργίας (+ `saturday_from`/`saturday_to` για το Σάββατο· τα κελιά εκτός ωραρίου της μέρας εμφανίζονται «κλειστά»): κρύβει ώρες εκτός από πλέγμα/εκτυπώσεις/Excel — ποτέ ώρα με τοποθετημένο μάθημα (⏰)· δεσμεύει ΚΑΙ τον solver από 18/9 (H0: κανένα μάθημα εκτός ωραρίου της μέρας, εκτός από κλειδωμένα· `services/operating_hours.py::closed_cells`). PUT = μερική ενημέρωση (`exclude_unset`) |
 | `solution_publications` | 📢 Δημοσιεύσεις προγράμματος (`services/publication.py`, `/api/publications`): αυτοτελές snapshot + έτοιμο μήνυμα ανά επηρεαζόμενο καθηγητή («τι άλλαξε για σένα» σε σχέση με την προηγούμενη δημοσίευση του σεναρίου). Το bot του CRM διαβάζει την ουρά `pending-telegram` ανά 5' και στέλνει ΜΙΑ σύνοψη με κουμπί ανά καθηγητή ΜΟΝΟ στον ιδιοκτήτη. Email (επιλογή παραληπτών κάθε φορά, `email_state`): background task → CRM `POST /api/eds-mail/teacher-schedule` (HTML πίνακας + PDF + .ics από το Gmail του φροντιστηρίου)· `POST /api/publications/{id}/emails` για την τελευταία δημοσίευση, `…/preview/{sid}/test-email` για δοκιμή |
 | `terms` | Σενάρια ωραρίου — scope για lessons/availability/solutions (term_id NOT NULL παντού), προαιρετικά start/end dates για ICS |
+| `data_cleanup_log` | Ίχνος καθαρισμών δεδομένων από Alembic (table, row_id, column, old_value, reason). Πρώτη χρήση: `d1e3f5a7b9c2` — email/τηλέφωνα «nan» (bug του CRM) → NULL, με την παλιά τιμή εδώ. Δεν σβήνεται στο downgrade |
 
 > ⚠️ **Η διαγραφή γραμμής στο `periods` είναι καταστροφική.** Τα FK προς
 > `periods` είναι `ON DELETE CASCADE`, οπότε σβήνονται ΟΡΙΣΤΙΚΑ όλες οι
@@ -129,6 +137,11 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
 > μαθήματα-κάρτες τους σε όλα τα σενάρια + τις ώρες τους) και για **αίθουσα** (με
 > force οι τοποθετημένες ώρες της γυρίζουν στην Παλέτα — δεν χάνονται). Το ίδιο και
 > για μάθημα-κάρτα με τοποθετημένες ώρες (`DELETE /api/lessons/{id}`).
+> Από 2026-10-02 και για **μετατροπή ώρας σε «Διάλειμμα»** (`PUT /api/periods/{id}` με
+> τοποθετημένες ώρες → 409 `requires_force` με λίστα `programmes`): με force **μόνο τα
+> ενεργά** προγράμματα πάνε στην Παλέτα, με εγγραφή στο 🕘 Ιστορικό (επανέρχονται με
+> Αναίρεση όταν η ώρα ξαναγίνει διδακτική)· τα **αρχειοθετημένα δεν αγγίζονται**. Στο 409
+> της διαγραφής μαθήματος μετράνε και οι ώρες του σε αρχειοθετημένα προγράμματα.
 
 ## Solver (`backend/solver/engine.py`)
 
@@ -144,7 +157,23 @@ Postgres 16. Τα SQLAlchemy models (`backend/models/`) περιγράφουν �
   - H6: Μαθητής δεν παρακολουθεί σε hours που έχει unavailable
   - **H7: Δύο τμήματα με κοινό μαθητή δεν πέφτουν ταυτόχρονα** (αυτό είναι το
     "killer feature" του φροντιστηριακού mode)
-- **Soft constraints:** spread, balance, preference με βαρύτητες
+  - **H6b (2026-10-02):** ώρες καθηγητή ≤ max(«Max/Εβδ.», κλειδωμένες ώρες του) — μόνο
+    όταν μπορεί να «δέσει» (αλλιώς το model μένει ίδιο). Strict → «αδύνατο» με όνομα
+    καθηγητή· permissive → το περίσσευμα στην Παλέτα με αιτία.
+  - **Σκληροί κανόνες χρήστη** (`backend/solver/hard_rules.py`, κοινός parser με το
+    `feasibility.py`): μόνο `no_late_day` και `teacher_preferred_days` επιβάλλονται
+    υποχρεωτικά (κλειδωμένα κελιά εξαιρούνται, όπως στα H0/H5). «Σκληρές» γραμμές
+    τύπων προτίμησης (κενά, ισοκατανομή, συμπτυγμένο κ.λπ.) εφαρμόζονται ως μαλακές με
+    ⚠️· άγνωστες/χαλασμένες αγνοούνται με ⚠️. Το `max_consecutive` δεν έχει handler.
+  - **Κλειδωμένες ώρες που ήδη συγκρούονται** (≥2 στο ίδιο κελί καθηγητή/τμήματος/
+    αίθουσας/μαθητή) κρατιούνται και τίποτα άλλο δεν μπαίνει εκεί — με ⚠️ αντί για
+    αποτυχία του «Γέμισε τα κενά»/Lock & Regenerate.
+- **Soft constraints:** spread, balance, preference με βαρύτητες. Από 2026-10-02:
+  ποινή 500 όταν δύο blocks μιας κάρτας με block ≥2 ωρών (π.χ. «2,2», «2,1») πέφτουν
+  την ίδια μέρα (όχι «1,1,1», ούτε κάρτες με περισσότερα blocks από μέρες) — μόνο όταν
+  ο solver ήδη βελτιστοποιεί (soft κανόνες ή permissive), ποτέ δεν κάνει λύση αδύνατη.
+  Κλειδωμένο block μιας κάρτας «2,2» αντιστοιχίζεται σε block της κατανομής (το άλλο
+  μένει δίωρο).
 
 Output: `timetable_slots` rows + `timetable_solutions` row με metadata
 (quality score, runtime, constraints violated).
