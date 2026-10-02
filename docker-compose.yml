@@ -28,7 +28,11 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8082:8000"
+      # IPv4 μόνο: χωρίς IP το Docker ακούει ΚΑΙ σε [::], και το APP-PORT-GUARD
+      # (iptables) δεν καλύπτει IPv6 — ο server έχει δημόσια IPv6 και ο
+      # EduScheduler δεν έχει login. Tailscale (100.x) και localhost δουλεύουν
+      # όπως πριν· το CRM μιλά με το container μέσω korifi-integration (όχι 8082).
+      - "0.0.0.0:8082:8000"
     mem_limit: 1g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz', timeout=5)"]
