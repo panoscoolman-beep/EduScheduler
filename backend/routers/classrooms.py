@@ -60,6 +60,10 @@ def update_classroom(classroom_id: int, data: ClassroomCreate, db: Session = Dep
     classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
     if not classroom:
         raise HTTPException(status_code=404, detail="Η αίθουσα δεν βρέθηκε")
+    # Ίδιος έλεγχος με το POST (πριν: IntegrityError → σκέτο 500).
+    if db.query(Classroom).filter(Classroom.short_name == data.short_name,
+                                  Classroom.id != classroom_id).first():
+        raise HTTPException(status_code=409, detail=f"Υπάρχει ήδη αίθουσα με συντομογραφία '{data.short_name}'")
     for key, value in data.model_dump().items():
         setattr(classroom, key, value)
     db.commit()

@@ -12,7 +12,7 @@ from backend.models import (
 from backend.services import lesson_change_guard as change_guard
 from backend.services import lesson_roster
 from backend.services import slot_history as slot_history_svc
-from backend.services.lesson_impact import lesson_impact, palette_review
+from backend.services.lesson_impact import archived_phrase, lesson_impact, palette_review
 from backend.schemas import (
     LessonRosterUpdate,
     PaletteCleanupRequest,
@@ -39,6 +39,9 @@ def _enrich_lesson(lesson: Lesson, names: list[str] | None = None) -> dict:
         "classroom_id": lesson.classroom_id,
         "periods_per_week": lesson.periods_per_week,
         "duration": lesson.duration,
+        # Χωρίς αυτό η φόρμα άνοιγε με κενή «Κατανομή» και κάθε αποθήκευση
+        # έσβηνε σιωπηλά τα δίωρα (π.χ. «2,2» → μονόωρα στον solver).
+        "distribution": lesson.distribution,
         "is_locked": lesson.is_locked,
         "subject_name": lesson.subject.name if lesson.subject else None,
         "teacher_name": lesson.teacher.name if lesson.teacher else None,
@@ -131,8 +134,10 @@ def apply_palette_cleanup(data: PaletteCleanupRequest, db: Session = Depends(get
     μπορεί να άλλαξαν από την προεπισκόπηση):
       • trim: μόνο αν ακόμα περισσεύουν ώρες — ποτέ τοποθετημένη ώρα·
       • delete: μόνο αν δεν υπάρχει ΚΑΜΙΑ τοποθετημένη ώρα σε κανένα πρόγραμμα.
-    Ό,τι δεν είναι ασφαλές παραλείπεται με αιτία."""
+    Ό,τι δεν είναι ασφαλές παραλείπεται με αιτία. Τα αρχειοθετημένα προγράμματα
+    μετρούν εδώ: η διαγραφή θα έσβηνε και τις δικές τους τοποθετημένες ώρες."""
     trimmed, hours_removed, deleted, skipped = 0, 0, 0, []
+    kept_for_archived = 0
     for lesson_id in dict.fromkeys(int(i) for i in data.trim_ids):
         report = lesson_impact(db, lesson_id)
         if report is None:
@@ -146,6 +151,11 @@ def apply_palette_cleanup(data: PaletteCleanupRequest, db: Session = Depends(get
         report = lesson_impact(db, lesson_id)
         if report is None:
             skipped.append({"lesson_id": lesson_id, "reason": "Δεν βρέθηκε."})
+        elif report["archived"]["placed"]:
+            kept_for_archived += 1
+            skipped.append({"lesson_id": lesson_id,
+                            "reason": (f"Έχει τοποθετημένες ώρες, {archived_phrase(report['archived'])} — "
+                                       "διάγραψέ το από το 🔍 αν το θες.")})
         elif report["delete"]["placed_total"]:
             skipped.append({"lesson_id": lesson_id,
                             "reason": "Έχει τοποθετημένες ώρες — διάγραψέ το από το 🔍 αν το θες."})
@@ -157,7 +167,10 @@ def apply_palette_cleanup(data: PaletteCleanupRequest, db: Session = Depends(get
         "trimmed": trimmed, "hours_removed": hours_removed, "deleted": deleted, "skipped": skipped,
         "message": (f"Αφαιρέθηκαν {hours_removed} ώρες από την Παλέτα ({trimmed} μαθήματα) και "
                     f"διαγράφηκαν {deleted} μαθήματα χωρίς τοποθετημένες ώρες. Καμία τοποθετημένη "
-                    "ώρα δεν πειράχτηκε."),
+                    "ώρα δεν πειράχτηκε."
+                    + (f" {kept_for_archived} μαθήματα ΔΕΝ διαγράφηκαν: έχουν τοποθετημένες ώρες σε "
+                       "αρχειοθετημένο πρόγραμμα (διάγραψέ τα από το 🔍 αν το θες)."
+                       if kept_for_archived else "")),
     }
 
 
@@ -179,9 +192,8 @@ def get_lesson(lesson_id: int, db: Session = Depends(get_db)):
     return _enrich_lesson(lesson, lesson_roster.display_names(db, [lesson]).get(lesson.id))
 
 
-@router.post("/", response_model=LessonResponse, status_code=201)
-def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
-    # Validate foreign keys
+def _require_refs(db: Session, data: LessonCreate) -> None:
+    """Μάθημα/καθηγητής/τμήμα/αίθουσα πρέπει να υπάρχουν (αλλιώς 404, όχι 500)."""
     if not db.query(Subject).filter(Subject.id == data.subject_id).first():
         raise HTTPException(status_code=404, detail="Το μάθημα δεν βρέθηκε")
     if not db.query(Teacher).filter(Teacher.id == data.teacher_id).first():
@@ -190,6 +202,11 @@ def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Η τάξη δεν βρέθηκε")
     if data.classroom_id and not db.query(Classroom).filter(Classroom.id == data.classroom_id).first():
         raise HTTPException(status_code=404, detail="Η αίθουσα δεν βρέθηκε")
+
+
+@router.post("/", response_model=LessonResponse, status_code=201)
+def create_lesson(data: LessonCreate, db: Session = Depends(get_db)):
+    _require_refs(db, data)
 
     lesson = Lesson(term_id=get_active_term_id(db), **data.model_dump())
     db.add(lesson)
@@ -224,6 +241,7 @@ def update_lesson(lesson_id: int, data: LessonCreate, force: bool = False, db: S
     lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
     if not lesson:
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
+    _require_refs(db, data)
     conflicts = change_guard.change_conflicts(db, lesson, data.teacher_id, data.class_id)
     if conflicts and not force:
         raise HTTPException(status_code=409, detail={
@@ -363,11 +381,14 @@ def delete_lesson(lesson_id: int, force: bool = False, db: Session = Depends(get
     report = lesson_impact(db, lesson_id)
     info = report["delete"]
     if info["placed_total"] and not force:
+        # Μετρούν ΚΑΙ τα αρχειοθετημένα προγράμματα: το cascade σβήνει και εκεί.
+        archived = report["archived"]
+        extra = f" (από αυτές {archived_phrase(archived)})" if archived["placed"] else ""
         raise HTTPException(status_code=409, detail={
             "code": "lesson_has_placed_slots",
             "requires_force": True,
             "message": (f"Το μάθημα έχει {info['placed_total']} τοποθετημένες ώρες σε "
-                        f"{info['solutions_with_placed']} πρόγραμμα(τα). Η διαγραφή θα τις "
+                        f"{info['solutions_with_placed']} πρόγραμμα(τα){extra}. Η διαγραφή θα τις "
                         "σβήσει οριστικά."),
             "impact": report,
         })

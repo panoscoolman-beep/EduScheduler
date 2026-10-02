@@ -43,6 +43,10 @@ def update_subject(subject_id: int, data: SubjectCreate, db: Session = Depends(g
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Το μάθημα δεν βρέθηκε")
+    # Ίδιος έλεγχος με το POST (πριν: IntegrityError → σκέτο 500).
+    if db.query(Subject).filter(Subject.short_name == data.short_name,
+                                Subject.id != subject_id).first():
+        raise HTTPException(status_code=409, detail=f"Υπάρχει ήδη μάθημα με συντομογραφία '{data.short_name}'")
     for key, value in data.model_dump().items():
         setattr(subject, key, value)
     db.commit()
