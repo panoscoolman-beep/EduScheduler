@@ -47,8 +47,11 @@ async def lifespan(app: FastAPI):
     kills the worker while the TimetableSolution row sits at
     status='generating'. This flips every stuck 'generating' row to
     'error' on boot so the UI shows a clear explanation, not a phantom job.
+    The same restart can kill a publication's email job mid-batch, leaving it
+    'sending' forever — _recover_stuck_emails releases those (never resends).
     """
     _recover_stuck_runs()
+    _recover_stuck_emails()
     yield
 
 
@@ -87,6 +90,31 @@ def _recover_stuck_runs() -> None:
             "Recovered %d stuck 'generating' solver runs to 'error' status",
             len(stuck),
         )
+    finally:
+        session.close()
+
+
+def _recover_stuck_emails() -> None:
+    """📢 Publications whose email job died with the previous container
+    (uvicorn runs ONE process, so at boot no send can be in flight): their
+    unsent emails become 'failed' with an explanation, so «✉️ Αποστολή email»
+    works again instead of answering «Στέλνονται ήδη» forever. Nothing is
+    sent automatically. Never blocks the boot."""
+    import logging
+    from sqlalchemy.orm import Session as _Session
+    from backend.services.publication import recover_interrupted_emails
+
+    logger = logging.getLogger(__name__)
+    session = _Session(bind=engine)
+    try:
+        recovered = recover_interrupted_emails(session)
+        if recovered:
+            logger.warning(
+                "Released %d publication(s) stuck at email_state='sending'", recovered
+            )
+    except Exception:  # noqa: BLE001 — a recovery hiccup must not take the app down
+        session.rollback()
+        logger.exception("Email recovery at startup failed")
     finally:
         session.close()
 

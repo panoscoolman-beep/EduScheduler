@@ -537,3 +537,66 @@ def test_xlsx_cells_get_the_subject_tint(client):
     fills = {c.fill.fgColor.rgb for row in wb[wb.sheetnames[0]].iter_rows(min_row=2)
              for c in row if c.value}
     assert any(str(f).endswith("FDEFD8") for f in fills)      # #F59E0B στο 16%
+
+
+# ------------------------------ G3-13: εκδόσεις .ics ------------------------------
+
+def _ics_events(text):
+    import re
+
+    out = {}
+    for ev in text.split("BEGIN:VEVENT")[1:]:
+        field = lambda name: re.search(rf"\r\n{name}[;:]([^\r]*)", "\r\n" + ev).group(1)  # noqa: E731
+        out[field("UID")] = {"start": field("DTSTART"), "stamp": field("DTSTAMP"),
+                             "seq": int(field("SEQUENCE")), "modified": field("LAST-MODIFIED")}
+    return out
+
+
+def test_ics_uids_survive_a_move_and_a_new_solution_so_reimports_update(client):
+    s = client.session
+    url = f"/api/exports/ics?solution_id={client.sol.id}&teacher_id={client.t1.id}"
+    before = _ics_events(client.get(url).text)
+    assert len(before) == 2 and all(uid.startswith(f"eduscheduler-t{client.t1.id}-lesson-") for uid in before)
+
+    monday = (s.query(TimetableSlot)
+              .filter(TimetableSlot.solution_id == client.sol.id, TimetableSlot.day_of_week == 0)
+              .join(Lesson).filter(Lesson.teacher_id == client.t1.id).one())
+    monday.day_of_week = 3                    # Δευτέρα → Πέμπτη (drag & drop)
+    s.commit()
+    after = _ics_events(client.get(url).text)
+    assert set(after) == set(before)          # ίδια γεγονότα → το ημερολόγιο τα ΕΝΗΜΕΡΩΝΕΙ
+    assert {e["start"] for e in after.values()} != {e["start"] for e in before.values()}
+
+    # Νέα λύση του ίδιου σεναρίου (νέα slot ids) με τις ίδιες κάρτες → ίδια UIDs, όχι διπλά.
+    sol2 = TimetableSolution(name="Λύση Β", status="optimal")
+    s.add(sol2)
+    s.commit()
+    for slot in s.query(TimetableSlot).filter(TimetableSlot.solution_id == client.sol.id).all():
+        s.add(TimetableSlot(solution_id=sol2.id, lesson_id=slot.lesson_id, day_of_week=slot.day_of_week,
+                            period_id=slot.period_id, classroom_id=slot.classroom_id))
+    s.commit()
+    other = _ics_events(client.get(f"/api/exports/ics?solution_id={sol2.id}&teacher_id={client.t1.id}").text)
+    assert set(other) == set(before)
+    # Ημερολόγιο μαθητή: δικά του UIDs (δεν «πατάει» το ημερολόγιο του καθηγητή).
+    student = _ics_events(client.get(
+        f"/api/exports/ics?solution_id={client.sol.id}&student_id={client.student.id}").text)
+    assert student and not set(student) & set(before)
+
+
+def test_ics_version_grows_with_each_generation(client):
+    import datetime as dt
+
+    from backend.routers.exports import render_ics
+
+    events = [{"lesson_id": 7, "day": 0, "period_id": 1, "start": "16:00", "end": "17:00",
+               "subject": "Φυσική", "klass": "Β1", "teacher": "Τ", "room": "Α1"}]
+    older = render_ics(client.session, None, "Τ", events, teacher_id=1,
+                       now=dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc))
+    newer = render_ics(client.session, None, "Τ", events, teacher_id=1,
+                       now=dt.datetime(2026, 1, 2, 9, 30, 15, tzinfo=dt.timezone.utc))
+    (a,), (b,) = _ics_events(older).values(), _ics_events(newer).values()
+    assert a["stamp"] == a["modified"] == "20260101T090000Z"
+    assert b["stamp"] == "20260102T093015Z" and b["seq"] > a["seq"] > 0
+    live = _ics_events(client.get(
+        f"/api/exports/ics?solution_id={client.sol.id}&teacher_id={client.t1.id}").text)
+    assert all(e["stamp"] != "20260101T000000Z" and e["seq"] > b["seq"] for e in live.values())
