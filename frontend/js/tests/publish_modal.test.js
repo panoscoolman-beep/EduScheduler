@@ -6,6 +6,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const P = require('../components/publish_modal.js');
+// Στον browser είναι global (index.html)· εδώ το δίνουμε εμείς (ώρα δημοσίευσης).
+global.TimetableHelpers = require('../views/timetable_helpers.js');
 
 const T = [
     { teacher_id: 1, teacher: 'Γεωργέλλης', email: 'g@x.gr', changed: true, hours: 44, message: 'm1',
@@ -124,4 +126,33 @@ test('τίποτα νέο: email για την τελευταία δημοσίε
     document.querySelector('.pub-mail[data-id="2"]').click();
     await opened[1].onSave();
     assert.deepEqual(calls, [['emails', 4, { teacher_ids: [2] }]]);      // ΟΧΙ νέα δημοσίευση
+});
+
+test('buildHtml: η ώρα της τελευταίας δημοσίευσης σε ώρα Ελλάδας (ο server στέλνει UTC χωρίς ζώνη)', () => {
+    const at = (published_at) => P.buildHtml(
+        { ...PREVIEW, previous: { solution_name: 'ΧΕΙΜ', published_at } }, [], '');
+    const summer = at('2026-10-02T15:49:03.123456');
+    assert.ok(summer.includes('2026-10-02 18:49'), summer.slice(0, 200));
+    assert.ok(!summer.includes('15:49'));
+    assert.ok(at('2026-01-15T10:05:00').includes('2026-01-15 12:05'));
+    assert.ok(at('2026-10-02T15:49:03+00:00').includes('2026-10-02 18:49'));   // με ζώνη: όχι διπλά
+    // και στο «τίποτα νέο» (επαναποστολή email)
+    const resend = P.buildHtml({ ...PREVIEW, affected: 0,
+        previous: { solution_name: 'ΧΕΙΜ', published_at: '2026-09-19T10:52:00' } }, [], '');
+    assert.ok(resend.includes('2026-09-19 13:52'));
+});
+
+test('changeBadge: μετρά και τις αλλαγές μαθητών (changes.roster)· χωρίς roster όπως πριν', () => {
+    const t = (changes) => ({ changed: true, changes });
+    // Μόνο αλλαγή μαθητών → «1 αλλαγή» (πριν: «0 αλλαγές»)
+    assert.match(P.changeBadge(t({ moved: [], added: [], removed: [], roster: [{ line: '+ Νίκος' }] }), false), />1 αλλαγή</);
+    assert.match(P.changeBadge(t({ moved: [{}], added: [], removed: [{}], roster: [{}, {}] }), false), />4 αλλαγές</);
+    // Παλιό backend χωρίς roster: ίδιο αποτέλεσμα με πριν
+    assert.match(P.changeBadge(t({ moved: [{}], added: [{}], removed: [] }), false), />2 αλλαγές</);
+    assert.match(P.changeBadge({ changed: true }, false), />0 αλλαγές</);
+    assert.match(P.changeBadge({ changed: false }, false), /χωρίς αλλαγές/);
+    assert.match(P.changeBadge(t({ moved: [] }), true), /νέο πρόγραμμα/);
+    // Και μέσα στο buildHtml
+    const html = P.buildHtml({ ...PREVIEW, teachers: [{ ...T[0], changes: { moved: [], added: [], removed: [], roster: [{}] } }] }, [], '');
+    assert.ok(html.includes('1 αλλαγή'), html.slice(0, 300));
 });

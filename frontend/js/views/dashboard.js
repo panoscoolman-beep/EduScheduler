@@ -116,8 +116,8 @@ const DashboardView = {
                         </span>
                     </div>
                     <p style="color: var(--text-secondary);">
-                        <strong>${latestSolution.name}</strong> — 
-                        ${latestSolution.created_at ? new Date(latestSolution.created_at).toLocaleString('el-GR') : ''}
+                        <strong>${DataTable.esc(latestSolution.name)}</strong> — 
+                        ${TimetableHelpers.formatServerTime(latestSolution.created_at, 'locale', '')}
                     </p>
                     <button class="btn btn-primary mt-md" id="view-latest">📋 Προβολή</button>
                 </div>
@@ -141,7 +141,7 @@ const DashboardView = {
                 <div class="empty-state">
                     <div class="empty-state-icon">⚠️</div>
                     <p class="empty-state-text">Σφάλμα σύνδεσης με τον server</p>
-                    <p class="text-muted">${err.message}</p>
+                    <p class="text-muted">${DataTable.esc(err.message)}</p>
                 </div>
             `;
         }

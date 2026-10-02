@@ -22,7 +22,7 @@ const CompareModal = {
         const optionsHtml = others.map(s =>
             `<label style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0;">
                 <input type="checkbox" class="cmp-pick" value="${s.id}">
-                <span><strong>${s.name}</strong>
+                <span><strong>${TimetableHelpers.esc(s.name)}</strong>
                 <span class="text-muted" style="font-size:0.85em">— ${s.status}, score=${s.score?.toFixed(0) || '—'}</span></span>
             </label>`
         ).join('');
@@ -56,7 +56,7 @@ const CompareModal = {
                 const result = await API.solver.compare(ids);
                 CompareModal.renderResult(result, document.getElementById('cmp-result'));
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(TimetableHelpers.esc(err.message));
             }
         });
     },

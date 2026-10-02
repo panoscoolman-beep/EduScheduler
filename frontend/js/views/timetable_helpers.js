@@ -21,12 +21,32 @@ const TimetableHelpers = {
      *   classIdsByLabel: "Last First" -> Set(class_ids)   (for slot filtering)
      *   idByLabel:       "Last First" -> student id        (for export params)
      *   sortedNames:     labels sorted with Greek collation
+     *
+     * Συνωνυμία: δύο μαθητές με ίδιο «Επώνυμο Όνομα» θα γίνονταν ΜΙΑ επιλογή
+     * (πλέγμα/εκτύπωση/ICS για τον άλλον) → η ετικέτα τους παίρνει την τάξη,
+     * ή το #id αν λείπει/συμπίπτει κι αυτή. Οι υπόλοιπες ετικέτες δεν αλλάζουν.
      */
     buildStudentLabelMaps(students) {
         const classIdsByLabel = new Map();
         const idByLabel = new Map();
-        for (const st of students || []) {
-            const label = `${st.last_name} ${st.first_name}`.trim();
+        const list = students || [];
+        const base = (st) => `${st.last_name} ${st.first_name}`.trim();
+        const withGrade = (st) => `${base(st)} (${st.grade || '#' + st.id})`;
+        const countBy = (fn) => {
+            const m = new Map();
+            for (const st of list) m.set(fn(st), (m.get(fn(st)) || 0) + 1);
+            return m;
+        };
+        const baseCount = countBy(base);
+        const gradeCount = countBy(withGrade);
+        const labelOf = (st) => {
+            if (baseCount.get(base(st)) < 2) return base(st);
+            return gradeCount.get(withGrade(st)) < 2
+                ? withGrade(st)
+                : `${base(st)} (${st.grade} · #${st.id})`;
+        };
+        for (const st of list) {
+            const label = labelOf(st);
             classIdsByLabel.set(label, new Set(st.class_ids || []));
             idByLabel.set(label, st.id);
         }
@@ -85,12 +105,61 @@ const TimetableHelpers = {
         return (slots || []).filter(s => s.is_locked && !s.is_unplaced).length;
     },
 
-    /** Minimal HTML-escape for values interpolated into template strings. */
+    /**
+     * Minimal HTML-escape for values interpolated into template strings —
+     * και μέσα σε attributes (value="…", data-…="…"), γι' αυτό και το ".
+     */
     esc(s) {
         return String(s ?? '')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
+    // ── Χρονοσφραγίδες του server ───────────────────────────────────────────
+    // Ο server κρατά UTC. Άλλα endpoints το γράφουν ρητά (…+00:00, π.χ. το
+    // created_at των προγραμμάτων) κι άλλα ως ISO χωρίς ζώνη (published_at,
+    // performed_at) — που ο browser θα διάβαζε ως ΤΟΠΙΚΗ ώρα (2–3 ώρες νωρίτερα).
+    // Κανόνας: χωρίς ζώνη = UTC· η εμφάνιση γίνεται πάντα σε ώρα Ελλάδας.
+    SCHOOL_TZ: 'Europe/Athens',
+
+    /** ISO του server → Date (χωρίς Z/±hh:mm = UTC). null αν λείπει ή είναι άκυρο. */
+    parseServerTime(value) {
+        if (value == null || value === '') return null;
+        let s = String(value).trim().replace(' ', 'T');
+        s = s.replace(/(\.\d{3})\d+/, '$1');            // μικροδευτερόλεπτα της Python → ms
+        const hasTime = /T\d{2}:\d{2}/.test(s);
+        const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(s);
+        const d = new Date(hasTime && !hasZone ? `${s}Z` : s);
+        return Number.isNaN(d.getTime()) ? null : d;
+    },
+
+    /**
+     * Χρονοσφραγίδα του server σε ώρα Ελλάδας, στη μορφή που είχε κάθε σημείο:
+     * 'locale' = όπως το toLocaleString('el-GR'), 'ymdhm' = «2026-10-02 18:49»,
+     * 'mdhm' = «10-02 18:49». Λείπει/άκυρη → fallback (ποτέ «Invalid Date»).
+     */
+    formatServerTime(value, style = 'locale', fallback = '') {
+        const d = TimetableHelpers.parseServerTime(value);
+        if (!d) return fallback;
+        const pad = (n) => String(n).padStart(2, '0');
+        let p;
+        try {
+            if (style === 'locale') return d.toLocaleString('el-GR', { timeZone: TimetableHelpers.SCHOOL_TZ });
+            p = {};
+            new Intl.DateTimeFormat('en-GB', {
+                timeZone: TimetableHelpers.SCHOOL_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+            }).formatToParts(d).forEach(x => { p[x.type] = x.value; });
+        } catch (e) {
+            // Browser χωρίς ζώνες ώρας (σπάνιο): η ώρα της συσκευής, αλλά σωστά από UTC.
+            if (style === 'locale') return d.toLocaleString('el-GR');
+            p = { year: d.getFullYear(), month: pad(d.getMonth() + 1), day: pad(d.getDate()),
+                  hour: pad(d.getHours()), minute: pad(d.getMinutes()) };
+        }
+        const md = `${p.month}-${p.day} ${p.hour}:${p.minute}`;
+        return style === 'mdhm' ? md : `${p.year}-${md}`;
     },
 
     /**
@@ -302,7 +371,9 @@ const TimetableHelpers = {
         if (!items.length) return '<p class="text-muted">Δεν υπάρχουν χειροκίνητες αλλαγές σε αυτό το πρόγραμμα.</p>';
         let active = 0;
         const rows = items.map(it => {
-            const time = (it.performed_at || '').replace('T', ' ').slice(5, 16);
+            // Ο server στέλνει UTC χωρίς ζώνη → ώρα Ελλάδας (ίδια μορφή «ΜΜ-ΗΗ ωω:λλ»).
+            const time = TimetableHelpers.formatServerTime(it.performed_at, 'mdhm',
+                (it.performed_at || '').replace('T', ' ').slice(5, 16));
             const icon = { move: '🔀', lock: '🔒', unlock: '🔓', place: '📥', unplace: '🅿️' }[it.operation] || '•';
             let action = '<span class="text-muted">(αναιρέθηκε)</span>';
             if (!it.undone) {
@@ -964,12 +1035,19 @@ const TimetableHelpers = {
         return html;
     },
 
-    /** Ποιο πρόγραμμα ανοίγει: το επιλεγμένο αν είναι ενεργό, αλλιώς το νεότερο ενεργό. */
+    /**
+     * Ποιο πρόγραμμα ανοίγει: όποιο διάλεξε ρητά ο χρήστης (ΚΑΙ αρχειοθετημένο —
+     * αλλιώς δεν θα άνοιγε ποτέ για ♻️ επαναφορά)· αλλιώς το νεότερο μη
+     * αρχειοθετημένο που βγήκε κανονικά (optimal/feasible) — όχι μια αποτυχημένη
+     * ή τρέχουσα εκτέλεση χωρίς ώρες· αλλιώς το νεότερο μη αρχειοθετημένο.
+     */
     defaultSolutionId(solutions, preferredId) {
         const list = solutions || [];
         const preferred = list.find(s => s.id === preferredId);
-        if (preferred && !preferred.archived) return preferred.id;
-        return ((list.find(s => !s.archived) || preferred || list[0]) || {}).id;
+        if (preferred) return preferred.id;
+        const active = list.filter(s => !s.archived);
+        const usable = active.find(s => s.status === 'optimal' || s.status === 'feasible');
+        return ((usable || active[0] || list[0]) || {}).id;
     },
 
     /** Εικονίδιο/επεξήγηση του κουμπιού αρχειοθέτησης για το επιλεγμένο πρόγραμμα. */

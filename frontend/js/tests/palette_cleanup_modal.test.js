@@ -70,3 +70,17 @@ test('περιττές ώρες Παλέτας (πάνω από τις ώρες/
         trim: { can_trim: true, trim_to: 1, would_remove: 1, surplus: true } });
     assert.match(M.suggestionText(it), /Αφαίρεση 1 περιττών ωρών Παλέτας \(πάνω από τις 1 ώρες\/εβδ\.\)/);
 });
+
+test('suggestionText «✋ Κράτα»: αναφέρει αρχειοθετημένο πρόγραμμα όταν archived_placed > 0', () => {
+    // Μόνο αρχειοθετημένο πρόγραμμα κρατά τις ώρες
+    assert.equal(M.suggestionText(item(5, 'keep', { placed_total: 0, max_placed: 2, archived_placed: 2 })),
+        '✋ Κράτα — 2 ώρες είναι τοποθετημένες σε αρχειοθετημένο πρόγραμμα');
+    // Και ενεργό και αρχειοθετημένο
+    assert.equal(M.suggestionText(item(6, 'keep', { placed_total: 3, max_placed: 3, archived_placed: 1 })),
+        '✋ Κράτα — 3 ώρες είναι τοποθετημένες σε άλλο πρόγραμμα (και 1 σε αρχειοθετημένο πρόγραμμα)');
+    // Χωρίς archived_placed (παλιό backend) / 0: όπως πριν
+    assert.equal(M.suggestionText(item(7, 'keep', { max_placed: 3 })),
+        '✋ Κράτα — 3 ώρες είναι τοποθετημένες σε άλλο πρόγραμμα');
+    assert.equal(M.suggestionText(item(8, 'keep', { max_placed: 3, archived_placed: 0 })),
+        '✋ Κράτα — 3 ώρες είναι τοποθετημένες σε άλλο πρόγραμμα');
+});

@@ -28,7 +28,13 @@ const PaletteCleanupModal = {
         if (item.suggestion === 'delete') {
             return '🗑️ Διαγραφή μαθήματος — καμία τοποθετημένη ώρα σε κανένα πρόγραμμα';
         }
-        return `✋ Κράτα — ${item.max_placed} ώρες είναι τοποθετημένες σε άλλο πρόγραμμα`;
+        // Ώρες σε αρχειοθετημένο πρόγραμμα: η διαγραφή θα τις έσβηνε (λείπει σε παλιό backend).
+        const archived = item.archived_placed || 0;
+        if (archived > 0 && !item.placed_total) {
+            return `✋ Κράτα — ${item.max_placed} ώρες είναι τοποθετημένες σε αρχειοθετημένο πρόγραμμα`;
+        }
+        return `✋ Κράτα — ${item.max_placed} ώρες είναι τοποθετημένες σε άλλο πρόγραμμα`
+            + (archived > 0 ? ` (και ${archived} σε αρχειοθετημένο πρόγραμμα)` : '');
     },
 
     rowHtml(item) {
@@ -117,14 +123,14 @@ const PaletteCleanupModal = {
             }
             try {
                 const res = await API.lessons.paletteCleanup(sel);
-                Toast.success(res.message || 'Έγινε');
+                Toast.success(PaletteCleanupModal.esc(res.message || 'Έγινε'));
                 if (res.skipped && res.skipped.length) {
                     Toast.info(`${res.skipped.length} μαθήματα παραλείφθηκαν (άλλαξαν στο μεταξύ).`);
                 }
                 Modal.close();
                 if (typeof onChanged === 'function') onChanged();
             } catch (err) {
-                Toast.error('Δεν έγινε: ' + err.message);
+                Toast.error('Δεν έγινε: ' + PaletteCleanupModal.esc(err.message));
             }
         });
     },

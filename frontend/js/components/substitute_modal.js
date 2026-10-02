@@ -14,7 +14,7 @@ const SubstituteModal = {
         try {
             teachers = await API.teachers.list();
         } catch (err) {
-            Toast.error(`Αποτυχία φόρτωσης καθηγητών: ${err.message}`);
+            Toast.error(`Αποτυχία φόρτωσης καθηγητών: ${TimetableHelpers.esc(err.message)}`);
             return;
         }
 

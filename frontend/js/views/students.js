@@ -17,8 +17,8 @@ const StudentsView = {
                 { key: 'grade', label: 'Τάξη', render: v => v ? StudentPicker.esc(v) : '—' },
                 { key: 'track', label: 'Κατεύθυνση / Τομέας', render: v => v ? StudentPicker.esc(v) : '—' },
                 { key: 'class_ids', label: 'Τμήματα', render: v => this._classBadgesHtml(v) },
-                { key: 'email', label: 'Email', render: v => v ? `${v}` : '—' },
-                { key: 'phone', label: 'Τηλέφωνο', render: v => v ? `${v}` : '—' },
+                { key: 'email', label: 'Email', render: v => v ? DataTable.esc(v) : '—' },
+                { key: 'phone', label: 'Τηλέφωνο', render: v => v ? DataTable.esc(v) : '—' },
                 { key: 'max_days_per_week', label: 'Max Ημέρες/Εβδ', render: v => v || '—' },
             ],
             apiService: API.students,
@@ -44,21 +44,21 @@ const StudentsView = {
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Επώνυμο *</label>
-                        <input class="form-input" id="f-last_name" value="${item?.last_name || ''}" placeholder="π.χ. Παπαδόπουλος">
+                        <input class="form-input" id="f-last_name" value="${DataTable.esc(item?.last_name || '')}" placeholder="π.χ. Παπαδόπουλος">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Όνομα *</label>
-                        <input class="form-input" id="f-first_name" value="${item?.first_name || ''}" placeholder="π.χ. Νίκος">
+                        <input class="form-input" id="f-first_name" value="${DataTable.esc(item?.first_name || '')}" placeholder="π.χ. Νίκος">
                     </div>
                 </div>
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Email</label>
-                        <input class="form-input" id="f-email" type="email" value="${item?.email || ''}" placeholder="π.χ. nikos@example.com">
+                        <input class="form-input" id="f-email" type="email" value="${DataTable.esc(item?.email || '')}" placeholder="π.χ. nikos@example.com">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Τηλέφωνο</label>
-                        <input class="form-input" id="f-phone" type="tel" value="${item?.phone || ''}" placeholder="π.χ. 6900000000">
+                        <input class="form-input" id="f-phone" type="tel" value="${DataTable.esc(item?.phone || '')}" placeholder="π.χ. 6900000000">
                     </div>
                 </div>
                 <div class="form-grid">
@@ -282,9 +282,19 @@ const StudentsView = {
      */
     async _openClassPicker(student, table) {
         const name = StudentPicker.studentLabel(student);
+        // Νέο παράθυρο: τίποτα από προηγούμενο επιλογέα (π.χ. της φόρμας
+        // Τμήματος, όπου τα ids είναι ΜΑΘΗΤΩΝ). Αποθήκευση μόνο αν φορτώθηκαν
+        // τα τμήματα ΑΥΤΟΥ του παραθύρου — αλλιώς θα έσβηνε εγγραφές.
+        const token = (this._classPickerToken = (this._classPickerToken || 0) + 1);
+        StudentPicker._state = null;
+        let mounted = false;
         Modal.open(`🏫 Τμήματα — ${name}`,
             '<div id="f-classes-picker"><div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div></div>',
             async () => {
+                if (!mounted) {
+                    Toast.error('Τα τμήματα δεν έχουν φορτωθεί — δεν άλλαξε τίποτα. Ξανάνοιξε το παράθυρο.');
+                    return;
+                }
                 const before = new Set(student.class_ids || []);
                 const after = new Set(StudentPicker.getSelected());
                 const added = [...after].filter(id => !before.has(id));
@@ -293,18 +303,19 @@ const StudentsView = {
                 try {
                     for (const cid of added) await API.classes.addStudent(cid, student.id);
                     for (const cid of removed) await API.classes.removeStudent(cid, student.id);
-                    Toast.success(`${name}: +${added.length} / −${removed.length} τμήματα`);
+                    Toast.success(`${StudentPicker.esc(name)}: +${added.length} / −${removed.length} τμήματα`);
                     Modal.close();
                     await this._loadClasses();
                     await table.loadData();
                 } catch (err) {
-                    Toast.error('Αποτυχία ενημέρωσης τμημάτων: ' + err.message);
+                    Toast.error('Αποτυχία ενημέρωσης τμημάτων: ' + StudentPicker.esc(err.message));
                 }
             });
         try {
             const classes = await API.classes.list();
+            if (token !== this._classPickerToken) return;   // άνοιξε άλλο παράθυρο στο μεταξύ
             this._classesById = new Map(classes.map(c => [c.id, c]));
-            StudentPicker.mount('f-classes-picker', {
+            mounted = !!StudentPicker.mount('f-classes-picker', {
                 items: classes,
                 selectedIds: student.class_ids || [],
                 labelOf: c => `${c.short_name} — ${c.name}`,
@@ -313,6 +324,7 @@ const StudentsView = {
                 noun: 'τμήματα',
             });
         } catch (err) {
+            if (token !== this._classPickerToken) return;
             const el = document.getElementById('f-classes-picker');
             if (el) el.innerHTML = `<div class="sp-empty">Σφάλμα φόρτωσης τμημάτων: ${StudentPicker.esc(err.message)}</div>`;
         }
@@ -362,7 +374,7 @@ const StudentsView = {
                 Modal.close();
                 await this.render(container);
             } catch (err) {
-                Toast.error(`Η εισαγωγή απέτυχε: ${err.message}`);
+                Toast.error(`Η εισαγωγή απέτυχε: ${StudentPicker.esc(err.message)}`);
             }
         });
     },

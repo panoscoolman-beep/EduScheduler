@@ -916,6 +916,14 @@ a:hover { color: var(--accent-blue-hover); }
     border-top: 1px solid var(--border-subtle);
 }
 
+/* Αποθήκευση σε εξέλιξη (Modal._handleSave): δεν δέχεται δεύτερο κλικ. */
+#modal-save:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+    box-shadow: none;
+}
+
 /* ── Toast Notifications ────────────────────────────────── */
 .toast-container {
     position: fixed;

@@ -660,3 +660,121 @@ test('buildFreeRoomsControlsHtml: options are period boundaries, sorted, and alw
     // Χωρίς παράθυρο: κανένα option δεν είναι selected.
     assert.doesNotMatch(H.buildFreeRoomsControlsHtml(DAY_PERIODS, '', ''), / selected>/);
 });
+
+// ── G4 regressions (Οκτ. 2026) ─────────────────────────────────────────────
+
+test('esc: και το " (τιμές μέσα σε attributes, π.χ. value="…")', () => {
+    assert.equal(H.esc('Γιάννης "Τζον"'), 'Γιάννης &quot;Τζον&quot;');
+    // Η Παλέτα κάνει ήδη .replace(/"/g,'&quot;') μετά το esc — χωρίς διπλό escape.
+    assert.equal(H.esc('a"b').replace(/"/g, '&quot;'), 'a&quot;b');
+});
+
+test('defaultSolutionId: χωρίς επιλογή → το νεότερο που βγήκε κανονικά, όχι αποτυχημένο/τρέχον', () => {
+    const sols = [
+        { id: 9, status: 'generating', archived: false },
+        { id: 8, status: 'error', archived: false },
+        { id: 7, status: 'infeasible', archived: false },
+        { id: 6, status: 'feasible', archived: false },
+        { id: 5, status: 'optimal', archived: false },
+    ];
+    assert.equal(H.defaultSolutionId(sols, null), 6);
+    assert.equal(H.defaultSolutionId(sols, undefined), 6);
+    assert.equal(H.defaultSolutionId(sols, 999), 6);           // άγνωστο id (π.χ. άλλο σενάριο)
+    // Ρητή επιλογή: τιμάται πάντα, ακόμα και αποτυχημένο
+    assert.equal(H.defaultSolutionId(sols, 8), 8);
+    // Κανένα κανονικό → το νεότερο μη αρχειοθετημένο (όπως πριν)
+    assert.equal(H.defaultSolutionId(sols.slice(0, 3), null), 9);
+    // Αρχειοθετημένο optimal δεν προτιμάται έναντι ενεργού
+    assert.equal(H.defaultSolutionId([
+        { id: 4, status: 'optimal', archived: true },
+        { id: 3, status: 'feasible', archived: false },
+    ], null), 3);
+    assert.equal(H.defaultSolutionId([], null), undefined);
+    assert.equal(H.defaultSolutionId(null, 3), undefined);
+});
+
+test('defaultSolutionId: ρητά επιλεγμένο αρχειοθετημένο ανοίγει (για ♻️ επαναφορά)', () => {
+    const sols = [
+        { id: 7, status: 'optimal', archived: false },
+        { id: 3, status: 'optimal', archived: true },
+    ];
+    assert.equal(H.defaultSolutionId(sols, 3), 3);
+    assert.equal(H.defaultSolutionId(sols, 7), 7);
+    assert.equal(H.defaultSolutionId(sols, null), 7);
+});
+
+test('buildStudentLabelMaps: συνώνυμοι μαθητές → ξεχωριστές επιλογές (τάξη ή #id)', () => {
+    const students = [
+        { id: 41, last_name: 'Παπαδόπουλος', first_name: 'Γιώργος', grade: 'Α΄ Λυκείου', class_ids: [11] },
+        { id: 87, last_name: 'Παπαδόπουλος', first_name: 'Γιώργος', grade: 'Γ΄ Λυκείου', class_ids: [12] },
+        { id: 5, last_name: 'Αλεξίου', first_name: 'Άννα', grade: 'Β΄ Λυκείου', class_ids: [] },
+    ];
+    const { idByLabel, sortedNames, classIdsByLabel } = H.buildStudentLabelMaps(students);
+    assert.equal(sortedNames.length, 3);
+    assert.equal(idByLabel.get('Παπαδόπουλος Γιώργος (Α΄ Λυκείου)'), 41);
+    assert.equal(idByLabel.get('Παπαδόπουλος Γιώργος (Γ΄ Λυκείου)'), 87);
+    assert.deepEqual([...classIdsByLabel.get('Παπαδόπουλος Γιώργος (Γ΄ Λυκείου)')], [12]);
+    assert.equal(idByLabel.get('Αλεξίου Άννα'), 5, 'οι υπόλοιπες ετικέτες δεν αλλάζουν');
+    assert.equal(idByLabel.has('Παπαδόπουλος Γιώργος'), false);
+
+    // Ίδια (ή καμία) τάξη → #id, πάντα μοναδικό
+    const same = H.buildStudentLabelMaps([
+        { id: 41, last_name: 'Π', first_name: 'Γ', grade: 'Α΄', class_ids: [] },
+        { id: 87, last_name: 'Π', first_name: 'Γ', grade: 'Α΄', class_ids: [] },
+        { id: 90, last_name: 'Π', first_name: 'Γ', grade: null, class_ids: [] },
+    ]);
+    assert.deepEqual([...same.idByLabel.entries()].sort((a, b) => a[1] - b[1]),
+        [['Π Γ (Α΄ · #41)', 41], ['Π Γ (Α΄ · #87)', 87], ['Π Γ (#90)', 90]]);
+    // resolveExportParams βρίσκει τον σωστό μαθητή
+    assert.equal(H.resolveExportParams('student', 'Π Γ (Α΄ · #41)', 7, new Map(), same.idByLabel),
+        'solution_id=7&student_id=41');
+});
+
+// ── Ώρες του server σε ώρα Ελλάδας (G2-15 / G3-14) ─────────────────────────
+
+test('parseServerTime: χωρίς ζώνη = UTC· με Z/±hh:mm όπως είναι· άκυρο → null', () => {
+    const utc = Date.UTC(2026, 9, 2, 15, 49, 3);
+    assert.equal(H.parseServerTime('2026-10-02T15:49:03').getTime(), utc);
+    assert.equal(H.parseServerTime('2026-10-02T15:49:03.123456').getTime(), utc + 123);   // μικροδευτ. Python
+    assert.equal(H.parseServerTime('2026-10-02 15:49:03').getTime(), utc);
+    assert.equal(H.parseServerTime('2026-10-02T15:49:03+00:00').getTime(), utc);         // _iso_utc: όχι 2η μετατόπιση
+    assert.equal(H.parseServerTime('2026-10-02T15:49:03.5Z').getTime(), utc + 500);
+    assert.equal(H.parseServerTime('2026-10-02T18:49:03+03:00').getTime(), utc);
+    for (const bad of [null, undefined, '', '   ', 'garbage', '2026-13-45T99:99:99']) {
+        assert.equal(H.parseServerTime(bad), null, String(bad));
+    }
+});
+
+test('formatServerTime: ώρα Ελλάδας — καλοκαίρι +3, χειμώνας +2, ίδια μορφή, fallback', () => {
+    assert.equal(H.formatServerTime('2026-10-02T15:49:03', 'ymdhm'), '2026-10-02 18:49');   // EEST
+    assert.equal(H.formatServerTime('2026-10-02T15:49:03', 'mdhm'), '10-02 18:49');
+    assert.equal(H.formatServerTime('2026-01-15T10:05:00', 'ymdhm'), '2026-01-15 12:05');   // EET
+    assert.equal(H.formatServerTime('2026-01-15T22:30:00', 'ymdhm'), '2026-01-16 00:30');   // αλλάζει και η μέρα
+    // Ήδη με ζώνη (λίστα προγραμμάτων): καμία διπλή μετατόπιση
+    assert.equal(H.formatServerTime('2026-10-02T15:49:03.123456+00:00', 'ymdhm'), '2026-10-02 18:49');
+    // Αλλαγές ώρας (ΕΕ: 29/3 και 25/10/2026 στις 01:00 UTC)
+    assert.equal(H.formatServerTime('2026-03-29T00:59:00', 'mdhm'), '03-29 02:59');
+    assert.equal(H.formatServerTime('2026-03-29T01:00:00', 'mdhm'), '03-29 04:00');
+    assert.equal(H.formatServerTime('2026-10-25T01:00:00', 'mdhm'), '10-25 03:00');
+    // 'locale': ίδια μορφή με το toLocaleString('el-GR'), αλλά σε ώρα Ελλάδας
+    assert.match(H.formatServerTime('2026-10-02T15:49:03'), /^2\/10\/2026,\s6:49:03\sμ\.μ\.$/);
+    assert.match(H.formatServerTime('2026-10-02T15:49:03+00:00'), /^2\/10\/2026,\s6:49:03\sμ\.μ\.$/);
+    assert.match(H.formatServerTime('2026-01-15T10:05:00'), /^15\/1\/2026,\s12:05:00\sμ\.μ\.$/);
+    // Λείπει/άκυρο → fallback, ποτέ «Invalid Date»
+    assert.equal(H.formatServerTime(null, 'locale', '—'), '—');
+    assert.equal(H.formatServerTime('', 'ymdhm'), '');
+    assert.equal(H.formatServerTime('garbage', 'locale', '—'), '—');
+    assert.equal(H.formatServerTime('garbage'), '');
+});
+
+test('buildHistoryHtml: η ώρα κάθε αλλαγής σε ώρα Ελλάδας', () => {
+    const html = H.buildHistoryHtml({ items: [
+        { id: 2, operation: 'move', operation_label: 'Μετακίνηση', undone: false, lesson: 'Α',
+          from: 'Δευ 1η', to: 'Τρι 1η', performed_at: '2026-10-02T15:49:03.123456' },
+        { id: 1, operation: 'move', operation_label: 'Μετακίνηση', undone: false, lesson: 'Β',
+          from: 'Δευ 1η', to: 'Τρι 1η', performed_at: '2026-01-15T10:05:00' },
+    ] });
+    assert.match(html, /<small>10-02 18:49<\/small>/);
+    assert.match(html, /<small>01-15 12:05<\/small>/);
+    assert.doesNotMatch(html, /15:49/);
+});

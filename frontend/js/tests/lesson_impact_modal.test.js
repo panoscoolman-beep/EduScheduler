@@ -146,7 +146,7 @@ test('ποιο πρόγραμμα ανοίγει + κατάσταση κουμπ
         { id: 2, name: 'Παλιό', archived: true },
     ];
     assert.equal(H.defaultSolutionId(sols, 3), 3);
-    assert.equal(H.defaultSolutionId(sols, 2), 3);       // αρχειοθετημένο → το νεότερο ενεργό
+    assert.equal(H.defaultSolutionId(sols, 2), 2);       // ρητά επιλεγμένο αρχειοθετημένο → ανοίγει (για ♻️)
     assert.equal(H.defaultSolutionId(sols, null), 3);
     assert.equal(H.defaultSolutionId([sols[1]], null), 2);   // μόνο αρχειοθετημένα → δείξε το
 
@@ -162,4 +162,20 @@ test('actionState: περιττές ώρες — οι ώρες/εβδ. μένο�
         trim: { can_trim: true, trim_to: 1, would_remove: 1, surplus: true, blocked_reason: null } });
     assert.equal(st.trimLabel, '✂️ Αφαίρεση 1 περιττών ωρών Παλέτας');
     assert.match(st.trimHint, /ΠΑΝΩ από τις 1 ώρες\/εβδ\..*μένουν ίδιες/);
+});
+
+test('warnings/buildHtml: ώρες σε αρχειοθετημένα προγράμματα (data.archived) — έξτρα γραμμή, escaped', () => {
+    const data = clone({ archived: { placed: 3, solutions: [
+        { solution_id: 5, solution_name: 'Παλιό <b>8/5</b>', placed: 2 },
+        { solution_id: 4, solution_name: 'Πολύ παλιό', placed: 1 },
+    ] } });
+    const w = M.warnings(data);
+    assert.equal(w.length, 2);
+    assert.equal(w[1], '📦 Και 3 ώρες τοποθετημένες σε αρχειοθετημένα προγράμματα '
+        + '(«Παλιό <b>8/5</b>» 2, «Πολύ παλιό» 1) — η διαγραφή του μαθήματος τις σβήνει κι αυτές.');
+    const html = M.buildHtml(data);
+    assert.match(html, /«Παλιό &lt;b&gt;8\/5&lt;\/b&gt;» 2, «Πολύ παλιό» 1/);
+    // Χωρίς archived (παλιό backend) ή με 0: καμία γραμμή
+    assert.deepEqual(M.warnings(clone({ archived: { placed: 0, solutions: [] } })), M.warnings(DATA));
+    assert.equal(M.warnings(DATA).some(x => x.includes('αρχειοθετημένα')), false);
 });

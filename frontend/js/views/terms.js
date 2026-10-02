@@ -75,7 +75,7 @@ const TermsView = {
                 Toast.success('Άλλαξε το ενεργό σενάριο');
                 if (App.refreshTermSelector) await App.refreshTermSelector();
                 await this.render(container);
-            } catch (err) { Toast.error(err.message); }
+            } catch (err) { Toast.error(this._esc(err.message)); }
         } else if (ds.act === 'clone') {
             this._openClone(id, ds.name, container);
         } else if (ds.act === 'shift') {
@@ -106,7 +106,7 @@ const TermsView = {
                         (r.availability_dropped || r.slots_unplaced ? ` (εκτός εύρους: ${r.availability_dropped}+${r.slots_unplaced})` : ''));
                     Modal.close();
                     await this.render(container);
-                } catch (err) { Toast.error(err.message); }
+                } catch (err) { Toast.error(this._esc(err.message)); }
             }, { saveText: '🕐 Μετατόπιση' });
     },
 
@@ -132,7 +132,7 @@ const TermsView = {
                     Toast.success('Οι ημερομηνίες αποθηκεύτηκαν');
                     Modal.close();
                     await this.render(container);
-                } catch (err) { Toast.error(err.message); }
+                } catch (err) { Toast.error(this._esc(err.message)); }
             }, { saveText: 'Αποθήκευση' });
     },
 
@@ -156,7 +156,7 @@ const TermsView = {
                     Modal.close();
                     if (App.refreshTermSelector) await App.refreshTermSelector();
                     await this.render(container);
-                } catch (err) { Toast.error(err.message); }
+                } catch (err) { Toast.error(this._esc(err.message)); }
             }, { saveText: 'Δημιουργία' });
     },
 
@@ -185,7 +185,7 @@ const TermsView = {
                     Modal.close();
                     if (App.refreshTermSelector) await App.refreshTermSelector();
                     await this.render(container);
-                } catch (err) { Toast.error(err.message); }
+                } catch (err) { Toast.error(this._esc(err.message)); }
             }, { saveText: '📑 Αντιγραφή' });
     },
 
@@ -212,10 +212,10 @@ const TermsView = {
                                     Modal.close();
                                     if (App.refreshTermSelector) await App.refreshTermSelector();
                                     await this.render(container);
-                                } catch (e2) { Toast.error(e2.message); }
+                                } catch (e2) { Toast.error(this._esc(e2.message)); }
                             }, { saveText: 'Ναι, διαγραφή όλων', saveClass: 'btn-danger' });
                     } else {
-                        Toast.error(err.message);
+                        Toast.error(this._esc(err.message));
                     }
                 }
             }, { saveText: 'Διαγραφή', saveClass: 'btn-danger' });

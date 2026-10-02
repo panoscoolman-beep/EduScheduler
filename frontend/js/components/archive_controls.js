@@ -52,11 +52,11 @@ const ArchiveControls = {
         const run = async (call) => {
             try {
                 const res = await call();
-                Toast.success(res.message || 'Έγινε');
+                Toast.success(ArchiveControls.esc(res.message || 'Έγινε'));
                 Modal.close();
                 await reload();
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(ArchiveControls.esc(err.message));
             }
         };
         return {

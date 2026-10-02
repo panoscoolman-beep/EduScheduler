@@ -46,7 +46,7 @@ const App = {
                 await this.refreshTermSelector();
                 this.navigateTo(this._currentView);  // re-render current view in the new scenario
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(DataTable.esc(err.message));
                 await this.refreshTermSelector();
             }
         });
