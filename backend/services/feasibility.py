@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import (
     Classroom,
+    Constraint,
     Lesson,
     Period,
     SchoolClass,
@@ -27,7 +28,9 @@ from backend.models import (
     TeacherAvailability,
 )
 from backend.services import lesson_roster
+from backend.services.operating_hours import closed_cells
 from backend.services.term_context import get_active_term_id
+from backend.solver.hard_rules import parse_constraints, phrase as rules_phrase
 
 
 @dataclass
@@ -49,6 +52,9 @@ class FeasibilityReport:
         }
 
 
+_HARD_RULE_ADVICE = ("Χαλάρωσε τον σκληρό (υποχρεωτικό) κανόνα στους Περιορισμούς ή κάν' τον "
+                     "Μαλακό, ή μείωσε/μοίρασε ώρες.")
+
 # Χαρτογράφηση κατηγορίας προβλήματος → συγκεκριμένη ενέργεια διόρθωσης.
 # Το «γιατί δεν βγαίνει» χωρίς πρόταση δράσης αφήνει τον χρήστη να ψάχνει
 # στα τυφλά — εδώ μετατρέπουμε κάθε αιτία σε «τι να κάνεις».
@@ -65,6 +71,12 @@ _SUGGESTION_RULES = [
     ("block", "Μείωσε το μέγεθος του block στην «Κατανομή» του μαθήματος ή αύξησε τις διδακτικές ώρες/μέρα."),
     ("εγγεγραμμένος σε", "Ο μαθητής είναι σε πολλά τμήματα με λίγη διαθεσιμότητα — μείωσε εγγραφές ή χαλάρωσε τα κωλύματά του."),
     ("Δεν υπάρχουν", "Συμπλήρωσε τα βασικά δεδομένα (καθηγητές/τάξεις/μαθήματα/αίθουσες/ώρες) πριν τρέξεις τον solver."),
+    ("ωράριο λειτουργίας",
+     "Το ωράριο λειτουργίας (Ρυθμίσεις) αφήνει λιγότερες ώρες απ' όσες χρειάζονται — άνοιξέ το ή μείωσε/μοίρασε ώρες."),
+    ("«Max/Εβδ.»",
+     "Αύξησε το «Max/Εβδ.» του καθηγητή (Καθηγητές) ή δώσε κάποιες ώρες του σε άλλον καθηγητή."),
+    ("με τον σκληρό κανόνα", _HARD_RULE_ADVICE),
+    ("με τους σκληρούς κανόνες", _HARD_RULE_ADVICE),
 ]
 
 
@@ -96,6 +108,71 @@ def _lesson_label(lesson: Lesson) -> str:
     subj = lesson.subject.name if lesson.subject else "?"
     cls = lesson.school_class.name if lesson.school_class else "?"
     return f"{subj} ({cls})"
+
+
+class _Cells:
+    """Ποια κελιά (μέρα, ώρα) μπορεί να πάρει κάθε κάρτα — όπως ο solver:
+    όλο το πλέγμα (μέρες × διδακτικές ώρες), μείον όσα είναι εκτός ωραρίου
+    λειτουργίας (H0), μείον όσα απαγορεύουν σκληροί κανόνες χρήστη.
+
+    Χωρίς ωράριο και χωρίς σκληρούς κανόνες όλα είναι ακριβώς όπως πριν
+    (ίδια νούμερα, ίδια μηνύματα)."""
+
+    def __init__(self, periods: list[Period], days_per_week: int,
+                 closed: set[tuple[int, int]], hard_rules: list):
+        self.periods = periods
+        self.index = {p.id: i for i, p in enumerate(periods)}
+        self.grid = frozenset((d, p.id) for d in range(days_per_week) for p in periods)
+        self.open = frozenset(c for c in self.grid if c not in closed)
+        self.rules = hard_rules
+        self.restricted = len(self.open) < len(self.grid) or bool(hard_rules)
+        self._allowed: dict[tuple, frozenset] = {}
+
+    def _rules_for(self, lesson: Lesson) -> tuple:
+        return tuple(r for r in self.rules if r.covers(lesson))
+
+    def allowed(self, lesson: Lesson) -> frozenset:
+        rules = self._rules_for(lesson)
+        if rules not in self._allowed:
+            self._allowed[rules] = frozenset(
+                c for c in self.open
+                if not any(r.forbids(c[0], self.index[c[1]]) for r in rules))
+        return self._allowed[rules]
+
+    def scope(self, lessons: list[Lesson]) -> tuple[frozenset, list[str]]:
+        """(κελιά που χωρούν οι κάρτες, «γιατί λιγότερα από όλο το πλέγμα»)."""
+        if not self.restricted:
+            return self.grid, []
+        distinct: dict[frozenset, None] = {}
+        rules: dict[str, object] = {}
+        for lesson in lessons:
+            distinct[self.allowed(lesson)] = None
+            for rule in self._rules_for(lesson):
+                rules.setdefault(rule.label, rule)
+        cells = frozenset().union(*distinct) if distinct else frozenset()
+        why = []
+        if len(self.open) < len(self.grid):
+            why.append("μέσα στο ωράριο λειτουργίας")
+        if rules and len(cells) < len(self.open):
+            why.append(rules_phrase(list(rules.values())))
+        return cells, why
+
+    def free(self, cells: frozenset, unavailable: list[tuple[int, int]]) -> int:
+        """|κελιά| μείον κωλύματα — χωρίς να ξαναμετράει κωλύματα σε κελιά
+        που έχουν ήδη αφαιρεθεί (π.χ. πρωινό κώλυμα εκτός ωραρίου)."""
+        already_out = sum(1 for c in unavailable if c in self.grid and c not in cells)
+        return len(cells) - (len(unavailable) - already_out)
+
+    def longest_run(self, lesson: Lesson) -> int:
+        """Μεγαλύτερη σειρά συνεχόμενων ωρών μιας μέρας που χωράει η κάρτα."""
+        allowed = self.allowed(lesson) if self.restricted else self.grid
+        best = 0
+        for day in {d for d, _ in self.grid}:
+            run = 0
+            for p in self.periods:
+                run = run + 1 if (day, p.id) in allowed else 0
+                best = max(best, run)
+        return best
 
 
 def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityReport:
@@ -143,12 +220,18 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
     teacher_unavail = teacher_unavail_q.all()
     student_unavail = student_unavail_q.all()
     enrollments = db.query(StudentClassEnrollment).all()
+    # Όπως ο solver: ωράριο λειτουργίας (H0) + «Σκληροί» κανόνες χρήστη.
+    rules = parse_constraints(
+        db.query(Constraint).filter(Constraint.is_active == True).all())  # noqa: E712
+    cells = _Cells(periods, days_per_week,
+                   closed_cells(settings, periods, days_per_week), rules.hard_rules)
 
     report.stats["term_id"] = term_id
 
     n_periods = len(periods)
     report.stats["days_per_week"] = days_per_week
     report.stats["periods_per_day"] = n_periods
+    report.stats["open_periods_per_week"] = len(cells.open)
     report.stats["total_lessons"] = len(lessons)
     report.stats["total_teachers"] = len(teachers)
     report.stats["total_classes"] = len(classes)
@@ -165,6 +248,7 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
         days_per_week=days_per_week,
         n_periods=n_periods,
         n_classrooms=len(classrooms),
+        cells=cells,
     )
     _check_teacher_load(
         report,
@@ -173,6 +257,7 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
         teacher_unavail=teacher_unavail,
         days_per_week=days_per_week,
         n_periods=n_periods,
+        cells=cells,
     )
     _check_class_load(
         report,
@@ -180,6 +265,7 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
         classes=classes,
         days_per_week=days_per_week,
         n_periods=n_periods,
+        cells=cells,
     )
     _check_special_room_demand(
         report,
@@ -187,8 +273,11 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
         classrooms=classrooms,
         days_per_week=days_per_week,
         n_periods=n_periods,
+        cells=cells,
     )
-    _check_block_lengths(report, lessons=lessons, n_periods=n_periods)
+    _check_block_lengths(report, lessons=lessons, n_periods=n_periods, cells=cells)
+    _check_rule_restricted_lessons(report, lessons=lessons, teacher_unavail=teacher_unavail,
+                                   cells=cells)
     _check_student_load(
         report,
         lessons=lessons,
@@ -200,7 +289,10 @@ def check_feasibility(db: Session, term_id: int | None = None) -> FeasibilityRep
         rosters=lesson_roster.roster_map(db, lessons),
         student_names={st.id: f"{st.last_name} {st.first_name}".strip()
                        for st in db.query(Student).all()},
+        cells=cells,
     )
+    # Σκληροί κανόνες που δεν επιβάλλονται ως υποχρεωτικοί — να το ξέρει ο χρήστης.
+    report.warnings.extend(rules.warnings)
 
     report.feasible = not report.errors
     return report
@@ -233,10 +325,14 @@ def _check_global_capacity(
     days_per_week: int,
     n_periods: int,
     n_classrooms: int,
+    cells: _Cells | None = None,
 ) -> None:
-    """Total demand vs supply across all rooms/periods/days."""
+    """Total demand vs supply across all rooms/periods/days (μέσα στο
+    ωράριο λειτουργίας / τους σκληρούς κανόνες, αν υπάρχουν)."""
     total_needed = sum(l.periods_per_week for l in lessons)
-    total_available = days_per_week * n_periods * n_classrooms
+    usable, why = cells.scope(lessons) if cells else (None, [])
+    n_cells = len(usable) if why else days_per_week * n_periods
+    total_available = n_cells * n_classrooms
 
     report.stats["total_periods_needed"] = total_needed
     report.stats["total_slots_available"] = total_available
@@ -245,11 +341,18 @@ def _check_global_capacity(
     )
 
     if total_needed > total_available:
-        report.errors.append(
-            f"Δεν επαρκούν τα slots: χρειάζονται {total_needed} αλλά "
-            f"υπάρχουν μόνο {total_available} ({days_per_week} μέρες × "
-            f"{n_periods} ώρες × {n_classrooms} αίθουσες)"
-        )
+        if why:
+            report.errors.append(
+                f"Δεν επαρκούν τα slots: χρειάζονται {total_needed} αλλά "
+                f"υπάρχουν μόνο {total_available} ({n_cells} ώρες/εβδομάδα "
+                f"{' και '.join(why)} × {n_classrooms} αίθουσες)"
+            )
+        else:
+            report.errors.append(
+                f"Δεν επαρκούν τα slots: χρειάζονται {total_needed} αλλά "
+                f"υπάρχουν μόνο {total_available} ({days_per_week} μέρες × "
+                f"{n_periods} ώρες × {n_classrooms} αίθουσες)"
+            )
         return
 
     if total_available > 0 and total_needed / total_available > 0.85:
@@ -267,16 +370,19 @@ def _check_teacher_load(
     teacher_unavail: list[TeacherAvailability],
     days_per_week: int,
     n_periods: int,
+    cells: _Cells | None = None,
 ) -> None:
     """Per-teacher: hours-required vs available-periods after unavailability
-    and max_periods_per_day caps."""
+    and max_periods_per_day caps (+ ωράριο λειτουργίας / σκληροί κανόνες)."""
     by_teacher: dict[int, int] = defaultdict(int)
+    lessons_by_teacher: dict[int, list[Lesson]] = defaultdict(list)
     for l in lessons:
         by_teacher[l.teacher_id] += l.periods_per_week
+        lessons_by_teacher[l.teacher_id].append(l)
 
-    unavail_by_teacher: dict[int, int] = defaultdict(int)
+    unavail_by_teacher: dict[int, list[tuple[int, int]]] = defaultdict(list)
     for ua in teacher_unavail:
-        unavail_by_teacher[ua.teacher_id] += 1
+        unavail_by_teacher[ua.teacher_id].append((ua.day_of_week, ua.period_id))
 
     teacher_overloads: list[dict] = []
     for t in teachers:
@@ -284,31 +390,44 @@ def _check_teacher_load(
         if required == 0:
             continue
 
-        raw_capacity = days_per_week * n_periods
-        unavail = unavail_by_teacher.get(t.id, 0)
-        capacity = raw_capacity - unavail
+        unavail = unavail_by_teacher.get(t.id, [])
+        base_avail = days_per_week * n_periods - len(unavail)
+        avail, why = base_avail, []
+        if cells is not None:
+            usable, why = cells.scope(lessons_by_teacher[t.id])
+            if why:
+                avail = cells.free(usable, unavail)
 
+        limits = []
         if t.max_periods_per_day and t.max_periods_per_day < n_periods:
-            cap_by_max = t.max_periods_per_day * days_per_week
-            capacity = min(capacity, cap_by_max)
-
-        if t.max_periods_per_week and t.max_periods_per_week < capacity:
-            capacity = t.max_periods_per_week
-
+            limits.append(t.max_periods_per_day * days_per_week)
         if t.max_days_per_week and t.max_days_per_week < days_per_week:
-            cap_by_days = t.max_days_per_week * (
-                t.max_periods_per_day or n_periods
-            )
-            capacity = min(capacity, cap_by_days)
+            limits.append(t.max_days_per_week * (t.max_periods_per_day or n_periods))
+        week = t.max_periods_per_week or None
+        caps = limits + ([week] if week else [])
+        base_capacity = min([base_avail, *caps])   # όπως πριν (χωρίς ωράριο/κανόνες)
+        capacity = min([avail, *caps])
 
         teacher_overloads.append(
             {"teacher_id": t.id, "name": t.name, "required": required, "capacity": capacity}
         )
         if required > capacity:
-            report.errors.append(
-                f"Καθηγητής {t.name}: χρειάζεται {required} ώρες αλλά "
-                f"η διαθεσιμότητά του επιτρέπει μόνο {capacity}"
-            )
+            if week and week < min([avail, *limits]):
+                # Το «Max/Εβδ.» είναι το όριο που κόβει — ο solver το τηρεί (H6b).
+                report.errors.append(
+                    f"Καθηγητής {t.name}: έχει {required} ώρες μαθημάτων αλλά "
+                    f"«Max/Εβδ.» {week}"
+                )
+            elif why and required <= base_capacity:
+                report.errors.append(
+                    f"Καθηγητής {t.name}: χρειάζεται {required} ώρες αλλά "
+                    f"χωράνε μόνο {capacity} {' και '.join(why)}"
+                )
+            else:
+                report.errors.append(
+                    f"Καθηγητής {t.name}: χρειάζεται {required} ώρες αλλά "
+                    f"η διαθεσιμότητά του επιτρέπει μόνο {capacity}"
+                )
         elif required > capacity * 0.85 and capacity > 0:
             report.warnings.append(
                 f"Καθηγητής {t.name}: φόρτος {required}/{capacity} "
@@ -324,22 +443,35 @@ def _check_class_load(
     classes: list[SchoolClass],
     days_per_week: int,
     n_periods: int,
+    cells: _Cells | None = None,
 ) -> None:
-    """Per-class: total weekly hours can't exceed days × periods."""
+    """Per-class: total weekly hours can't exceed days × periods
+    (μέσα στο ωράριο λειτουργίας / τους σκληρούς κανόνες, αν υπάρχουν)."""
     by_class: dict[int, int] = defaultdict(int)
+    lessons_by_class: dict[int, list[Lesson]] = defaultdict(list)
     for l in lessons:
         by_class[l.class_id] += l.periods_per_week
+        lessons_by_class[l.class_id].append(l)
 
     class_loads: list[dict] = []
-    capacity = days_per_week * n_periods
     for c in classes:
         required = by_class.get(c.id, 0)
         if required == 0:
             continue
+        capacity, why = days_per_week * n_periods, []
+        if cells is not None:
+            usable, why = cells.scope(lessons_by_class[c.id])
+            if why:
+                capacity = len(usable)
         class_loads.append(
             {"class_id": c.id, "name": c.name, "required": required, "capacity": capacity}
         )
-        if required > capacity:
+        if required > capacity and why:
+            report.errors.append(
+                f"Τάξη {c.name}: χρειάζεται {required} ώρες αλλά χωράνε μόνο "
+                f"{capacity} {' και '.join(why)}"
+            )
+        elif required > capacity:
             report.errors.append(
                 f"Τάξη {c.name}: χρειάζεται {required} ώρες αλλά η εβδομάδα "
                 f"έχει μόνο {capacity} ({days_per_week}×{n_periods})"
@@ -359,6 +491,7 @@ def _check_special_room_demand(
     classrooms: list[Classroom],
     days_per_week: int,
     n_periods: int,
+    cells: _Cells | None = None,
 ) -> None:
     """If subjects require lab/gym/etc., check that demand fits the rooms
     of that type."""
@@ -367,17 +500,24 @@ def _check_special_room_demand(
         rooms_by_type[r.room_type or "regular"] += 1
 
     demand_by_type: dict[str, int] = defaultdict(int)
+    lessons_by_type: dict[str, list[Lesson]] = defaultdict(list)
     for l in lessons:
         sub = l.subject
         if l.classroom_id:
             continue
         if sub and sub.requires_special_room and sub.special_room_type:
             demand_by_type[sub.special_room_type] += l.periods_per_week
+            lessons_by_type[sub.special_room_type].append(l)
 
     special_summary: list[dict] = []
     for room_type, demand in demand_by_type.items():
         rooms = rooms_by_type.get(room_type, 0)
-        capacity = rooms * days_per_week * n_periods
+        n_cells, why = days_per_week * n_periods, []
+        if cells is not None:
+            usable, why = cells.scope(lessons_by_type[room_type])
+            if why:
+                n_cells = len(usable)
+        capacity = rooms * n_cells
         special_summary.append(
             {
                 "room_type": room_type,
@@ -391,6 +531,12 @@ def _check_special_room_demand(
                 f"Απαιτείται αίθουσα τύπου '{room_type}' για {demand} ώρες "
                 "αλλά δεν υπάρχει καμία τέτοια αίθουσα"
             )
+        elif demand > capacity and why:
+            report.errors.append(
+                f"Αίθουσες τύπου '{room_type}': ζήτηση {demand} ώρες αλλά "
+                f"χωρητικότητα μόνο {capacity} ({rooms} αίθουσες × "
+                f"{n_cells} ώρες/εβδομάδα {' και '.join(why)})"
+            )
         elif demand > capacity:
             report.errors.append(
                 f"Αίθουσες τύπου '{room_type}': ζήτηση {demand} ώρες αλλά "
@@ -401,16 +547,57 @@ def _check_special_room_demand(
     report.stats["special_rooms"] = special_summary
 
 
-def _check_block_lengths(
-    report: FeasibilityReport, lessons: list[Lesson], n_periods: int
+def _check_rule_restricted_lessons(
+    report: FeasibilityReport,
+    lessons: list[Lesson],
+    teacher_unavail: list[TeacherAvailability],
+    cells: _Cells,
 ) -> None:
-    """A block longer than the school day can never be placed."""
+    """Κάρτα που περιορίζει σκληρός κανόνας: χωράνε οι ώρες της στα κελιά
+    που αφήνει ο κανόνας, μείον τα κωλύματα του καθηγητή της; (Τα αθροιστικά
+    checks ανά καθηγητή/τμήμα δεν το βλέπουν όταν μόνο μία κάρτα περιορίζεται.)"""
+    if not cells.rules:
+        return
+    unavail: dict[int, set[tuple[int, int]]] = defaultdict(set)
+    for ua in teacher_unavail:
+        unavail[ua.teacher_id].add((ua.day_of_week, ua.period_id))
     for l in lessons:
+        if len(cells.allowed(l)) >= len(cells.open):
+            continue  # κανένας σκληρός κανόνας δεν της κόβει κελιά
+        usable, why = cells.scope([l])
+        blocked = unavail.get(l.teacher_id, set()) & usable
+        possible = len(usable) - len(blocked)
+        if l.periods_per_week > possible:
+            extra = " και με τα κωλύματα του καθηγητή" if blocked else ""
+            report.errors.append(
+                f"{_lesson_label(l)}: χρειάζεται {l.periods_per_week} ώρες αλλά χωράνε "
+                f"μόνο {possible} {' και '.join(why)}{extra}"
+            )
+
+
+def _check_block_lengths(
+    report: FeasibilityReport, lessons: list[Lesson], n_periods: int,
+    cells: _Cells | None = None,
+) -> None:
+    """A block longer than the school day can never be placed — ούτε block
+    μεγαλύτερο από τις συνεχόμενες ώρες που αφήνει το ωράριο λειτουργίας /
+    ένας σκληρός κανόνας."""
+    restricted = cells is not None and cells.restricted
+    for l in lessons:
+        run = cells.longest_run(l) if restricted else n_periods
         for length in _parse_distribution(l):
             if length > n_periods:
                 report.errors.append(
                     f"{_lesson_label(l)}: ζητάει block {length} ωρών αλλά η "
                     f"μέρα έχει μόνο {n_periods} διαθέσιμες περιόδους"
+                )
+                break
+            if length > run:
+                _, why = cells.scope([l])
+                report.errors.append(
+                    f"{_lesson_label(l)}: ζητάει block {length} ωρών αλλά "
+                    f"{' και '.join(why) or 'με τους περιορισμούς'} η μέρα έχει μόνο "
+                    f"{run} συνεχόμενες ώρες"
                 )
                 break
 
@@ -424,6 +611,7 @@ def _check_student_load(
     n_periods: int,
     rosters: dict[int, set[int]] | None = None,
     student_names: dict[int, str] | None = None,
+    cells: _Cells | None = None,
 ) -> None:
     """Per-student: total weekly enrolled hours vs availability windows.
     Useful για φροντιστήριο όπου μαθητές γράφονται σε πολλά τμήματα.
@@ -431,10 +619,12 @@ def _check_student_load(
     `rosters` ({lesson_id: {student_id}}) = η λίστα κάθε κάρτας με τις
     εξαιρέσεις/προσθήκες· χωρίς αυτό, μετράμε τα σκέτα τμήματα."""
     hours_by_student: dict[int, int] = defaultdict(int)
+    lessons_by_student: dict[int, list[Lesson]] = defaultdict(list)
     if rosters is not None:
         for l in lessons:
             for sid in rosters.get(l.id, ()):
                 hours_by_student[sid] += l.periods_per_week
+                lessons_by_student[sid].append(l)
     else:
         lessons_by_class: dict[int, list[Lesson]] = defaultdict(list)
         for l in lessons:
@@ -442,21 +632,34 @@ def _check_student_load(
         for e in enrollments:
             for l in lessons_by_class.get(e.class_id, []):
                 hours_by_student[e.student_id] += l.periods_per_week
+                lessons_by_student[e.student_id].append(l)
 
-    unavail_by_student: dict[int, int] = defaultdict(int)
+    unavail_by_student: dict[int, list[tuple[int, int]]] = defaultdict(list)
     for ua in student_unavail:
-        unavail_by_student[ua.student_id] += 1
+        unavail_by_student[ua.student_id].append((ua.day_of_week, ua.period_id))
 
     overloaded: list[dict] = []
     for student_id, required in hours_by_student.items():
-        capacity = days_per_week * n_periods - unavail_by_student.get(student_id, 0)
+        unavail = unavail_by_student.get(student_id, [])
+        base_capacity = days_per_week * n_periods - len(unavail)
+        capacity, why = base_capacity, []
+        if cells is not None:
+            usable, why = cells.scope(lessons_by_student[student_id])
+            if why:
+                capacity = cells.free(usable, unavail)
         if required > capacity:
             overloaded.append(
                 {"student_id": student_id, "required": required, "capacity": capacity}
             )
             who = (student_names or {}).get(student_id) or f"id={student_id}"
-            report.errors.append(
-                f"Μαθητής {who}: εγγεγραμμένος σε {required} ώρες "
-                f"αλλά η διαθεσιμότητά του επιτρέπει μόνο {capacity}"
-            )
+            if why and required <= base_capacity:
+                report.errors.append(
+                    f"Μαθητής {who}: εγγεγραμμένος σε {required} ώρες "
+                    f"αλλά χωράνε μόνο {capacity} {' και '.join(why)}"
+                )
+            else:
+                report.errors.append(
+                    f"Μαθητής {who}: εγγεγραμμένος σε {required} ώρες "
+                    f"αλλά η διαθεσιμότητά του επιτρέπει μόνο {capacity}"
+                )
     report.stats["overloaded_students"] = overloaded

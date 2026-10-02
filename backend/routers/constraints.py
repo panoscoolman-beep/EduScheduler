@@ -82,8 +82,9 @@ def seed_default_constraints(db: Session = Depends(get_db)):
          '{"type": "min_class_gaps"}', 90),
         ("Ισοκατανομή μαθημάτων", "soft", "subject",
          '{"type": "subject_distribution"}', 70),
-        ("Αποφυγή πολλών συνεχόμενων", "soft", "general",
-         '{"type": "max_consecutive"}', 60),
+        # («Αποφυγή πολλών συνεχόμενων» / max_consecutive αφαιρέθηκε 2/10/2026: ο
+        # solver δεν έχει τέτοιον κανόνα — η γραμμή δεν έκανε τίποτα. Όσες
+        # υπάρχουν ήδη στη βάση μένουν ως έχουν· αλλάζει μόνο ένα νέο seed.)
         ("Ισοκατανομή φόρτου καθηγητή", "soft", "teacher",
          '{"type": "teacher_day_balance"}', 50),
     ]
