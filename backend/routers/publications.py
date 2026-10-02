@@ -1,6 +1,8 @@
 """📢 Δημοσίευση προγράμματος + ουρά μηνυμάτων για το Telegram bot του CRM."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from backend.services import publication as pub_service
 from backend.services.term_context import resolve_term_id
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class PublishRequest(BaseModel):
@@ -34,6 +37,14 @@ def _send_emails_job(publication_id: int) -> None:
     db = SessionLocal()
     try:
         pub_service.send_emails(db, publication_id, crm_mail.send_teacher_schedule)
+    except Exception:  # noqa: BLE001 — αλλιώς η δημοσίευση μένει «sending» για πάντα
+        logger.exception("Η αποστολή email της δημοσίευσης %s σταμάτησε", publication_id)
+        db.rollback()
+        try:
+            pub_service.abandon_emails(db, publication_id)
+        except Exception:  # noqa: BLE001 — π.χ. η βάση εκτός: το ξεκολλάει η εκκίνηση
+            logger.exception("Δεν σημειώθηκαν ως αποτυχημένα τα email της δημοσίευσης %s",
+                             publication_id)
     finally:
         db.close()
 

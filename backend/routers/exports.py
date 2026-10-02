@@ -363,20 +363,78 @@ def export_ics(
 
 def build_ics(db: Session, solution_id: int, teacher_id: int | None = None,
               student_id: int | None = None) -> str:
-    """Το κείμενο .ics (κοινό για το κουμπί εξαγωγής και τα email Δημοσίευσης).
+    """Το κείμενο .ics του ΖΩΝΤΑΝΟΥ προγράμματος (κουμπί εξαγωγής).
 
-    Αν το σενάριο της λύσης έχει start/end dates, τα events αγκυρώνονται
-    στην έναρξη, σταματούν στη λήξη (RRULE UNTIL) και εξαιρούν τις
-    ελληνικές αργίες (EXDATE) — αλλιώς τα μαθήματα θα εμφανίζονταν στο
-    ημερολόγιο για πάντα, και τον Αύγουστο, και τις αργίες."""
+    Τα email της Δημοσίευσης φτιάχνουν το δικό τους .ics από το στιγμιότυπο
+    της δημοσίευσης, με τον ίδιο render_ics (services/publication.py)."""
     solution, slots, label = _load_filtered_slots(db, solution_id, teacher_id, student_id)
     periods = _periods_by_id(db)
+    events = []
+    for slot in slots:
+        period = periods.get(slot.period_id)
+        if not period or slot.day_of_week is None:
+            continue
+        lesson = slot.lesson
+        events.append({
+            "lesson_id": lesson.id,
+            "day": slot.day_of_week,
+            "period_id": slot.period_id,
+            "start": period.start_time,
+            "end": period.end_time,
+            "subject": lesson.subject.name if lesson.subject else "Μάθημα",
+            "klass": lesson.school_class.name if lesson.school_class else "",
+            "teacher": lesson.teacher.name if lesson.teacher else "",
+            "room": slot.classroom.name if slot.classroom else "",
+        })
+    return render_ics(db, solution.term_id, label, events,
+                      teacher_id=teacher_id, student_id=student_id)
+
+
+def _event_uids(events: list[dict], scope: str) -> list[str]:
+    """Σταθερό UID ανά γεγονός: (ημερολόγιο, κάρτα, n-οστή ώρα της κάρτας στην
+    εβδομάδα). ΟΧΙ το id της ώρας (slot): αυτό αλλάζει σε κάθε νέα λύση, οπότε
+    ένα νέο .ics θα διπλασίαζε τα μαθήματα στο κινητό αντί να τα ενημερώσει.
+    Μια ώρα που μετακινείται κρατά το UID της → το ημερολόγιο τη μετακινεί."""
+    def order(i: int):
+        ev = events[i]
+        return (ev["day"], str(ev["start"]).zfill(5), ev.get("period_id") or 0, ev.get("room") or "")
+
+    by_lesson: dict = {}
+    for i, ev in enumerate(events):
+        by_lesson.setdefault(ev.get("lesson_id"), []).append(i)
+    uids = [""] * len(events)
+    for lesson_id, indexes in by_lesson.items():
+        for n, i in enumerate(sorted(indexes, key=order), start=1):
+            uids[i] = f"eduscheduler-{scope}-lesson-{lesson_id}-{n}@korifi"
+    return uids
+
+
+def render_ics(db: Session, term_id: int | None, label: str, events: list[dict], *,
+               teacher_id: int | None = None, student_id: int | None = None,
+               now: datetime.datetime | None = None) -> str:
+    """Το κείμενο .ics από «γεγονότα» ({lesson_id, day, period_id, start, end,
+    subject, klass, teacher, room}) — κοινό για το κουμπί εξαγωγής και τα
+    email Δημοσίευσης.
+
+    Αν το σενάριο έχει start/end dates, τα events αγκυρώνονται
+    στην έναρξη, σταματούν στη λήξη (RRULE UNTIL) και εξαιρούν τις
+    ελληνικές αργίες (EXDATE) — αλλιώς τα μαθήματα θα εμφανίζονταν στο
+    ημερολόγιο για πάντα, και τον Αύγουστο, και τις αργίες.
+
+    Εκδόσεις: σταθερό UID (_event_uids) + DTSTAMP/LAST-MODIFIED της στιγμής
+    δημιουργίας + SEQUENCE που μόνο μεγαλώνει (λεπτά από το 1970), ώστε ένα
+    νεότερο .ics να ΕΝΗΜΕΡΩΝΕΙ ό,τι πέρασε ήδη ο καθηγητής στο ημερολόγιο."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+    now = now.astimezone(datetime.timezone.utc)
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+    sequence = int(now.timestamp()) // 60
     today = datetime.date.today()
-    stamp = "20260101T000000Z"  # static DTSTAMP: feed is deterministic per solution
 
     term = (
-        db.query(Term).filter(Term.id == solution.term_id).first()
-        if solution.term_id is not None else None
+        db.query(Term).filter(Term.id == term_id).first()
+        if term_id is not None else None
     )
     term_start = term.start_date if term and term.start_date else None
     term_end = term.end_date if term and term.end_date else None
@@ -415,20 +473,17 @@ def build_ics(db: Session, solution_id: int, teacher_id: int | None = None,
         "END:VTIMEZONE",
     ]
 
-    for slot in slots:
-        period = periods.get(slot.period_id)
-        if not period or slot.day_of_week is None:
-            continue
-        start_date = _next_weekday(anchor, slot.day_of_week)
+    scope = f"t{teacher_id}" if teacher_id is not None else f"s{student_id}"
+    for ev, uid in zip(events, _event_uids(events, scope)):
+        start_date = _next_weekday(anchor, ev["day"])
         if term_end and start_date > term_end:
             continue  # σενάριο μικρότερο από εβδομάδα: το μάθημα δεν προλαβαίνει ποτέ
-        start_hm = period.start_time.replace(":", "") + "00"
-        end_hm = period.end_time.replace(":", "") + "00"
-        lesson = slot.lesson
-        subject = lesson.subject.name if lesson.subject else "Μάθημα"
-        klass = lesson.school_class.name if lesson.school_class else ""
-        teacher = lesson.teacher.name if lesson.teacher else ""
-        room = slot.classroom.name if slot.classroom else ""
+        start_hm = ev["start"].replace(":", "") + "00"
+        end_hm = ev["end"].replace(":", "") + "00"
+        subject = ev["subject"]
+        klass = ev["klass"]
+        teacher = ev["teacher"]
+        room = ev["room"]
 
         summary = subject if teacher_id is not None else f"{subject} ({teacher})"
         description = " · ".join(x for x in [klass, teacher, room] if x)
@@ -440,8 +495,10 @@ def build_ics(db: Session, solution_id: int, teacher_id: int | None = None,
 
         event = [
             "BEGIN:VEVENT",
-            f"UID:eduscheduler-slot-{slot.id}@korifi",
+            f"UID:{uid}",
             f"DTSTAMP:{stamp}",
+            f"LAST-MODIFIED:{stamp}",
+            f"SEQUENCE:{sequence}",
             f"DTSTART;TZID=Europe/Athens:{start_date.strftime('%Y%m%d')}T{start_hm}",
             f"DTEND;TZID=Europe/Athens:{start_date.strftime('%Y%m%d')}T{end_hm}",
             rrule,
@@ -450,7 +507,7 @@ def build_ics(db: Session, solution_id: int, teacher_id: int | None = None,
         # άγκυρα — ίδιο TZID+ώρα με το DTSTART ώστε να ταιριάξει το instance.
         exdates = [
             h for h in holidays
-            if h.weekday() == slot.day_of_week and h >= start_date
+            if h.weekday() == ev["day"] and h >= start_date
         ]
         for i in range(0, len(exdates), 3):  # ≤3 ανά γραμμή → κάτω από 75 octets
             chunk = exdates[i:i + 3]

@@ -25,8 +25,33 @@ def send_teacher_schedule(payload: dict) -> tuple[bool, str | None]:
         return False, f"Το CRM δεν απαντά: {exc}"
     if res.status_code == 200:
         return True, None
+    return False, _detail_text(res) or f"CRM {res.status_code}"
+
+
+def _detail_text(res) -> str | None:
+    """Το `detail` της απάντησης του CRM ως κείμενο για τον ιδιοκτήτη.
+
+    String → ως έχει. Λίστα σφαλμάτων επικύρωσης (422 του FastAPI) → «πεδίο:
+    μήνυμα» για τα πρώτα 5, αντί για σκέτο «CRM 422» που δεν έλεγε τι
+    απορρίφθηκε. Οτιδήποτε άλλο (όχι JSON, JSON χωρίς dict) → None."""
     try:
-        detail = res.json().get("detail")
+        body = res.json()
     except ValueError:
-        detail = None
-    return False, (detail if isinstance(detail, str) else None) or f"CRM {res.status_code}"
+        return None
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, str):
+        return detail
+    if not isinstance(detail, list):
+        return None
+    parts = []
+    for err in detail[:5]:
+        if not isinstance(err, dict):
+            continue
+        loc = ".".join(str(x) for x in (err.get("loc") or []) if x != "body")
+        msg = str(err.get("msg") or "").strip()
+        if msg:
+            parts.append(f"{loc}: {msg}" if loc else msg)
+    if not parts:
+        return None
+    more = f" (+{len(detail) - 5} ακόμα)" if len(detail) > 5 else ""
+    return f"Το CRM απέρριψε τα δεδομένα ({res.status_code}): " + "; ".join(parts) + more

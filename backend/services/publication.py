@@ -13,11 +13,11 @@ from __future__ import annotations
 import html
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from datetime import timedelta
 
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from backend.models import (
@@ -54,7 +54,9 @@ def snapshot_entries(db: Session, solution_id: int) -> list[dict]:
     periods = {p.id: p for p in db.query(Period).all()}
     # 👥 Ονόματα μαθητών ανά κάρτα (αυτόματα) — ο καθηγητής βλέπει ΠΟΙΟΥΣ έχει.
     from backend.services import lesson_roster
-    roster_names = lesson_roster.display_names(db, list({s.lesson for s in slots if s.lesson}))
+    lessons = list({s.lesson for s in slots if s.lesson})
+    roster_names = lesson_roster.display_names(db, lessons)
+    roster_ids = lesson_roster.roster_map(db, lessons)   # για τη σύγκριση (όχι για προβολή)
     rooms = {r.id: r.name for r in db.query(Classroom).all()}
     room_shorts = {r.id: (r.short_name or r.name) for r in db.query(Classroom).all()}
     teachers = {t.id: t.name for t in db.query(Teacher).all()}
@@ -80,6 +82,10 @@ def snapshot_entries(db: Session, solution_id: int) -> list[dict]:
             "klass": klass,
             "students": roster_names.get(lesson.id, []),
             "room_short": room_shorts.get(s.classroom_id, "") if s.classroom_id else "",
+            # Ταυτότητα τμήματος/μαθητών για το «τι άλλαξε» (όχι ονόματα: η
+            # μετονομασία δεν είναι αλλαγή). Παλιά στιγμιότυπα δεν τα έχουν.
+            "class_id": lesson.class_id,
+            "student_ids": sorted(roster_ids.get(lesson.id, ())),
         })
     return sorted(out, key=_entry_order)
 
@@ -100,10 +106,15 @@ def _position(e: dict):
 def teacher_changes(previous: list[dict], current: list[dict]) -> dict[int, dict]:
     """Αλλαγές ανά καθηγητή (μόνο όσοι άλλαξαν).
 
-    Ταυτότητα ώρας = (θέση, μάθημα) — ΟΧΙ το id ή το όνομα της κάρτας: έτσι
-    ούτε η μετονομασία τμήματος ούτε μια κάρτα που σβήστηκε και ξαναφτιάχτηκε
-    στις ίδιες ώρες βγάζουν ψεύτικο «➖ καταργείται / ➕ νέα ώρα». Ό,τι μένει
-    ζευγαρώνεται ανά μάθημα και γίνεται «μετακίνηση».
+    Ταυτότητα ώρας = (θέση, μάθημα, τμήμα) — το τμήμα με το id του, ΟΧΙ το
+    id ή το όνομα της κάρτας: έτσι ούτε η μετονομασία τμήματος ούτε μια κάρτα
+    που σβήστηκε και ξαναφτιάχτηκε στις ίδιες ώρες βγάζουν ψεύτικο «➖
+    καταργείται / ➕ νέα ώρα». Ό,τι μένει ζευγαρώνεται ανά (μάθημα, τμήμα) και
+    γίνεται «μετακίνηση» — έτσι φαίνεται και η ανταλλαγή ωρών δύο τμημάτων.
+    Ίδια ώρα με άλλους μαθητές → «👥» (ποιοι μπήκαν/βγήκαν).
+
+    Παλιά στιγμιότυπα (πριν το class_id): ταυτότητα (θέση, μάθημα) και
+    ζευγάρωμα ανά μάθημα, όπως πριν· οι μαθητές συγκρίνονται με τα ονόματα.
     """
     def by_teacher(entries):
         grouped: dict[int, list[dict]] = defaultdict(list)
@@ -111,29 +122,105 @@ def teacher_changes(previous: list[dict], current: list[dict]) -> dict[int, dict
             grouped[e["teacher_id"]].append(e)
         return grouped
 
+    by_class = all("class_id" in e for e in previous) and all("class_id" in e for e in current)
+
+    def key(e):
+        base = (_position(e), _subject_of(e))
+        return base + (e.get("class_id") or 0,) if by_class else base
+
+    def group(k):                      # ζευγάρωμα μετακινήσεων
+        return k[1:] if by_class else k[1]
+
     prev, cur = by_teacher(previous), by_teacher(current)
     out: dict[int, dict] = {}
     for tid in sorted(set(prev) | set(cur)):
-        before = {(_position(e), _subject_of(e)): e for e in prev.get(tid, [])}
-        after = {(_position(e), _subject_of(e)): e for e in cur.get(tid, [])}
+        before = {key(e): e for e in prev.get(tid, [])}
+        after = {key(e): e for e in cur.get(tid, [])}
+        same = [(before[k], after[k]) for k in sorted(before.keys() & after.keys())]
         gone_keys = sorted(before.keys() - after.keys())
         new_keys = sorted(after.keys() - before.keys())
-        if not (gone_keys or new_keys):
-            continue
-        gone_by_subject: dict[str, list[dict]] = defaultdict(list)
-        for key in gone_keys:
-            gone_by_subject[key[1]].append(before[key])
-        moved, added = [], []
-        for key in new_keys:
-            same_subject = gone_by_subject.get(key[1])
-            if same_subject:
-                moved.append({"from": same_subject.pop(0), "to": after[key]})
+        gone_by_group: dict = defaultdict(list)
+        for k in gone_keys:
+            gone_by_group[group(k)].append(k)
+        moved, new_left = [], []
+        for k in new_keys:
+            candidates = gone_by_group.get(group(k))
+            if candidates:
+                moved.append({"from": before[candidates.pop(0)], "to": after[k]})
             else:
-                added.append(after[key])
-        removed = [e for rest in gone_by_subject.values() for e in rest]
+                new_left.append(k)
+        gone_left = [k for rest in gone_by_group.values() for k in rest]
+        regrouped = []
+        if by_class:
+            # Ίδια ώρα & μάθημα, άλλο τμήμα (π.χ. ξαναφτιαγμένο τμήμα): όχι
+            # «➖/➕» — μετρά μόνο αν άλλαξαν οι μαθητές (👥 παρακάτω).
+            gone_at: dict = defaultdict(list)
+            for k in gone_left:
+                gone_at[k[:2]].append(k)
+            still_new = []
+            for k in new_left:
+                if gone_at.get(k[:2]):
+                    regrouped.append((before[gone_at[k[:2]].pop(0)], after[k]))
+                else:
+                    still_new.append(k)
+            new_left = still_new
+            gone_left = [k for rest in gone_at.values() for k in rest]
+        roster_pairs = same + regrouped + ([(m["from"], m["to"]) for m in moved] if by_class else [])
+        roster = _roster_changes(roster_pairs)
+        added = [after[k] for k in new_left]
+        removed = [before[k] for k in gone_left]
+        if not (moved or added or removed or roster):
+            continue
         out[tid] = {"moved": moved, "added": added,
-                    "removed": sorted(removed, key=_entry_order)}
+                    "removed": sorted(removed, key=_entry_order), "roster": roster}
     return out
+
+
+def _minus(items: list[str], other: list[str]) -> list[str]:
+    """Όσα από το items δεν υπάρχουν στο other (με πολλαπλότητα, κρατά τη σειρά)."""
+    left = Counter(other)
+    out = []
+    for x in items:
+        if left[x]:
+            left[x] -= 1
+        else:
+            out.append(x)
+    return out
+
+
+def _roster_changes(pairs: list[tuple[dict, dict]]) -> list[dict]:
+    """👥 Ίδια ώρα (ή ίδιο τμήμα που μετακινήθηκε) με άλλους μαθητές.
+
+    Μετρά μόνο ό,τι βλέπει ο καθηγητής: άλλαξαν τα ονόματα ΚΑΙ (όπου υπάρχουν
+    ids) οι ίδιοι οι μαθητές — η μετονομασία μαθητή δεν είναι αλλαγή. Μία
+    γραμμή ανά (μάθημα-τμήμα, ποιοι μπήκαν/βγήκαν), με τις ώρες όπου ισχύει."""
+    groups: dict[tuple, dict] = {}
+    for before, after in pairs:
+        if "students" not in before or "students" not in after:
+            continue                     # πολύ παλιό στιγμιότυπο: δεν ξέρουμε ποιοι ήταν
+        old, new = before.get("students") or [], after.get("students") or []
+        if Counter(old) == Counter(new):
+            continue
+        if ("student_ids" in before and "student_ids" in after
+                and sorted(before["student_ids"]) == sorted(after["student_ids"])):
+            continue
+        joined, left = _minus(new, old), _minus(old, new)
+        k = (after["label"], tuple(joined), tuple(left))
+        g = groups.setdefault(k, {"label": after["label"], "subject": _subject_of(after),
+                                  "joined": joined, "left": left, "entries": []})
+        g["entries"].append(after)
+    for g in groups.values():
+        g["entries"].sort(key=_entry_order)
+    return sorted(groups.values(), key=lambda g: _entry_order(g["entries"][0]))
+
+
+def _roster_text(r: dict) -> str:
+    parts = []
+    if r["joined"]:
+        parts.append("+ " + ", ".join(r["joined"]))
+    if r["left"]:
+        parts.append("− " + ", ".join(r["left"]))
+    return "μαθητές: " + " · ".join(parts)
 
 
 def _when(e: dict) -> str:
@@ -154,16 +241,21 @@ def _change_lines(changes: dict) -> list[str]:
             lines.append(f"• {t['label']}: {_when(f)} → {_when(t)}{_room(t)}")
     lines += [f"• ➕ {e['label']}: {_when(e)}{_room(e)} (νέα ώρα)" for e in changes["added"]]
     lines += [f"• ➖ {e['label']}: {_when(e)} (καταργείται)" for e in changes["removed"]]
+    lines += [f"• 👥 {r['label']}: {', '.join(_when(e) for e in r['entries'])} — {_roster_text(r)}"
+              for r in changes.get("roster") or []]
     return lines
 
 
 def _merged_blocks(entries: list[dict]) -> list[dict]:
-    """Συνεχόμενες ώρες ίδιου μαθήματος/αίθουσας → ένα μπλοκ (16:00–18:00)."""
+    """Συνεχόμενες ώρες ίδιου μαθήματος/αίθουσας ΚΑΙ ίδιων μαθητών → ένα μπλοκ
+    (16:00–18:00). Με άλλους μαθητές (άλλη κάρτα του τμήματος) μένουν χωριστά,
+    αλλιώς το μπλοκ θα έδειχνε μόνο τους μαθητές της πρώτης ώρας."""
     blocks: list[dict] = []
     for e in sorted(entries, key=_entry_order):
         last = blocks[-1] if blocks else None
         if (last and last["day"] == e["day"] and last["label"] == e["label"]
-                and last["room"] == e["room"] and last["end"] == e["start"]):
+                and last["room"] == e["room"] and last["end"] == e["start"]
+                and last.get("students") == e.get("students")):
             last["end"] = e["end"]
         else:
             blocks.append(dict(e))
@@ -239,6 +331,8 @@ def telegram_message(teacher: str, entries: list[dict], changes: dict | None, ho
                 parts.append(f"• {esc(_subject_of(t))}: {_short_when(f)} → {_short_when(t)}")
         parts += [f"• ➕ {esc(_subject_of(e))}: {_short_when(e)}" for e in changes["added"]]
         parts += [f"• ➖ {esc(_subject_of(e))}: {_short_when(e)} (καταργείται)" for e in changes["removed"]]
+        parts += [f"• 👥 {esc(r['subject'])}: {', '.join(_short_when(e) for e in r['entries'])}"
+                  f" — {esc(_roster_text(r))}" for r in changes.get("roster") or []]
     elif changes is not None:
         parts += ["", "✅ Καμία αλλαγή για σένα"]
     day = None
@@ -271,7 +365,7 @@ def build_messages(previous: list[dict] | None, current: list[dict]) -> list[dic
         names[e["teacher_id"]] = e["teacher"]
 
     affected = None if previous is None else teacher_changes(previous, current)
-    empty = {"moved": [], "added": [], "removed": []}
+    empty = {"moved": [], "added": [], "removed": [], "roster": []}
     out = []
     for tid in set(by_teacher) | set(affected or {}):
         entries = by_teacher.get(tid, [])
@@ -386,10 +480,27 @@ def preview(db: Session, solution_id: int) -> dict:
     }
 
 
+_LOCK_NAMESPACE = 0x45445350   # «EDSP»: δικός μας χώρος για τα advisory locks
+
+
+def _lock_term(db: Session, term_id: int) -> None:
+    """Σειριοποιεί «📢 Δημοσίευση» / «✉️ Αποστολή email» ανά σενάριο ως το
+    commit της συναλλαγής: δύο αιτήματα που επικαλύπτονται (διπλό κλικ, δύο
+    καρτέλες) δεν βγάζουν δύο δημοσιεύσεις ούτε διπλά email — το 2ο περιμένει
+    και ξαναελέγχει (409 no_changes / sending). Postgres advisory xact lock·
+    σε άλλη βάση (SQLite των tests) δεν κάνει τίποτα."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+                   {"ns": _LOCK_NAMESPACE, "key": int(term_id)})
+
+
 def publish(db: Session, solution_id: int, note: str | None, notify_telegram: bool,
             email_teacher_ids: list[int] | None = None) -> SolutionPublication:
     """Καταγράφει τη δημοσίευση (χωρίς commit — το κάνει ο router). Τα email
     ΔΕΝ στέλνονται εδώ: σημειώνονται «pending» και τα στέλνει το send_emails."""
+    sol = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
+    if sol is not None and sol.term_id is not None:
+        _lock_term(db, sol.term_id)   # ΠΡΙΝ διαβαστεί η τελευταία δημοσίευση
     data = preview(db, solution_id)
     if not data["placed"]:
         raise PublishError("empty", "Το πρόγραμμα δεν έχει καμία τοποθετημένη ώρα.")
@@ -427,25 +538,66 @@ def publish(db: Session, solution_id: int, note: str | None, notify_telegram: bo
 # Email (αποστολή μέσω CRM — βλ. services/crm_mail.py)
 # ---------------------------------------------------------------------------
 
+# Όρια του CRM (korifi-crm backend/routers/eds_mail.py) — πάνω από αυτά το
+# email απορρίπτεται ολόκληρο με «CRM 422».
+_CRM_KLASS_MAX = 200
+_CRM_ROOM_MAX = 100
+_CRM_CHANGES_MAX = 100
+_CRM_CELL_NAMES = 3        # όσα ονόματα δείχνει ο πίνακας του email (CRM short_klass)
+
+
+def _email_klass(e: dict) -> str:
+    """Οι μαθητές της ώρας για το email, μέσα στο όριο του CRM. Μεγάλο τμήμα
+    (~16+ μαθητές) → «Α Α., Β Β., Γ Γ. +17»: ίδια μορφή με τον πίνακα του
+    email, ώστε και εκεί το «+N» να βγαίνει σωστό (ποτέ σιωπηλή αποκοπή)."""
+    text_ = _klass_of(e)
+    if len(text_) <= _CRM_KLASS_MAX:
+        return text_
+    names = e.get("students") or []
+    for keep in range(min(_CRM_CELL_NAMES, len(names) - 1), 0, -1):
+        short = ", ".join(names[:keep]) + f" +{len(names) - keep}"
+        if len(short) <= _CRM_KLASS_MAX:
+            return short
+    return text_[:_CRM_KLASS_MAX - 1] + "…"
+
+
+def _email_changes(changes: list[str]) -> list[str]:
+    if len(changes) <= _CRM_CHANGES_MAX:
+        return changes
+    rest = len(changes) - (_CRM_CHANGES_MAX - 1)
+    return changes[:_CRM_CHANGES_MAX - 1] + [f"…και άλλες {rest} αλλαγές — δες το πλήρες πρόγραμμα."]
+
+
 def email_payload(*, to: str, teacher: str, title: str, note: str | None, changes: list[str],
                   first: bool, entries: list[dict], ics: str | None, test: bool = False) -> dict:
     """Ό,τι χρειάζεται το CRM για να φτιάξει το email + PDF (όχι HTML εδώ)."""
+    def room(e):
+        value = e["room"] or ""
+        return value if len(value) <= _CRM_ROOM_MAX else value[:_CRM_ROOM_MAX - 1] + "…"
+
     return {
-        "to": to, "teacher": teacher, "title": title, "note": note or "", "changes": changes,
+        "to": to, "teacher": teacher, "title": title, "note": note or "", "changes": _email_changes(changes),
         "first": first, "test": test, "ics": ics or "",
         "entries": [{"day": e["day"], "start": e["start"], "end": e["end"],
-                     "subject": _subject_of(e), "klass": _klass_of(e), "room": e["room"],
+                     "subject": _subject_of(e), "klass": _email_klass(e), "room": room(e),
                      "color": e.get("color") or "#3B82F6"}
                     for e in sorted(entries, key=_entry_order)],
     }
 
 
-def _ics_for(db: Session, solution_id: int | None, teacher_id: int) -> str | None:
-    if solution_id is None:
-        return None
-    from backend.routers.exports import build_ics
+def _ics_for(db: Session, term_id: int | None, teacher: str, teacher_id: int,
+             entries: list[dict]) -> str | None:
+    """Το .ics του email από τις ΙΔΙΕΣ ώρες με το σώμα του (στιγμιότυπο της
+    δημοσίευσης / προεπισκόπηση) — όχι από το ζωντανό πρόγραμμα, που μπορεί
+    να άλλαξε στο μεταξύ (τότε το email έλεγε άλλα στο σώμα κι άλλα στο .ics)."""
+    from backend.routers.exports import render_ics
     try:
-        return build_ics(db, solution_id, teacher_id=teacher_id)
+        events = [{"lesson_id": e.get("lesson_id"), "day": e["day"], "period_id": e.get("period_id"),
+                   "start": e["start"], "end": e["end"], "subject": _subject_of(e),
+                   "klass": e.get("klass") or "", "teacher": e.get("teacher") or teacher,
+                   "room": e.get("room") or ""}
+                  for e in entries]
+        return render_ics(db, term_id, teacher, events, teacher_id=teacher_id)
     except Exception:  # noqa: BLE001 — το .ics είναι bonus, όχι λόγος να μη φύγει το email
         return None
 
@@ -463,12 +615,12 @@ def send_emails(db: Session, publication_id: int, sender) -> dict:
         mail = m.get("email")
         if not mail or mail.get("status") != "pending":
             continue
-        payload = email_payload(
-            to=mail["to"], teacher=m["teacher"], title=pub.solution_name, note=pub.note,
-            changes=m.get("change_lines") or [], first=first,
-            entries=[e for e in snapshot if e["teacher_id"] == m["teacher_id"]],
-            ics=_ics_for(db, pub.solution_id, m["teacher_id"]))
-        try:
+        try:   # και η προετοιμασία μέσα: ένα σφάλμα χαλάει ΕΝΑ email, όχι όλη την αποστολή
+            entries = [e for e in snapshot if e["teacher_id"] == m["teacher_id"]]
+            payload = email_payload(
+                to=mail["to"], teacher=m["teacher"], title=pub.solution_name, note=pub.note,
+                changes=m.get("change_lines") or [], first=first, entries=entries,
+                ics=_ics_for(db, pub.term_id, m["teacher"], m["teacher_id"], entries))
             ok, error = sender(payload)
         except Exception as exc:  # noqa: BLE001
             ok, error = False, str(exc)
@@ -488,6 +640,8 @@ def request_emails(db: Session, publication_id: int, teacher_ids: list[int]) -> 
     pub = db.query(SolutionPublication).filter(SolutionPublication.id == publication_id).first()
     if pub is None:
         raise LookupError("Η δημοσίευση δεν βρέθηκε.")
+    _lock_term(db, pub.term_id)
+    db.refresh(pub)   # ό,τι πρόλαβε να κάνει commit ένα παράλληλο αίτημα (π.χ. «sending»)
     if latest_publication(db, pub.term_id).id != pub.id:
         raise PublishError("not_latest", "Υπάρχει νεότερη δημοσίευση — στείλε από εκείνη.")
     if pub.email_state == "sending":
@@ -516,11 +670,64 @@ def send_test_email(db: Session, solution_id: int, teacher_id: int, to: str, sen
     m = next((x for x in data["teachers"] if x["teacher_id"] == teacher_id), None)
     if m is None:
         raise LookupError("Ο καθηγητής δεν έχει ώρες σε αυτό το πρόγραμμα.")
+    entries = data["_entries"].get(teacher_id, [])
+    term_id = (db.query(TimetableSolution.term_id)
+               .filter(TimetableSolution.id == solution_id).scalar())
     payload = email_payload(
         to=to, teacher=m["teacher"], title=data["solution"]["name"], note=None,
-        changes=change_lines(m["changes"]), first=data["first"],
-        entries=data["_entries"].get(teacher_id, []), ics=_ics_for(db, solution_id, teacher_id), test=True)
+        changes=change_lines(m["changes"]), first=data["first"], entries=entries,
+        ics=_ics_for(db, term_id, m["teacher"], teacher_id, entries), test=True)
     return sender(payload)
+
+
+EMAIL_INTERRUPTED = "Η αποστολή διακόπηκε (επανεκκίνηση του EduScheduler) — στείλε ξανά."
+EMAIL_ABORTED = "Η αποστολή σταμάτησε από σφάλμα — στείλε ξανά."
+
+
+def _abandon_pending(pub: SolutionPublication, reason: str) -> int:
+    """«pending» → «failed» (με την αιτία) και τέλος το «sending», ώστε το
+    «✉️ Αποστολή email» να μπορεί να τα ξαναστείλει. ΠΟΤΕ δεν στέλνει μόνο του."""
+    try:
+        messages = _messages(pub)
+    except (TypeError, ValueError):
+        pub.email_state = "done"   # χαλασμένο JSON: δεν το αγγίζουμε, απλώς ξεκολλάει
+        return 0
+    now = utcnow_naive().isoformat()
+    abandoned = 0
+    for m in messages:
+        mail = m.get("email")
+        if mail and mail.get("status") == "pending":
+            mail.update({"status": "failed", "error": reason, "at": now})
+            abandoned += 1
+    if abandoned:
+        pub.messages_json = json.dumps(messages, ensure_ascii=False)
+    pub.email_state = "done"
+    return abandoned
+
+
+def abandon_emails(db: Session, publication_id: int, reason: str = EMAIL_ABORTED) -> int:
+    """Η αποστολή μιας δημοσίευσης σταμάτησε από σφάλμα: ό,τι έμεινε «pending»
+    γίνεται «failed». Με commit. Επιστρέφει πόσα email σημειώθηκαν."""
+    pub = db.query(SolutionPublication).filter(SolutionPublication.id == publication_id).first()
+    if pub is None or pub.email_state != "sending":
+        return 0
+    abandoned = _abandon_pending(pub, reason)
+    db.commit()
+    return abandoned
+
+
+def recover_interrupted_emails(db: Session) -> int:
+    """Κατά την εκκίνηση: όποια δημοσίευση είναι ακόμα «sending» είναι ορφανή
+    (ένα μόνο process uvicorn — καμία αποστολή δεν τρέχει πριν σηκωθεί η
+    εφαρμογή), π.χ. το deploy σκότωσε την αποστολή στη μέση. Τα email που
+    δεν πρόλαβαν γίνονται «failed» για ξαναστείλιμο από τον χρήστη. Με commit.
+    Επιστρέφει πόσες δημοσιεύσεις ξεκόλλησαν."""
+    stuck = db.query(SolutionPublication).filter(SolutionPublication.email_state == "sending").all()
+    for pub in stuck:
+        _abandon_pending(pub, EMAIL_INTERRUPTED)
+    if stuck:
+        db.commit()
+    return len(stuck)
 
 
 def latest_before(db: Session, pub: SolutionPublication) -> SolutionPublication | None:
