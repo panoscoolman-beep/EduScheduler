@@ -97,7 +97,7 @@ class Teacher(Base):
     name = Column(String(200), nullable=False)
     short_name = Column(String(20), nullable=False, unique=True)
     email = Column(String(200))
-    phone = Column(String(30))
+    phone = Column(String(100))  # 30 → 100 (alembic c9d2e4f6a8b1), όσο στο CRM
     max_periods_per_day = Column(Integer)
     max_periods_per_week = Column(Integer)
     max_days_per_week = Column(Integer)
@@ -185,7 +185,7 @@ class Student(Base):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     email = Column(String(200))
-    phone = Column(String(30))
+    phone = Column(String(100))  # 30 → 100 (alembic c9d2e4f6a8b1), όσο στο CRM
     # Τάξη φοίτησης («Α΄ Λυκείου», «Β΄ Γυμνασίου», «ΕΠΑΛ – Οικονομίας»).
     # Ελεύθερο κείμενο: τα `classes` εδώ είναι ΤΜΗΜΑΤΑ, όχι τάξεις.
     grade = Column(String(60))
@@ -440,6 +440,23 @@ class SolutionPublication(Base):
     notify_telegram = Column(Boolean, nullable=False, default=False)
     telegram_sent_at = Column(DateTime, nullable=True)
     email_state = Column(String(20), nullable=True)   # None | sending | done
+
+
+class DataCleanupLog(Base):
+    """🧹 Μόνιμο ίχνος καθαρισμών δεδομένων από migrations (π.χ. «nan» του CRM
+    → κενό, alembic d1e3f5a7b9c2): ποια τιμή άλλαξε, πού και πότε. Μόνο
+    εγγραφή από migrations· δηλώνεται εδώ ώστε ένα autogenerate να μην
+    προτείνει ποτέ να σβηστεί."""
+
+    __tablename__ = "data_cleanup_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    table_name = Column(String(64), nullable=False)
+    row_id = Column(Integer, nullable=False)
+    column_name = Column(String(64), nullable=False)
+    old_value = Column(Text)
+    reason = Column(String(200), nullable=False)
+    cleaned_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
 
 class TimetableSlotHistory(Base):
