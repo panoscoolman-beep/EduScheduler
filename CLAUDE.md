@@ -64,8 +64,13 @@ hard/soft constraints με βαρύτητα).
 
 | Service | Container name | Image | Ports | Notes |
 |---|---|---|---|---|
-| `backend` | `edscheduler-backend` | Custom (Dockerfile) | 8082 → 8000 | Static frontend mounted ως volume |
+| `backend` | `edscheduler-backend` | Custom (Dockerfile) | `0.0.0.0:8082` → 8000 (μόνο IPv4 — βλ. σημείωση) | Static frontend mounted ως volume |
 | `db` | `edscheduler-db` | `postgres:16-alpine` | (internal only) | Healthcheck με `pg_isready` |
+
+> **Πόρτα μόνο IPv4 (2026-10-02).** Το `8082` δένεται ρητά σε `0.0.0.0`: χωρίς διεύθυνση
+> το Docker ακούει και σε `[::]`, όπου το `APP-PORT-GUARD` (iptables, μόνο IPv4) δεν
+> φτάνει, ενώ ο server έχει δημόσια IPv6 και ο EduScheduler δεν έχει login. Το
+> `tests/test_compose_ports.py` κόβει πόρτα χωρίς IPv4 διεύθυνση.
 
 **Network:** `edscheduler-net` (bridge) — isolated από άλλα projects.
 **Volume:** `postgres_data` (named volume).
@@ -193,9 +198,15 @@ Output: `timetable_slots` rows + `timetable_solutions` row με metadata
    ένα κόκκινο run να μην αγγίζει ποτέ το production image).
 2. **Frontend JS tests:** `npm ci` και μετά `node --test frontend/js/tests/*.test.js`
    (Node built-in runner + jsdom).
-3. **Deploy:** rsync στο `/home/coolman/EduScheduler` (χωρίς `.git`,
-   `.github`, `.env`) και `docker compose up -d --build`.
-4. **Healthcheck:** `curl http://localhost:8082/api/healthz`, έως 3 προσπάθειες.
+3. **Backup αν εκκρεμεί migration** (`tools/predeploy_backup.sh`, από 2026-10-02): αν
+   το `alembic_version` της βάσης ≠ head του νέου κώδικα, `pg_dump -Fc` στο
+   `/home/coolman/backups/edscheduler/manual/pre-deploy-<sha>-<UTC>.dump`, ελεγμένο με
+   `pg_restore --list`. Σταματά το deploy αν η βάση είναι σταματημένη, αν δεν διαβάζεται
+   το revision ή αν το backup αποτύχει. Χωρίς container βάσης (πρώτη εγκατάσταση) → τίποτα.
+4. **Deploy:** rsync στο `/home/coolman/EduScheduler` (χωρίς `.git`,
+   `.github`, `.env`) και `docker compose up -d --build` (το entrypoint κάνει
+   `alembic upgrade head`).
+5. **Healthcheck:** `curl http://127.0.0.1:8082/api/healthz`, έως 3 προσπάθειες.
 
 Τα ίδια gates τοπικά, πριν από push:
 

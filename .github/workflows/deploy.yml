@@ -32,6 +32,21 @@ jobs:
           npm ci
           node --test frontend/js/tests/*.test.js
 
+      - name: Back up the DB if a migration is pending
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Το entrypoint τρέχει `alembic upgrade head` μόλις ξεκινήσει ο νέος
+          # backend — άρα το backup γίνεται ΕΔΩ, πριν από το compose up. Αν
+          # αποτύχει οτιδήποτε, το deploy σταματά και τρέχει ο παλιός κώδικας.
+          heads=$(docker run --rm -v "$PWD":/work:ro -w /work \
+            eduscheduler-backend-citest alembic heads | awk '{print $1}')
+          if [ "$(printf '%s\n' "$heads" | grep -c .)" -ne 1 ]; then
+            echo "::error::Expected exactly one Alembic head, got: ${heads:-none}"
+            exit 1
+          fi
+          bash tools/predeploy_backup.sh "$heads"
+
       - name: Deploy to Server
         run: |
           APP_DIR="/home/coolman/EduScheduler"
