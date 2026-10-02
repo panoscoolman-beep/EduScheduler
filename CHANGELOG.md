@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 2026-10-02 — 🔒 Πόρτα μόνο IPv4 & backup πριν από deploy με migration
+
+- **Πόρτα 8082 μόνο σε IPv4** (`docker-compose.yml`: `0.0.0.0:8082:8000`). Χωρίς
+  διεύθυνση το Docker την άνοιγε και σε IPv6, όπου δεν φτάνει το firewall (`APP-PORT-GUARD`
+  είναι μόνο IPv4) — και ο EduScheduler δεν έχει login. Tailscale, localhost και η σύνδεση
+  με το CRM (`korifi-integration`) δουλεύουν όπως πριν. Test: `tests/test_compose_ports.py`.
+- **Backup πριν από deploy που φέρνει νέο migration** (`tools/predeploy_backup.sh`, νέο
+  βήμα στο CI πριν από το `docker compose up`): `pg_dump -Fc` στο
+  `/home/coolman/backups/edscheduler/manual/`, ελεγμένο με `pg_restore --list`· fail-closed
+  (σταματημένη βάση, μη αναγνώσιμο revision, αποτυχημένο/άδειο backup → κανένα deploy). Ίδιο
+  μοτίβο με το CRM. Test: `tests/test_predeploy_backup.py` (ψεύτικο `docker`).
+- Κανένα migration, καμία αλλαγή σε backend/frontend (v=89).
+
 ### 2026-10-02 — 🔒 Ενημερώσεις βιβλιοθηκών (ειδοποιήσεις Dependabot)
 
 Μόνο βιβλιοθήκες· καμία αλλαγή σε κώδικα, βάση (Alembic head ίδιο) ή frontend (v=89).
