@@ -117,7 +117,7 @@ const GenerateView = {
                 Toast.error(`${report.errors.length} σφάλματα — ο solver θα αποτύχει`);
             }
         } catch (err) {
-            Toast.error(err.message);
+            Toast.error(TimetableHelpers.esc(err.message));
         } finally {
             btn.disabled = false;
             btn.textContent = '🔍 Έλεγχος Εφικτότητας';
@@ -140,9 +140,7 @@ const GenerateView = {
         );
         sel.innerHTML = '<option value="">— Καμία (πλήρης αναζήτηση) —</option>'
             + usable.map(s => {
-                const date = s.created_at
-                    ? new Date(s.created_at).toLocaleString('el-GR')
-                    : '—';
+                const date = TimetableHelpers.formatServerTime(s.created_at, 'locale', '—');
                 return `<option value="${s.id}">${this._escape(s.name)} (${date})</option>`;
             }).join('');
         // Preserve user's previous selection if still present
@@ -193,9 +191,9 @@ const GenerateView = {
             if (result.status === 'optimal' || result.status === 'feasible') {
                 message.textContent = result.message;
                 if (result.unplaced_count > 0) {
-                    Toast.info(result.message);
+                    Toast.info(TimetableHelpers.esc(result.message));
                 } else {
-                    Toast.success(result.message);
+                    Toast.success(TimetableHelpers.esc(result.message));
                 }
 
                 statsDiv.classList.remove('hidden');
@@ -221,7 +219,7 @@ const GenerateView = {
                 `;
             } else {
                 message.textContent = result.message;
-                Toast.error(result.message);
+                Toast.error(TimetableHelpers.esc(result.message));
                 // «Γιατί δεν βγαίνει;» — τρέξε αυτόματα τον έλεγχο εφικτότητας
                 // ώστε ο χρήστης να δει αιτίες + προτάσεις χωρίς δεύτερο κλικ.
                 try {
@@ -258,7 +256,7 @@ const GenerateView = {
                 Toast.error(explanation);
             } else {
                 message.textContent = `Σφάλμα: ${err.message}`;
-                Toast.error(err.message);
+                Toast.error(TimetableHelpers.esc(err.message));
             }
         }
 
@@ -340,7 +338,7 @@ const GenerateView = {
                                 <td>${this._escape(s.name)}</td>
                                 <td><span class="constraint-badge ${statusClass}" title="${statusTitle}">${statusLabels[s.status] || s.status}</span></td>
                                 <td>${s.score?.toFixed(0) || '—'}</td>
-                                <td>${s.created_at ? new Date(s.created_at).toLocaleString('el-GR') : '—'}</td>
+                                <td>${TimetableHelpers.formatServerTime(s.created_at, 'locale', '—')}</td>
                                 <td class="actions">
                                     <button class="btn btn-sm btn-primary view-sol" data-id="${s.id}" ${s.status === 'error' || s.status === 'generating' ? 'disabled' : ''}>📋 Προβολή</button>
                                     <button class="btn btn-sm btn-danger del-sol" data-id="${s.id}">🗑️</button>
@@ -359,18 +357,42 @@ const GenerateView = {
             });
 
             listEl.querySelectorAll('.del-sol').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    try {
-                        await API.solver.deleteSolution(parseInt(btn.dataset.id));
-                        Toast.success('Η λύση διαγράφηκε');
-                        this._loadSolutions();
-                    } catch (err) {
-                        Toast.error(err.message);
-                    }
+                btn.addEventListener('click', () => {
+                    const id = parseInt(btn.dataset.id);
+                    this._confirmDeleteSolution(id, solutions.find(s => s.id === id));
                 });
             });
         } catch (err) {
-            listEl.innerHTML = `<p class="text-muted">Σφάλμα: ${err.message}</p>`;
+            listEl.innerHTML = `<p class="text-muted">Σφάλμα: ${TimetableHelpers.esc(err.message)}</p>`;
         }
+    },
+
+    /**
+     * 🗑️ Οριστική διαγραφή προγράμματος — μόνο μετά από επιβεβαίωση. Ο server
+     * σβήνει ώρες, κλειδώματα και ιστορικό αλλαγών χωρίς άλλο έλεγχο· το
+     * «📦 Αρχειοθέτηση» του Ωρολογίου είναι η ασφαλής εναλλακτική.
+     */
+    _confirmDeleteSolution(id, solution) {
+        const name = (solution && solution.name) || `#${id}`;
+        Modal.open('🗑️ Οριστική διαγραφή προγράμματος',
+            `<p>Θα διαγραφεί <b>οριστικά</b> το πρόγραμμα «<b>${this._escape(name)}</b>».</p>
+             <ul class="text-muted" style="font-size:0.85rem; margin:0.5rem 0 0 1.1rem">
+                <li>Σβήνονται όλες οι ώρες του, τα κλειδώματα 🔒 και το ιστορικό αλλαγών.</li>
+                <li><b>Δεν αναιρείται</b> — επιστρέφει μόνο από backup.</li>
+                <li>Αν απλώς δεν το θες στη λίστα, προτίμησε το <b>📦 Αρχειοθέτηση</b>
+                    (κουμπί 📦 δίπλα στο «Πρόγραμμα» στο Ωρολόγιο): δεν σβήνει τίποτα
+                    και επαναφέρεται όποτε θες.</li>
+             </ul>`,
+            async () => {
+                try {
+                    await API.solver.deleteSolution(id);
+                    Modal.close();
+                    Toast.success('Η λύση διαγράφηκε');
+                    this._loadSolutions();
+                } catch (err) {
+                    Toast.error(TimetableHelpers.esc(err.message));
+                }
+            },
+            { saveText: 'Οριστική διαγραφή', saveClass: 'btn-danger' });
     },
 };

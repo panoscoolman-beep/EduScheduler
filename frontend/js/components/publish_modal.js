@@ -33,7 +33,9 @@ const PublishModal = {
     changeBadge(t, first) {
         if (first) return '<span class="pub-badge pub-new">νέο πρόγραμμα</span>';
         if (!t.changed) return '<span class="pub-badge">χωρίς αλλαγές</span>';
-        const n = t.changes ? t.changes.moved.length + t.changes.added.length + t.changes.removed.length : 0;
+        // + αλλαγές μαθητών (changes.roster: μπήκε/βγήκε μαθητής) — λείπει σε παλιό backend.
+        const c = t.changes;
+        const n = c ? ['moved', 'added', 'removed', 'roster'].reduce((sum, k) => sum + (c[k] || []).length, 0) : 0;
         return `<span class="pub-badge pub-changed">${n} αλλαγ${n === 1 ? 'ή' : 'ές'}</span>`;
     },
 
@@ -41,7 +43,9 @@ const PublishModal = {
         const esc = PublishModal.esc;
         const teachers = (preview && preview.teachers) || [];
         const prev = preview.previous;
-        const when = (iso) => (iso || '').replace('T', ' ').slice(0, 16);
+        // published_at = UTC χωρίς ζώνη → ώρα Ελλάδας, ίδια μορφή «ΕΕΕΕ-ΜΜ-ΗΗ ωω:λλ».
+        const when = (iso) => TimetableHelpers.formatServerTime(iso, 'ymdhm',
+            (iso || '').replace('T', ' ').slice(0, 16));
         const resend = PublishModal.isResend(preview);
         const intro = resend
             ? `<p>✅ Από την τελευταία δημοσίευση («${esc(prev.solution_name)}», ${esc(when(prev.published_at))})
@@ -134,7 +138,7 @@ const PublishModal = {
             preview = await API.solver.publishPreview(solutionId);
         } catch (err) {
             Modal.close();
-            Toast.error(err.message);
+            Toast.error(PublishModal.esc(err.message));
             return;
         }
         const resend = PublishModal.isResend(preview);
@@ -183,9 +187,9 @@ const PublishModal = {
         btn.textContent = '⏳ Αποστολή…';
         try {
             await API.solver.publishTestEmail(solutionId, { teacher_id: teacherId, to });
-            Toast.success(`📧 Στάλθηκε δοκιμή στο ${to} — δες τα εισερχόμενα.`);
+            Toast.success(`📧 Στάλθηκε δοκιμή στο ${PublishModal.esc(to)} — δες τα εισερχόμενα.`);
         } catch (err) {
-            Toast.error(err.message);
+            Toast.error(PublishModal.esc(err.message));
         } finally {
             btn.disabled = false;
             btn.textContent = 'Αποστολή δοκιμής';
@@ -199,7 +203,7 @@ const PublishModal = {
         try {
             res = await API.solver.publish(solutionId, { note, notify_telegram: notify, email_teacher_ids: selected });
         } catch (err) {
-            Toast.error(err.message);
+            Toast.error(PublishModal.esc(err.message));
             return;
         }
         if (!res.emails || !res.emails.requested) {
@@ -219,7 +223,7 @@ const PublishModal = {
         try {
             res = await API.solver.publicationEmails(publicationId, { teacher_ids: selected });
         } catch (err) {
-            Toast.error(err.message);
+            Toast.error(PublishModal.esc(err.message));
             return;
         }
         await PublishModal._track(res);

@@ -104,7 +104,7 @@ const AvailabilityModal = {
                     Toast.success('Οι διαθεσιμότητες ενημερώθηκαν επιτυχώς.');
                     Modal.close();
                 } catch (err) {
-                    Toast.error('Αποτυχία: ' + err.message);
+                    Toast.error('Αποτυχία: ' + DataTable.esc(err.message));
                 }
             });
 
@@ -123,7 +123,7 @@ const AvailabilityModal = {
             });
 
         } catch(err) {
-            Modal.open(title, `<div class="alert alert-error">Σφάλμα: ${err.message}</div>`);
+            Modal.open(title, `<div class="alert alert-error">Σφάλμα: ${DataTable.esc(err.message)}</div>`);
             console.error(err);
         }
     }

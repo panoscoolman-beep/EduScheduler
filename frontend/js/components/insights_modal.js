@@ -34,7 +34,7 @@ const InsightsModal = {
                 document.getElementById('diff-result').innerHTML =
                     TimetableHelpers.buildDiffResultHtml(diff);
             } catch (err) {
-                Toast.error(`Το diff απέτυχε: ${err.message}`);
+                Toast.error(`Το diff απέτυχε: ${TimetableHelpers.esc(err.message)}`);
             }
         }, { saveText: '🔍 Δείξε διαφορές', wide: true });
     },
@@ -51,7 +51,7 @@ const InsightsModal = {
                 { hideFooter: true },
             );
         } catch (err) {
-            Toast.error(`Η αναφορά απέτυχε: ${err.message}`);
+            Toast.error(`Η αναφορά απέτυχε: ${TimetableHelpers.esc(err.message)}`);
         }
     },
 

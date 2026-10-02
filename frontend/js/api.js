@@ -37,6 +37,8 @@ const API = {
             err.detail = detail;  // raw — lets callers detect e.g. requires_force
             // Ονομαστικό conflict του drag&drop (code, blocking_slot_id, ...) — null αλλού.
             err.conflict = (data && data.conflict) || null;
+            // Ολόκληρο το σώμα της απάντησης (π.χ. skipped_break δίπλα στο detail).
+            err.body = data;
             throw err;
         }
 
@@ -112,7 +114,9 @@ const API = {
         list: () => API.get('/periods/'),
         get: (id) => API.get(`/periods/${id}`),
         create: (data) => API.post('/periods/', data),
-        update: (id, data) => API.put(`/periods/${id}`, data),
+        // force: ώρα με τοποθετημένα μαθήματα γίνεται «Διάλειμμα» → 409 + επιβεβαίωση
+        // στο DataTable, που ξαναστέλνει με ?force=true (τα μαθήματα πάνε στην Παλέτα).
+        update: (id, data, force = false) => API.put(`/periods/${id}${force ? '?force=true' : ''}`, data),
         delete: (id, force = false) => API.delete(`/periods/${id}${force ? '?force=true' : ''}`),
         seedDefaults: () => API.post('/periods/seed-defaults', {}),
     },
@@ -193,13 +197,16 @@ const API = {
         publishTestEmail: (solutionId, data) => API.post(`/publications/preview/${solutionId}/test-email`, data),
         publication: (id) => API.get(`/publications/${id}`),
         publicationEmails: (id, data) => API.post(`/publications/${id}/emails`, data),
-        undoTo: (solutionId, entryId) =>
-            API.post(`/solver/solutions/${solutionId}/history/undo-to/${entryId}`, {}),
+        // skipBreak: παράλειψη αλλαγών σε ώρα που έγινε διάλειμμα (409 «break_hour»).
+        undoTo: (solutionId, entryId, skipBreak = false) =>
+            API.post(`/solver/solutions/${solutionId}/history/undo-to/${entryId}${skipBreak ? '?skip_break=true' : ''}`, {}),
         unplaceBulk: (solutionId, body) => API.post(`/solver/solutions/${solutionId}/unplace-bulk`, body),
         unplaceSlot: (solutionId, slotId) =>
             API.post(`/solver/solutions/${solutionId}/slots/${slotId}/unplace`, {}),
-        undo: (solutionId) => API.post(`/solver/solutions/${solutionId}/undo`, {}),
-        redo: (solutionId) => API.post(`/solver/solutions/${solutionId}/redo`, {}),
+        undo: (solutionId, skipBreak = false) =>
+            API.post(`/solver/solutions/${solutionId}/undo${skipBreak ? '?skip_break=true' : ''}`, {}),
+        redo: (solutionId, skipBreak = false) =>
+            API.post(`/solver/solutions/${solutionId}/redo${skipBreak ? '?skip_break=true' : ''}`, {}),
         historySummary: (solutionId) => API.get(`/solver/solutions/${solutionId}/history-summary`),
         substituteSuggestions: (solutionId, teacherId, dayOfWeek) =>
             API.get(`/solver/solutions/${solutionId}/substitute-suggestions?teacher_id=${teacherId}&day_of_week=${dayOfWeek}`),

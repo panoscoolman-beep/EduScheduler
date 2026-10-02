@@ -88,6 +88,13 @@ const RULE_TYPES = {
 
 const DAY_LABELS = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
 
+// Πώς τους εφαρμόζει ο solver (backend/solver/hard_rules.py — κράτα τα σε συμφωνία):
+// «Σκληρός» επιβάλλεται ΜΟΝΟ σε αυτά τα δύο είδη· οι κανόνες-προτιμήσεις που είναι
+// αποθηκευμένοι ως «Σκληροί» εφαρμόζονται ως μαλακοί (με προειδοποίηση).
+const HARD_CAPABLE_RULES = ['no_late_day', 'teacher_preferred_days'];
+// Είδη χωρίς κανόνα στον solver — η γραμμή δεν κάνει τίποτα.
+const UNSUPPORTED_RULES = ['max_consecutive'];
+
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -108,9 +115,11 @@ const ConstraintsView = {
 
         const table = new DataTable({
             columns: [
-                { key: 'constraint_type', label: 'Τύπος', render: v => `<span class="constraint-badge ${v}">${v === 'hard' ? 'Σκληρός' : 'Μαλακός'}</span>` },
+                { key: 'constraint_type', label: 'Τύπος', render: (v, item) => `<span class="constraint-badge ${v}">${v === 'hard' ? 'Σκληρός' : 'Μαλακός'}</span>`
+                    + (this._appliedAsSoft(item) ? '<br><small class="text-muted constraint-note">⚠️ εφαρμόζεται ως μαλακός</small>' : '') },
                 { key: 'name', label: 'Περιορισμός' },
-                { key: 'rule', label: 'Κανόνας', render: v => this._renderRuleSummary(v) },
+                { key: 'rule', label: 'Κανόνας', render: (v, item) => this._renderRuleSummary(v)
+                    + (this._notApplied(item) ? '<br><small class="text-muted constraint-note">⚠️ δεν εφαρμόζεται από τον solver</small>' : '') },
                 { key: 'category', label: 'Κατηγορία', render: v => ({ teacher: 'Καθηγητής', class: 'Τάξη', subject: 'Μάθημα', room: 'Αίθουσα', general: 'Γενικό' }[v] || v) },
                 { key: 'weight', label: 'Βάρος', render: (v, item) => item.constraint_type === 'soft' ? `${v}%` : '—' },
                 { key: 'is_active', label: 'Ενεργός', render: v => v ? '✅' : '❌' },
@@ -136,7 +145,7 @@ const ConstraintsView = {
                 Toast.success('Φορτώθηκαν οι προεπιλεγμένοι περιορισμοί');
                 await table.loadData();
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(this._esc(err.message));
             }
         });
 
@@ -149,19 +158,37 @@ const ConstraintsView = {
 
     // ---------- column rendering -------------------------------------------
 
+    /** Τύπος κανόνα μιας γραμμής (ή undefined). */
+    _ruleTypeOf(item) {
+        return (this._safeParseRule(item && item.rule) || {}).type;
+    },
+
+    /** «Σκληρή» γραμμή κανόνα-προτίμησης: ο solver την εφαρμόζει ως μαλακή. */
+    _appliedAsSoft(item) {
+        const t = this._ruleTypeOf(item);
+        return Boolean(item && item.constraint_type === 'hard'
+            && Object.prototype.hasOwnProperty.call(RULE_TYPES, t)
+            && t !== 'custom' && !HARD_CAPABLE_RULES.includes(t));
+    },
+
+    /** Είδος που ο solver δεν υλοποιεί (π.χ. max_consecutive). */
+    _notApplied(item) {
+        return UNSUPPORTED_RULES.includes(this._ruleTypeOf(item));
+    },
+
     _renderRuleSummary(ruleStr) {
         if (!ruleStr) return '<span class="text-muted">—</span>';
         try {
             const r = typeof ruleStr === 'string' ? JSON.parse(ruleStr) : ruleStr;
             const t = r.type;
             const meta = RULE_TYPES[t];
-            if (!meta) return `<code>${t || '?'}</code>`;
+            if (!meta) return `<code>${this._esc(t || '?')}</code>`;
             const extras = [];
             if (t === 'no_late_day' && r.max_period_index !== undefined) {
                 extras.push(`μέχρι ${r.max_period_index + 1}η ώρα`);
             }
             if (t === 'no_late_day' && r.scope && r.scope !== 'all') {
-                extras.push(r.scope === 'class' ? `τμήμα ${r.id}` : `καθηγητής ${r.id}`);
+                extras.push(r.scope === 'class' ? `τμήμα ${this._esc(String(r.id))}` : `καθηγητής ${this._esc(String(r.id))}`);
             }
             if (t === 'teacher_preferred_days' && Array.isArray(r.days)) {
                 extras.push(r.days.map(d => DAY_LABELS[d]?.slice(0, 3)).join(','));
@@ -169,7 +196,7 @@ const ConstraintsView = {
             const tail = extras.length ? ` <span class="text-muted">(${extras.join(', ')})</span>` : '';
             return `${meta.label}${tail}`;
         } catch {
-            return `<code>${ruleStr.slice(0, 30)}…</code>`;
+            return `<code>${this._esc(ruleStr.slice(0, 30))}…</code>`;
         }
     },
 
@@ -179,6 +206,9 @@ const ConstraintsView = {
         const existingRule = this._safeParseRule(item?.rule) || { type: 'min_teacher_gaps' };
         const ruleType = existingRule.type in RULE_TYPES ? existingRule.type : 'custom';
 
+        // «Σκληρός» μόνο για όσα μπορεί να επιβάλει ο solver· μια ΥΠΑΡΧΟΥΣΑ σκληρή
+        // γραμμή άλλου είδους μένει όπως είναι (δεν αλλάζει σιωπηλά τι αποθηκεύεται).
+        const hardAllowed = HARD_CAPABLE_RULES.includes(ruleType) || item?.constraint_type === 'hard';
         const ruleTypeOptions = Object.entries(RULE_TYPES).map(([key, meta]) =>
             `<option value="${key}" ${ruleType === key ? 'selected' : ''}>${meta.label}</option>`
         ).join('');
@@ -194,8 +224,9 @@ const ConstraintsView = {
                     <label class="form-label">Τύπος *</label>
                     <select class="form-select" id="f-type">
                         <option value="soft" ${item?.constraint_type !== 'hard' ? 'selected' : ''}>Μαλακός (προτίμηση)</option>
-                        <option value="hard" ${item?.constraint_type === 'hard' ? 'selected' : ''}>Σκληρός (υποχρεωτικός)</option>
+                        <option value="hard" ${item?.constraint_type === 'hard' ? 'selected' : ''}${hardAllowed ? '' : ' disabled'}>Σκληρός (υποχρεωτικός)</option>
                     </select>
+                    <small class="text-muted" id="f-type-hint" style="display:block; margin-top:0.25rem;"></small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Κατηγορία *</label>
@@ -262,6 +293,32 @@ const ConstraintsView = {
 
         const initialRule = this._safeParseRule(existingRuleEl.value) || {};
 
+        const typeSel = document.getElementById('f-type');
+        const hardOpt = typeSel ? typeSel.querySelector('option[value="hard"]') : null;
+        const hintEl = document.getElementById('f-type-hint');
+        const wasHard = Boolean(typeSel && typeSel.value === 'hard');
+        const originalRuleType = ruleSelect.value;
+        const syncHardOption = () => {
+            if (!typeSel || !hardOpt) return;
+            const rt = ruleSelect.value;
+            const capable = HARD_CAPABLE_RULES.includes(rt);
+            // Υπάρχουσα σκληρή γραμμή: μένει σκληρή όσο δεν αλλάζει το είδος της.
+            const keep = wasHard && rt === originalRuleType;
+            hardOpt.disabled = !capable && !keep;
+            if (hardOpt.disabled && typeSel.value === 'hard') typeSel.value = 'soft';
+            if (!hintEl) return;
+            if (capable) hintEl.textContent = '';
+            else if (typeSel.value === 'hard') {
+                hintEl.textContent = rt === 'custom' ? ''
+                    : '⚠️ Αυτό το είδος κανόνα εφαρμόζεται ως μαλακός (προτίμηση) από τον solver.';
+            } else {
+                hintEl.textContent = 'Ο «Σκληρός» υπάρχει μόνο για «Όχι μάθημα μετά από συγκεκριμένη ώρα» '
+                    + 'και «Προτιμώμενες ημέρες καθηγητή» — οι υπόλοιποι κανόνες είναι προτιμήσεις.';
+            }
+        };
+        syncHardOption();
+        if (typeSel) typeSel.addEventListener('change', syncHardOption);
+
         const renderParams = (ruleType, prefill) => {
             const meta = RULE_TYPES[ruleType];
             descEl.textContent = meta.description;
@@ -269,11 +326,17 @@ const ConstraintsView = {
             this._wireParamFieldEvents();
         };
 
-        // Initial render
-        renderParams(ruleSelect.value, initialRule);
+        // Initial render. Κανόνας που ανοίγει ως «Custom» (ενσωματωμένος, άγνωστο
+        // είδος ή custom): το ΔΙΚΟ του JSON στο πεδίο — πριν, έμπαινε το default
+        // {"type": "custom"} και μια απλή αποθήκευση αντικαθιστούσε τον κανόνα.
+        const initialPrefill = (ruleSelect.value === 'custom' && Object.keys(initialRule).length)
+            ? { ...initialRule, __raw_json__: JSON.stringify(initialRule) }
+            : initialRule;
+        renderParams(ruleSelect.value, initialPrefill);
 
         ruleSelect.addEventListener('change', () => {
             renderParams(ruleSelect.value, {});
+            syncHardOption();
             // Auto-set category to the rule's natural fit (don't override
             // if user already picked something different in this session)
             const meta = RULE_TYPES[ruleSelect.value];
@@ -303,7 +366,7 @@ const ConstraintsView = {
                             <label class="form-label">${spec.label}</label>
                             <input class="form-input" id="${id}" type="number"
                                    min="${spec.min ?? ''}" max="${spec.max ?? ''}"
-                                   value="${value ?? ''}">
+                                   value="${this._esc(value ?? '')}">
                         </div>
                     `;
                 case 'textarea':
@@ -332,7 +395,7 @@ const ConstraintsView = {
                             <select class="form-select" id="${id}">
                                 <option value="">— Επίλεξε καθηγητή —</option>
                                 ${teachers.map(t =>
-                                    `<option value="${t.id}" ${t.id == value ? 'selected' : ''}>${t.name}</option>`
+                                    `<option value="${t.id}" ${t.id == value ? 'selected' : ''}>${this._esc(t.name)}</option>`
                                 ).join('')}
                             </select>
                         </div>
@@ -346,10 +409,10 @@ const ConstraintsView = {
                             <select class="form-select" id="${id}">
                                 <option value="">— Διάλεξε —</option>
                                 <optgroup label="Τμήματα">
-                                    ${classes.map(c => `<option data-kind="class" value="${c.id}" ${c.id == value && prefill.scope === 'class' ? 'selected' : ''}>${c.name}</option>`).join('')}
+                                    ${classes.map(c => `<option data-kind="class" value="${c.id}" ${c.id == value && prefill.scope === 'class' ? 'selected' : ''}>${this._esc(c.name)}</option>`).join('')}
                                 </optgroup>
                                 <optgroup label="Καθηγητές">
-                                    ${teachers.map(t => `<option data-kind="teacher" value="${t.id}" ${t.id == value && prefill.scope === 'teacher' ? 'selected' : ''}>${t.name}</option>`).join('')}
+                                    ${teachers.map(t => `<option data-kind="teacher" value="${t.id}" ${t.id == value && prefill.scope === 'teacher' ? 'selected' : ''}>${this._esc(t.name)}</option>`).join('')}
                                 </optgroup>
                             </select>
                         </div>
@@ -372,7 +435,7 @@ const ConstraintsView = {
                     `;
                 }
                 default:
-                    return `<div class="form-group"><label>${spec.label}</label><input class="form-input" id="${id}" value="${value ?? ''}"></div>`;
+                    return `<div class="form-group"><label>${spec.label}</label><input class="form-input" id="${id}" value="${this._esc(value ?? '')}"></div>`;
             }
         }).join('');
     },

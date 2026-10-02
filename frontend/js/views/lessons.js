@@ -55,7 +55,7 @@ const LessonsView = {
                 },
                 { key: 'classroom_name', label: 'Αίθουσα', render: v => v || '—αυτόματη—' },
                 { key: 'periods_per_week', label: 'Ώρες/Εβδ' },
-                { key: 'distribution', label: 'Blocks', render: v => v || '<span class="text-muted">όλα 1ωρα</span>' },
+                { key: 'distribution', label: 'Blocks', render: v => v ? LessonsHelpers._esc(v) : '<span class="text-muted">όλα 1ωρα</span>' },
             ],
             apiService: API.lessons,
             entityName: 'Μαθήματα-Κάρτες',
@@ -100,7 +100,7 @@ const LessonsView = {
         try {
             terms = await API.terms.list();
         } catch (err) {
-            Toast.error('Αδύνατη η φόρτωση σεναρίων: ' + err.message);
+            Toast.error('Αδύνατη η φόρτωση σεναρίων: ' + LessonsHelpers._esc(err.message));
             return;
         }
         const active = terms.find(t => t.is_active);
@@ -156,7 +156,7 @@ const LessonsView = {
             this._wireTermImportList(body);
         } catch (err) {
             body.innerHTML = '';
-            Toast.error('Αδύνατη η φόρτωση μαθημάτων: ' + err.message);
+            Toast.error('Αδύνατη η φόρτωση μαθημάτων: ' + LessonsHelpers._esc(err.message));
         }
     },
 
@@ -188,11 +188,11 @@ const LessonsView = {
         }
         try {
             const res = await API.lessons.importFromTerm(parseInt(source), ids);
-            Toast.success(res.message || `Εισήχθησαν ${res.created} μαθήματα`);
+            Toast.success(LessonsHelpers._esc(res.message || `Εισήχθησαν ${res.created} μαθήματα`));
             Modal.close();
             await table.loadData();
         } catch (err) {
-            Toast.error('Αποτυχία εισαγωγής: ' + err.message);
+            Toast.error('Αποτυχία εισαγωγής: ' + LessonsHelpers._esc(err.message));
         }
     },
 
@@ -261,7 +261,7 @@ const LessonsView = {
                 const result = await API.lessonsBulkImport.preview(csv);
                 this._renderPreviewResult(result, csv, table, resultArea);
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(LessonsHelpers._esc(err.message));
             }
             previewBtn.disabled = false;
             previewBtn.textContent = '👁️ Preview';
@@ -337,14 +337,14 @@ const LessonsView = {
             try {
                 const summary = await API.lessonsBulkImport.commit(csvText);
                 if (summary.status === 'ok') {
-                    Toast.success(summary.message);
+                    Toast.success(LessonsHelpers._esc(summary.message));
                     Modal.close();
                     await table.loadData();
                 } else {
-                    Toast.error(summary.message);
+                    Toast.error(LessonsHelpers._esc(summary.message));
                 }
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(LessonsHelpers._esc(err.message));
             }
             btn.disabled = false;
             btn.textContent = '✅ Εισαγωγή';
@@ -369,14 +369,14 @@ const LessonsView = {
                     <label class="form-label">Μάθημα *</label>
                     <select class="form-select" id="f-subject">
                         <option value="">— Επιλέξτε —</option>
-                        ${this._subjects.map(s => `<option value="${s.id}" ${item?.subject_id === s.id ? 'selected' : ''}>${s.name}${s.requires_special_room ? ` (απαιτεί ${s.special_room_type || 'ειδική αίθουσα'})` : ''}</option>`).join('')}
+                        ${this._subjects.map(s => `<option value="${s.id}" ${item?.subject_id === s.id ? 'selected' : ''}>${this._esc(s.name)}${s.requires_special_room ? ` (απαιτεί ${s.special_room_type || 'ειδική αίθουσα'})` : ''}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Καθηγητής *</label>
                     <select class="form-select" id="f-teacher">
                         <option value="">— Επιλέξτε —</option>
-                        ${this._teachers.map(t => `<option value="${t.id}" ${item?.teacher_id === t.id ? 'selected' : ''}>${t.name} (${t.short_name})</option>`).join('')}
+                        ${this._teachers.map(t => `<option value="${t.id}" ${item?.teacher_id === t.id ? 'selected' : ''}>${this._esc(t.name)} (${this._esc(t.short_name)})</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -385,14 +385,14 @@ const LessonsView = {
                     <label class="form-label">Τάξη *</label>
                     <select class="form-select" id="f-class">
                         <option value="">— Επιλέξτε —</option>
-                        ${this._classes.map(c => `<option value="${c.id}" ${item?.class_id === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                        ${this._classes.map(c => `<option value="${c.id}" ${item?.class_id === c.id ? 'selected' : ''}>${this._esc(c.name)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Αίθουσα (προαιρετικά)</label>
                     <select class="form-select" id="f-classroom">
                         <option value="">— Αυτόματη —</option>
-                        ${this._classrooms.map(r => `<option value="${r.id}" data-room-type="${r.room_type || ''}" ${item?.classroom_id === r.id ? 'selected' : ''}>${r.name}${r.room_type ? ` (${r.room_type})` : ''}</option>`).join('')}
+                        ${this._classrooms.map(r => `<option value="${r.id}" data-room-type="${r.room_type || ''}" ${item?.classroom_id === r.id ? 'selected' : ''}>${this._esc(r.name)}${r.room_type ? ` (${r.room_type})` : ''}</option>`).join('')}
                     </select>
                 </div>
             </div>
@@ -412,7 +412,7 @@ const LessonsView = {
                     </div>
                     <input class="form-input" id="f-dist" type="text"
                            placeholder="π.χ. 2,2,1 (ή κάνε κλικ σε επιλογή)"
-                           value="${item?.distribution || ''}">
+                           value="${LessonsHelpers._esc(item?.distribution || '')}">
                     <p class="text-muted" style="font-size:0.8em; margin-top:0.3rem;">${periodsHint}</p>
                 </div>
             </div>
@@ -529,7 +529,7 @@ const LessonsView = {
             });
         } catch (err) {
             chipsEl.innerHTML = `<span class="text-muted" style="font-size:0.85em;">
-                ⚠️ Σφάλμα: ${err.message}
+                ⚠️ Σφάλμα: ${LessonsHelpers._esc(err.message)}
             </span>`;
         }
     },

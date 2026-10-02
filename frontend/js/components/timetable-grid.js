@@ -69,8 +69,8 @@ const TimetableGrid = {
             const periodCell = `
                 <td class="period-cell${outside ? ' period-outside' : ''}"${outside
                     ? ' title="Εκτός ωραρίου λειτουργίας — φαίνεται γιατί έχει μάθημα"' : ''}>
-                    ${period.short_name}${outside ? ' ⏰' : ''}
-                    <span class="period-time">${period.start_time}-${period.end_time}</span>
+                    ${TimetableGrid.esc(period.short_name)}${outside ? ' ⏰' : ''}
+                    <span class="period-time">${TimetableGrid.esc(period.start_time)}-${TimetableGrid.esc(period.end_time)}</span>
                 </td>
             `;
 
@@ -134,9 +134,9 @@ const TimetableGrid = {
                                     title="${lockTitle}">
                                 ${lockIcon}
                             </button>
-                            <span class="subject-name" style="color:${bgColor}">${line1 || ''}</span>
-                            <span class="teacher-name">${line2 || ''}</span>
-                            <span class="room-name">${line3 || ''}</span>
+                            <span class="subject-name" style="color:${bgColor}">${TimetableGrid.esc(line1 || '')}</span>
+                            <span class="teacher-name">${TimetableGrid.esc(line2 || '')}</span>
+                            <span class="room-name">${TimetableGrid.esc(line3 || '')}</span>
                         </div>
                     `;
                 }).join('');
@@ -470,7 +470,7 @@ const TimetableGrid = {
             }
             this._notifyHistoryChanged();
         } catch (err) {
-            Toast.error('Αποτυχία αφαίρεσης: ' + err.message);
+            Toast.error('Αποτυχία αφαίρεσης: ' + TimetableGrid.esc(err.message));
         }
     },
 
@@ -571,7 +571,7 @@ const TimetableGrid = {
     reportConflict(prefix, err) {
         const conflict = err && err.conflict;
         const msg = (err && err.message) || 'Άγνωστο σφάλμα';
-        Toast.error(prefix + msg, conflict ? 9000 : 6000);
+        Toast.error(prefix + TimetableGrid.esc(msg), conflict ? 9000 : 6000);
         if (!conflict) return;
         const target = conflict.blocking_slot_id != null
             ? conflict.blocking_slot_id : conflict.card_slot_id;
@@ -779,9 +779,9 @@ const TimetableGrid = {
                     ? newRoom.classroom_name : undefined,
             });
             Toast.success(roomChanged
-                ? `Μετακινήθηκε — άλλαξε αίθουσα σε «${slotData.classroom_name}» (η προηγούμενη ήταν κατειλημμένη)`
+                ? `Μετακινήθηκε — άλλαξε αίθουσα σε «${TimetableGrid.esc(slotData.classroom_name)}» (η προηγούμενη ήταν κατειλημμένη)`
                 : (targetRoom != null && slotData.classroom_name
-                    ? `Η κάρτα μπήκε στην αίθουσα «${slotData.classroom_name}»`
+                    ? `Η κάρτα μπήκε στην αίθουσα «${TimetableGrid.esc(slotData.classroom_name)}»`
                     : 'Η κάρτα μετακινήθηκε επιτυχώς!'));
             if (wasParkingCard) {
                 this._notifyParkingLotChanged();
@@ -894,13 +894,25 @@ const TimetableGrid = {
      * from, so a drag/lock survives a view/filter switch (which re-renders
      * without re-fetching). `this._slots` references the same slot objects the
      * TimetableView holds, so mutating them keeps everything consistent.
+     *
+     * Στην προβολή «Μαθητή» το πλέγμα κρατά ΦΙΛΤΡΑΡΙΣΜΕΝΟ αντίγραφο· η Παλέτα
+     * διαβάζει τον πλήρη πίνακα (TimetableView._paletteCtx.slots) — ενημέρωσε
+     * και αυτόν, αλλιώς μια ώρα μαθήματος εκτός του μαθητή έμενε «στην Παλέτα»
+     * και το επόμενο σύρσιμο μετακινούσε την ώρα που μόλις μπήκε.
      */
     _syncSlot(slotId, patch) {
-        if (!Array.isArray(this._slots)) return;
-        const rec = this._slots.find(s => s.id === slotId);
-        if (!rec) return;
-        for (const k in patch) {
-            if (patch[k] !== undefined) rec[k] = patch[k];
+        const arrays = [this._slots];
+        const ctx = (typeof TimetableView !== 'undefined') ? TimetableView._paletteCtx : null;
+        if (ctx && ctx.slots !== this._slots) arrays.push(ctx.slots);
+        const seen = new Set();
+        for (const arr of arrays) {
+            if (!Array.isArray(arr)) continue;
+            const rec = arr.find(s => s.id === slotId);
+            if (!rec || seen.has(rec)) continue;
+            seen.add(rec);
+            for (const k in patch) {
+                if (patch[k] !== undefined) rec[k] = patch[k];
+            }
         }
     },
 
@@ -971,7 +983,7 @@ const TimetableGrid = {
             card.draggable = newLockedValue;
             slot.is_locked = !newLockedValue;
             card.dataset.json = JSON.stringify(slot);
-            Toast.error(`Lock toggle απέτυχε: ${err.message}`);
+            Toast.error(`Lock toggle απέτυχε: ${TimetableGrid.esc(err.message)}`);
         } finally {
             btn.disabled = false;
             btn.classList.remove('busy');

@@ -30,21 +30,21 @@ const TeachersView = {
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Ονοματεπώνυμο *</label>
-                        <input class="form-input" id="f-name" value="${item?.name || ''}" placeholder="π.χ. Γιάννης Νικολάου" required>
+                        <input class="form-input" id="f-name" value="${DataTable.esc(item?.name || '')}" placeholder="π.χ. Γιάννης Νικολάου" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Συντομογραφία *</label>
-                        <input class="form-input" id="f-short_name" value="${item?.short_name || ''}" placeholder="π.χ. ΓΝ" required maxlength="20">
+                        <input class="form-input" id="f-short_name" value="${DataTable.esc(item?.short_name || '')}" placeholder="π.χ. ΓΝ" required maxlength="20">
                     </div>
                 </div>
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Email</label>
-                        <input class="form-input" id="f-email" type="email" value="${item?.email || ''}">
+                        <input class="form-input" id="f-email" type="email" value="${DataTable.esc(item?.email || '')}">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Τηλέφωνο</label>
-                        <input class="form-input" id="f-phone" value="${item?.phone || ''}">
+                        <input class="form-input" id="f-phone" value="${DataTable.esc(item?.phone || '')}">
                     </div>
                 </div>
                 <div class="form-grid">

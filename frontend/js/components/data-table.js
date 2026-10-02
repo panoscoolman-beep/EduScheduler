@@ -10,7 +10,7 @@ class DataTable {
     }
 
     constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady,
-                  rowFilter, onRendered, toolbarHtml }) {
+                  rowFilter, onRendered, toolbarHtml, forceUpdateConfirm }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -26,6 +26,9 @@ class DataTable {
         this.rowFilter = rowFilter;
         this.onRendered = onRendered;
         this.toolbarHtml = toolbarHtml || '';   // προαιρετικά controls δίπλα στο «Προσθήκη»
+        // Προαιρετικά: forceUpdateConfirm(detail) → {title, bodyHtml, saveText, successText}
+        // για δικά της κείμενα στην επιβεβαίωση ενός 409 (null = τα γενικά).
+        this.forceUpdateConfirm = forceUpdateConfirm || null;
         this.data = [];
     }
 
@@ -57,7 +60,7 @@ class DataTable {
             this.data = await this.api.list();
             this.renderTable();
         } catch (err) {
-            Toast.error(`Σφάλμα φόρτωσης: ${err.message}`);
+            Toast.error(`Σφάλμα φόρτωσης: ${DataTable.esc(err.message)}`);
         }
     }
 
@@ -170,9 +173,9 @@ class DataTable {
                 // Η αλλαγή συγκρούεται με τοποθετημένες ώρες (π.χ. νέος καθηγητής
                 // σε κάρτα) → δεύτερη επιβεβαίωση και επανάληψη με force.
                 if (editId && err.status === 409 && err.detail && err.detail.requires_force) {
-                    this._confirmForceUpdate(editId, formData, err.detail.message);
+                    this._confirmForceUpdate(editId, formData, err.detail.message, err.detail);
                 } else {
-                    Toast.error(err.message);
+                    Toast.error(DataTable.esc(err.message));
                 }
             }
         });
@@ -192,7 +195,7 @@ class DataTable {
 
         Modal.open(
             'Επιβεβαίωση Διαγραφής',
-            `<p>Είστε σίγουροι ότι θέλετε να διαγράψετε <strong>"${name}"</strong>;</p>
+            `<p>Είστε σίγουροι ότι θέλετε να διαγράψετε <strong>"${DataTable.esc(name)}"</strong>;</p>
              <p class="text-muted mt-sm">Η ενέργεια αυτή δεν μπορεί να αναιρεθεί.</p>`,
             async () => {
                 try {
@@ -207,7 +210,7 @@ class DataTable {
                     if (err.status === 409 && err.detail && err.detail.requires_force) {
                         this._confirmForceDelete(id, name, err.detail.message);
                     } else {
-                        Toast.error(err.message);
+                        Toast.error(DataTable.esc(err.message));
                     }
                 }
             },
@@ -215,22 +218,24 @@ class DataTable {
         );
     }
 
-    _confirmForceUpdate(id, formData, message) {
+    _confirmForceUpdate(id, formData, message, detail) {
+        const custom = this.forceUpdateConfirm ? this.forceUpdateConfirm(detail || {}) : null;
         Modal.open(
-            '⚠️ Η αλλαγή συγκρούεται με το πρόγραμμα',
-            `<p style="font-weight:600">${DataTable.esc(message)}</p>
+            (custom && custom.title) || '⚠️ Η αλλαγή συγκρούεται με το πρόγραμμα',
+            (custom && custom.bodyHtml) || `<p style="font-weight:600">${DataTable.esc(message)}</p>
              <p class="text-muted mt-sm">Οι υπόλοιπες ώρες μένουν όπως είναι.</p>`,
             async () => {
                 try {
                     await this.api.update(id, formData, true);  // force
-                    Toast.success('Αποθηκεύτηκε — οι ώρες που συγκρούονταν είναι στην Παλέτα.');
+                    Toast.success((custom && custom.successText)
+                        || 'Αποθηκεύτηκε — οι ώρες που συγκρούονταν είναι στην Παλέτα.');
                     Modal.close();
                     await this.loadData();
                 } catch (err) {
-                    Toast.error(err.message);
+                    Toast.error(DataTable.esc(err.message));
                 }
             },
-            { saveText: 'Ναι, αποθήκευση', saveClass: 'btn-warning' },
+            { saveText: (custom && custom.saveText) || 'Ναι, αποθήκευση', saveClass: 'btn-warning' },
         );
     }
 
@@ -247,7 +252,7 @@ class DataTable {
                     Modal.close();
                     await this.loadData();
                 } catch (err) {
-                    Toast.error(err.message);
+                    Toast.error(DataTable.esc(err.message));
                 }
             },
             { saveText: 'Ναι, διαγραφή όλων', saveClass: 'btn-danger' },

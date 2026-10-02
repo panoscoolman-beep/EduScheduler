@@ -17,11 +17,11 @@ const SubjectsView = {
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Όνομα Μαθήματος *</label>
-                        <input class="form-input" id="f-name" value="${item?.name || ''}" placeholder="π.χ. Μαθηματικά">
+                        <input class="form-input" id="f-name" value="${DataTable.esc(item?.name || '')}" placeholder="π.χ. Μαθηματικά">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Συντομογραφία *</label>
-                        <input class="form-input" id="f-short_name" value="${item?.short_name || ''}" placeholder="π.χ. ΜΑΘ" maxlength="20">
+                        <input class="form-input" id="f-short_name" value="${DataTable.esc(item?.short_name || '')}" placeholder="π.χ. ΜΑΘ" maxlength="20">
                     </div>
                 </div>
                 <div class="form-group">

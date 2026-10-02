@@ -12,7 +12,7 @@ const ClassroomsView = {
                 { key: 'name', label: 'Αίθουσα' , render: ArchiveControls.nameRender },
                 { key: 'short_name', label: 'Συντομ.' },
                 { key: 'capacity', label: 'Χωρητικότητα' },
-                { key: 'room_type', label: 'Τύπος', render: v => self.ROOM_TYPES[v] || v },
+                { key: 'room_type', label: 'Τύπος', render: v => self.ROOM_TYPES[v] || DataTable.esc(v) },
                 { key: 'building', label: 'Κτίριο', render: v => v || '—' },
             ],
             apiService: archive.api,
@@ -23,11 +23,11 @@ const ClassroomsView = {
                 <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Όνομα Αίθουσας *</label>
-                        <input class="form-input" id="f-name" value="${item?.name || ''}" placeholder="π.χ. Αίθουσα 1">
+                        <input class="form-input" id="f-name" value="${DataTable.esc(item?.name || '')}" placeholder="π.χ. Αίθουσα 1">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Συντομογραφία *</label>
-                        <input class="form-input" id="f-short_name" value="${item?.short_name || ''}" placeholder="π.χ. Α1" maxlength="20">
+                        <input class="form-input" id="f-short_name" value="${DataTable.esc(item?.short_name || '')}" placeholder="π.χ. Α1" maxlength="20">
                     </div>
                 </div>
                 <div class="form-grid">
@@ -45,7 +45,7 @@ const ClassroomsView = {
                     </div>
                     <div class="form-group">
                         <label class="form-label">Κτίριο</label>
-                        <input class="form-input" id="f-building" value="${item?.building || ''}">
+                        <input class="form-input" id="f-building" value="${DataTable.esc(item?.building || '')}">
                     </div>
                 </div>
             `,

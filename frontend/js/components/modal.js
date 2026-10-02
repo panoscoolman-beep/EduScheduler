@@ -3,6 +3,12 @@
  */
 const Modal = {
     _onSave: null,
+    // Προστασία από διπλό κλικ στο «Αποθήκευση»: όσο τρέχει η ενέργεια του
+    // παραθύρου το κουμπί είναι απενεργό. Το _token αλλάζει σε κάθε open(),
+    // ώστε ένα παράθυρο που ανοίγει ΜΕΣΑ από την ενέργεια (π.χ. επιβεβαίωση
+    // «force», πρόοδος email) να ξεκινά πάντα με ενεργό κουμπί.
+    _token: 0,
+    _busy: false,
 
     open(title, bodyHTML, onSave, options = {}) {
         const overlay = document.getElementById('modal-overlay');
@@ -20,6 +26,7 @@ const Modal = {
             footer.style.display = '';
             saveBtn.textContent = options.saveText || 'Αποθήκευση';
             saveBtn.className = `btn ${options.saveClass || 'btn-primary'}`;
+            if (cancelBtn) cancelBtn.textContent = options.cancelText || 'Ακύρωση';
         }
 
         if (options.wide || options.hideFooter) {
@@ -30,6 +37,9 @@ const Modal = {
         }
 
         this._onSave = onSave;
+        this._token += 1;
+        this._busy = false;
+        if (saveBtn) saveBtn.disabled = false;
         overlay.classList.add('active');
         document.body.style.overflow = 'hidden';
 
@@ -46,8 +56,22 @@ const Modal = {
         this._onSave = null;
     },
 
-    _handleSave() {
-        if (this._onSave) this._onSave();
+    async _handleSave() {
+        if (!this._onSave || this._busy) return;   // ήδη σε εξέλιξη — αγνόησε το 2ο κλικ
+        const token = this._token;
+        const saveBtn = document.getElementById('modal-save');
+        this._busy = true;
+        if (saveBtn) saveBtn.disabled = true;
+        try {
+            await this._onSave();
+        } finally {
+            // Μόνο αν είναι ακόμα το ΙΔΙΟ παράθυρο (σε σφάλμα ξαναενεργοποιείται
+            // για νέα προσπάθεια)· ένα νέο παράθυρο έχει ήδη δικό του κουμπί.
+            if (this._token === token) {
+                this._busy = false;
+                if (saveBtn) saveBtn.disabled = false;
+            }
+        }
     },
 
     init() {

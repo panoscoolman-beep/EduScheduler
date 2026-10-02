@@ -51,6 +51,14 @@ const LessonImpactModal = {
         if (!l.class_students) {
             out.push('⚠️ Το τμήμα δεν έχει μαθητές — ίσως το μάθημα να μη χρειάζεται καθόλου.');
         }
+        // Αρχειοθετημένα προγράμματα: δεν είναι στον πίνακα, αλλά η διαγραφή
+        // του μαθήματος σβήνει και τις δικές τους ώρες (λείπει σε παλιό backend).
+        const arch = (data && data.archived) || {};
+        if ((arch.placed || 0) > 0) {
+            const names = (arch.solutions || []).map(r => `«${r.solution_name}» ${r.placed}`).join(', ');
+            out.push(`📦 Και ${arch.placed} ώρες τοποθετημένες σε αρχειοθετημένα προγράμματα`
+                + `${names ? ` (${names})` : ''} — η διαγραφή του μαθήματος τις σβήνει κι αυτές.`);
+        }
         return out;
     },
 
@@ -185,7 +193,7 @@ const LessonImpactModal = {
         body.innerHTML = LessonImpactModal.buildHtml(data);
 
         const finish = (message) => {
-            Toast.success(message);
+            Toast.success(LessonImpactModal.esc(message));
             Modal.close();
             if (typeof onChanged === 'function') onChanged();
         };
@@ -195,7 +203,7 @@ const LessonImpactModal = {
                 const res = await API.lessons.trimUnplaced(lessonId);
                 finish(res.message || 'Οι ώρες καθαρίστηκαν');
             } catch (err) {
-                Toast.error('Δεν έγινε: ' + err.message);
+                Toast.error('Δεν έγινε: ' + LessonImpactModal.esc(err.message));
             }
         });
 
@@ -210,7 +218,7 @@ const LessonImpactModal = {
                 await API.lessons.delete(lessonId, needsConfirm);
                 finish('Το μάθημα διαγράφηκε');
             } catch (err) {
-                Toast.error('Δεν έγινε: ' + err.message);
+                Toast.error('Δεν έγινε: ' + LessonImpactModal.esc(err.message));
             }
         });
     },

@@ -15,7 +15,7 @@ const SettingsView = {
                     </div>
                     <div class="form-group">
                         <label class="form-label">Όνομα Σχολείου / Φροντιστηρίου</label>
-                        <input class="form-input" id="s-name" value="${settings.school_name || ''}">
+                        <input class="form-input" id="s-name" value="${DataTable.esc(settings.school_name || '')}">
                     </div>
                     <div class="form-grid">
                         <div class="form-group">
@@ -27,7 +27,7 @@ const SettingsView = {
                         </div>
                         <div class="form-group">
                             <label class="form-label">Σχολικό Έτος</label>
-                            <input class="form-input" id="s-year" value="${settings.academic_year || ''}">
+                            <input class="form-input" id="s-year" value="${DataTable.esc(settings.academic_year || '')}">
                         </div>
                     </div>
                     <div class="form-group">
@@ -99,12 +99,12 @@ const SettingsView = {
                     Toast.success('Οι ρυθμίσεις αποθηκεύτηκαν');
                     document.getElementById('school-name').textContent = document.getElementById('s-name').value.trim();
                 } catch (err) {
-                    Toast.error(err.message);
+                    Toast.error(DataTable.esc(err.message));
                 }
             });
 
         } catch (err) {
-            container.innerHTML = `<p class="text-muted">Σφάλμα: ${err.message}</p>`;
+            container.innerHTML = `<p class="text-muted">Σφάλμα: ${DataTable.esc(err.message)}</p>`;
         }
     },
 
@@ -134,7 +134,7 @@ const SettingsView = {
                 </div>
             `).join('');
         } catch (err) {
-            listEl.innerHTML = `<p class="text-muted">Σφάλμα: ${err.message}</p>`;
+            listEl.innerHTML = `<p class="text-muted">Σφάλμα: ${DataTable.esc(err.message)}</p>`;
         }
     },
 
@@ -143,7 +143,7 @@ const SettingsView = {
         try {
             const preview = await API.settings.previewTemplate(key);
             if (preview.fatal_error) {
-                Toast.error(preview.fatal_error);
+                Toast.error(DataTable.esc(preview.fatal_error));
                 return;
             }
             const c = preview.will_create;
@@ -165,12 +165,12 @@ const SettingsView = {
 
             const result = await API.settings.applyTemplate(key);
             if (result.fatal_error) {
-                Toast.error(result.fatal_error);
+                Toast.error(DataTable.esc(result.fatal_error));
                 return;
             }
-            Toast.success(`✅ Δημιουργήθηκαν ${result.total_created} εγγραφές από το ${label}`);
+            Toast.success(`✅ Δημιουργήθηκαν ${result.total_created} εγγραφές από το ${DataTable.esc(label)}`);
         } catch (err) {
-            Toast.error(err.message);
+            Toast.error(DataTable.esc(err.message));
         }
     },
 };

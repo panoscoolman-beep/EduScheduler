@@ -66,7 +66,7 @@ const LessonRosterModal = {
             [data, all] = await Promise.all([API.lessons.students(lesson.id), API.students.list()]);
         } catch (err) {
             Modal.close();
-            Toast.error(err.message);
+            Toast.error(LessonRosterModal.esc(err.message));
             return;
         }
         let attending = LessonRosterModal.attendingIds(data.students);
@@ -107,7 +107,7 @@ const LessonRosterModal = {
                     { saveText: 'Ναι, αποθήκευση', saveClass: 'btn-warning' });
                 return;
             }
-            Toast.error(err.message);
+            Toast.error(LessonRosterModal.esc(err.message));
         }
     },
 };

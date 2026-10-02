@@ -71,7 +71,7 @@ const TimetableView = {
                 <div class="card mb-lg">
                     <img src="img/logo.svg" class="print-logo" style="display:none;" />
                     <div class="card-header print-hide">
-                        <h2 class="card-title">📋 ${solution.name}</h2>
+                        <h2 class="card-title">📋 ${this._esc(solution.name)}</h2>
                         <div>
                             <button class="btn btn-secondary" id="tt-undo" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" style="margin-right:0.25rem" disabled>↩ Αναίρεση</button>
                             <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.25rem" disabled>↪ Επανάληψη</button>
@@ -111,7 +111,7 @@ const TimetableView = {
                             <label class="form-label">Φίλτρο</label>
                             <select class="form-select" id="tt-filter">
                                 <option value="all">-- Προβολή Όλων --</option>
-                                ${classNames.map(n => `<option value="${n}">${n}</option>`).join('')}
+                                ${classNames.map(n => `<option value="${this._esc(n)}">${this._esc(n)}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-group" style="margin:0; min-width: 150px;">
@@ -228,14 +228,15 @@ const TimetableView = {
                         });
                         const result = await TimetableInteractions.pollSolve(started.solution_id, 120);
                         if (result.status === 'optimal' || result.status === 'feasible') {
-                            Toast.success(`✅ ${result.message}`);
+                            this._toastSolveResult(result.message, '✅ Η νέα έκδοση είναι έτοιμη.');
                             App._currentSolutionId = result.solution_id;
-                            await this.render(container);
+                            // Αν ο χρήστης έφυγε σε άλλη σελίδα, μην την αντικαταστήσεις.
+                            if (App._currentView === 'timetable') await this.render(container);
                         } else {
-                            Toast.error(result.message);
+                            Toast.error(this._esc(result.message));
                         }
                     } catch (err) {
-                        Toast.error(`Regenerate απέτυχε: ${err.message}`);
+                        Toast.error(`Regenerate απέτυχε: ${this._esc(err.message)}`);
                     }
                 }, { saveText: '🚀 Εκτέλεση', saveClass: 'btn-warning' });
             });
@@ -291,7 +292,7 @@ const TimetableView = {
                                 TimetableView.freeRoomsWindow(),
                             );
                         })
-                        .catch(err => Toast.error(`Αδύνατη η φόρτωση αιθουσών: ${err.message}`));
+                        .catch(err => Toast.error(`Αδύνατη η φόρτωση αιθουσών: ${this._esc(err.message)}`));
                     return;
                 }
                 if (viewType && viewType.startsWith('overview')) {
@@ -411,15 +412,22 @@ const TimetableView = {
                 }
             };
 
-            const performUndoRedo = async (op) => {
+            const performUndoRedo = async (op, skipBreak = false) => {
                 try {
                     const res = op === 'undo'
-                        ? await API.solver.undo(solutionId)
-                        : await API.solver.redo(solutionId);
-                    Toast.success(res.message);
+                        ? await API.solver.undo(solutionId, skipBreak)
+                        : await API.solver.redo(solutionId, skipBreak);
+                    Toast.success(this._esc(res.message) + this._skippedBreakNote(res));
                     await this.render(container);
                 } catch (err) {
-                    Toast.error(err.message);
+                    // Ώρα που έγινε «Διάλειμμα» / αίτημα με skip_break: βλ. _afterHistoryStepError.
+                    if (await this._afterHistoryStepError(err, op, skipBreak, container,
+                        () => performUndoRedo(op, true))) return;
+                    Toast.error(this._esc(err.message));
+                    // Και σε 409 (θέση πιασμένη / η ώρα δεν υπάρχει πια) ο server
+                    // μπορεί να σημάνει την εγγραφή ως «παραλείφθηκε» — άρα αλλάζουν
+                    // τα διαθέσιμα undo/redo· φρέσκαρε τα κουμπιά.
+                    await refreshHistoryButtons();
                 }
             };
 
@@ -437,10 +445,20 @@ const TimetableView = {
             redoBtn.addEventListener('click', () => performUndoRedo('redo'));
             this._historyKeyHandler = (e) => {
                 if (!(e.ctrlKey || e.metaKey)) return;
-                if (e.key === 'z' || e.key === 'Z') {
+                // Μόνο όσο φαίνεται ΑΥΤΟ το Ωρολόγιο, χωρίς ανοιχτό παράθυρο και
+                // όχι μέσα σε πεδίο κειμένου (εκεί το Ctrl+Z είναι αναίρεση
+                // πληκτρολόγησης). Πριν, ο listener έμενε ενεργός σε όλη την
+                // εφαρμογή και αναιρούσε σιωπηλά αλλαγές του προγράμματος.
+                if (!undoBtn.isConnected || App._currentView !== 'timetable') return;
+                if (document.getElementById('modal-overlay')?.classList.contains('active')) return;
+                const t = e.target;
+                if (t && ((t.closest && t.closest('input, textarea')) || t.isContentEditable)) return;
+                const isZ = e.key === 'z' || e.key === 'Z';
+                if (isZ && !e.shiftKey) {
                     e.preventDefault();
                     if (!undoBtn.disabled) performUndoRedo('undo');
-                } else if (e.key === 'y' || e.key === 'Y') {
+                } else if (isZ || e.key === 'y' || e.key === 'Y') {
+                    // Ctrl+Y ή Ctrl+Shift+Z (το συνηθισμένο «επανάληψη») — όχι αναίρεση.
                     e.preventDefault();
                     if (!redoBtn.disabled) performUndoRedo('redo');
                 }
@@ -458,7 +476,7 @@ const TimetableView = {
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">⚠️</div>
-                    <p class="empty-state-text">Σφάλμα: ${err.message}</p>
+                    <p class="empty-state-text">Σφάλμα: ${this._esc(err.message)}</p>
                 </div>
             `;
         }
@@ -484,6 +502,12 @@ const TimetableView = {
             search: '', fClass: '', fTeacher: '', fSubject: '',
         });
         const palette = TimetableHelpers.buildLessonPalette(allSlots, this._lessons || []);
+        // Φίλτρο χωρίς καμία κάρτα (π.χ. μετά από αλλαγή σεναρίου): το dropdown
+        // θα έδειχνε «Όλοι/Όλα» ενώ θα έκρυβε τα πάντα → καθάρισέ το.
+        const has = (key, value) => palette.entries.some(e => e[key] === value);
+        if (ui.fClass && !has('class_name', ui.fClass)) ui.fClass = '';
+        if (ui.fTeacher && !has('teacher_name', ui.fTeacher)) ui.fTeacher = '';
+        if (ui.fSubject && !has('subject_name', ui.fSubject)) ui.fSubject = '';
         container.innerHTML = TimetableHelpers.buildLessonPaletteHtml(palette, ui);
         if (!container.innerHTML.trim()) return;
 
@@ -586,7 +610,7 @@ const TimetableView = {
                 ? await API.solver.archiveSolution(solutionId)
                 : await API.solver.unarchiveSolution(solutionId);
             Modal.close();
-            Toast.success(res.message || 'Έγινε');
+            Toast.success(this._esc(res.message || 'Έγινε'));
             // Μετά την αρχειοθέτηση ανοίγει το νεότερο ενεργό πρόγραμμα.
             if (archived && App._currentSolutionId === solutionId) App._currentSolutionId = null;
             await this.render(container);
@@ -629,7 +653,7 @@ const TimetableView = {
                 await this.render(container);
                 this._offerBulkRestore(solutionId, res, container);
             } catch (err) {
-                Toast.error(err.message);
+                Toast.error(this._esc(err.message));
             }
         }, { saveText: '🅿️ Άδειασμα' });
         const kindSel = document.getElementById('bu-kind');
@@ -649,21 +673,37 @@ const TimetableView = {
     /** Μετά το άδειασμα: επαναφορά ΟΛΩΝ με ένα κλικ (αναστρέψιμη κι αυτή). */
     _offerBulkRestore(solutionId, res, container) {
         if (!res.first_entry_id) {
-            Toast.info(res.message);
+            Toast.info(this._esc(res.message));
             return;
         }
-        Modal.open('✅ Έγινε', `<p>${this._esc(res.message)}</p>
-            <p class="text-muted" style="font-size:0.85rem">Άλλαξες γνώμη; Επανέρχονται όλες ακριβώς όπου ήταν.</p>`,
-        async () => {
+        // Ίδιος χειρισμός με το «↩️ μέχρι εδώ» (και για ώρα που έγινε διάλειμμα).
+        const restore = async (skipBreak = false) => {
             try {
-                const back = await API.solver.undoTo(solutionId, res.first_entry_id);
-                Toast.success(back.message);
+                const back = await API.solver.undoTo(solutionId, res.first_entry_id, skipBreak);
+                Toast.success(this._esc(back.message) + this._skippedBreakNote(back));
                 Modal.close();
                 await this.render(container);
             } catch (err) {
-                Toast.error(err.message);
+                if (await this._afterHistoryStepError(err, 'undo', skipBreak, container,
+                    () => restore(true))) return;
+                Toast.error(this._esc(err.message));
             }
-        }, { saveText: '↩️ Επαναφορά όλων' });
+        };
+        Modal.open('✅ Έγινε', `<p>${this._esc(res.message)}</p>
+            <p class="text-muted" style="font-size:0.85rem">Άλλαξες γνώμη; Επανέρχονται όλες ακριβώς όπου ήταν.</p>`,
+        () => restore(), { saveText: '↩️ Επαναφορά όλων' });
+    },
+
+    /**
+     * Επιτυχία solver (Lock & Regenerate / Γέμισε τα κενά): το μήνυμα του server
+     * ως κείμενο, με τις γραμμές του. Με ⚠️ προειδοποιήσεις μένει περισσότερο
+     * στην οθόνη (κίτρινο), ώστε να προλαβαίνει να διαβαστεί. Χωρίς μήνυμα → fallback.
+     */
+    _toastSolveResult(message, fallback) {
+        if (!message) { Toast.success(fallback); return; }
+        const text = `✅ ${this._esc(message).replace(/\n/g, '<br>')}`;
+        if (String(message).includes('⚠️')) Toast.show(text, 'warning', 15000);
+        else Toast.success(text);
     },
 
     _openFillGaps(solutionId, solution, container) {
@@ -693,14 +733,18 @@ const TimetableView = {
                 });
                 const result = await TimetableInteractions.pollSolve(started.solution_id, 120);
                 if (result.status === 'optimal' || result.status === 'feasible') {
-                    Toast.success(`✅ Έτοιμο το «${name}» — σύγκρινέ το με το αρχικό.`);
+                    // Το μήνυμα του server (με ⚠️ προειδοποιήσεις, π.χ. κλειδωμένες ώρες
+                    // που συμπίπτουν, «Max/Εβδ.» στην Παλέτα)· αλλιώς το σταθερό κείμενο.
+                    this._toastSolveResult(result.message,
+                        `✅ Έτοιμο το «${this._esc(name)}» — σύγκρινέ το με το αρχικό.`);
                     App._currentSolutionId = result.solution_id;
-                    await this.render(container);
+                    // Αν ο χρήστης έφυγε σε άλλη σελίδα, μην την αντικαταστήσεις.
+                    if (App._currentView === 'timetable') await this.render(container);
                 } else {
-                    Toast.error(result.message);
+                    Toast.error(this._esc(result.message));
                 }
             } catch (err) {
-                Toast.error(`Δεν έγινε: ${err.message}`);
+                Toast.error(`Δεν έγινε: ${this._esc(err.message)}`);
             }
         }, { saveText: '🧩 Εκτέλεση' });
     },
@@ -714,7 +758,7 @@ const TimetableView = {
             report = await API.solver.gaps(solutionId);
         } catch (err) {
             Modal.close();
-            Toast.error(err.message);
+            Toast.error(this._esc(err.message));
             return;
         }
         const body = document.getElementById('modal-body');
@@ -756,16 +800,16 @@ const TimetableView = {
                 try {
                     await API.solver.updateSlot(solutionId, s.slot_id,
                         { day_of_week: s.day_of_week, period_id: s.period_id });
-                    Toast.success(`✅ ${s.lesson}: ${s.from} → ${s.to} (αναίρεση με Ctrl+Z)`);
+                    Toast.success(`✅ ${this._esc(s.lesson)}: ${this._esc(s.from)} → ${this._esc(s.to)} (αναίρεση με Ctrl+Z)`);
                     await this.render(container);
                     await this._openGaps(solutionId, container);
                 } catch (err) {
-                    Toast.error(err.message);
+                    Toast.error(this._esc(err.message));
                 }
             }));
         } catch (err) {
             box.innerHTML = '';
-            Toast.error(err.message);
+            Toast.error(this._esc(err.message));
         }
     },
 
@@ -783,22 +827,87 @@ const TimetableView = {
         try {
             history = await API.solver.history(solutionId);
         } catch (err) {
-            Toast.error(err.message);
+            Toast.error(this._esc(err.message));
             return;
         }
         const body = document.getElementById('modal-body');
         if (!body) return;
         body.innerHTML = TimetableHelpers.buildHistoryHtml(history);
-        body.querySelectorAll('.hist-undo-to').forEach(btn => btn.addEventListener('click', async () => {
+        const undoTo = async (entryId, skipBreak = false) => {
             try {
-                const res = await API.solver.undoTo(solutionId, Number(btn.dataset.id));
-                Toast.success(res.message);
+                const res = await API.solver.undoTo(solutionId, entryId, skipBreak);
+                Toast.success(this._esc(res.message) + this._skippedBreakNote(res));
                 Modal.close();
                 await this.render(container);
             } catch (err) {
-                Toast.error(err.message);
+                if (await this._afterHistoryStepError(err, 'undo', skipBreak, container,
+                    () => undoTo(entryId, true))) return;
+                Toast.error(this._esc(err.message));
             }
-        }));
+        };
+        body.querySelectorAll('.hist-undo-to').forEach(btn =>
+            btn.addEventListener('click', () => undoTo(Number(btn.dataset.id))));
+    },
+
+    /**
+     * Σφάλμα βήματος ιστορικού (↩/↪, «μέχρι εδώ», «Επαναφορά όλων»). true = το
+     * χειρίστηκε· false = ο καλών κάνει ό,τι έκανε πάντα.
+     *  - 409 break_hour → επιβεβαίωση → retry() με skip_break=true.
+     *  - Αίτημα ΜΕ skip_break: οι παραλείψεις έχουν ήδη γραφτεί → ΠΑΝΤΑ νέα σχεδίαση
+     *    (πλέγμα + ↩/↪)· 400 με skipped_break = «δεν έμεινε άλλη αλλαγή» → ενημέρωση.
+     */
+    async _afterHistoryStepError(err, op, skipBreak, container, retry) {
+        if (this._isBreakHour(err)) {
+            this._confirmSkipBreak(err, retry, op);
+            return true;
+        }
+        if (!skipBreak) return false;
+        const n = Number(err && err.body && err.body.skipped_break) || 0;
+        if (n > 0) Toast.warning(this._skippedNothingLeftText(n, op, err.message));
+        else Toast.error(this._esc(err.message));
+        await this.render(container);
+        return true;
+    },
+
+    /** «Παραλείφθηκαν N αλλαγές … — δεν υπάρχει άλλη αλλαγή προς αναίρεση/επανάληψη.» */
+    _skippedNothingLeftText(n, op, serverText) {
+        // Αν το γράφει ήδη ο server, μην το διπλασιάσεις.
+        if (/παραλείφθηκ/i.test(String(serverText || ''))) return this._esc(serverText);
+        const head = n === 1 ? 'Παραλείφθηκε 1 αλλαγή' : `Παραλείφθηκαν ${n} αλλαγές`;
+        return `${head} σε ώρα που έγινε διάλειμμα — δεν υπάρχει άλλη αλλαγή προς `
+            + `${op === 'redo' ? 'επανάληψη' : 'αναίρεση'}.`;
+    },
+
+    /** 409 «break_hour»: η αλλαγή αφορά ώρα που έγινε (και μένει) «Διάλειμμα». */
+    _isBreakHour(err) {
+        return Boolean(err && err.status === 409 && err.detail && typeof err.detail === 'object'
+            && err.detail.code === 'break_hour');
+    },
+
+    /**
+     * Επιβεβαίωση: παράλειψη των αλλαγών σε ώρα-διάλειμμα και συνέχεια με τις
+     * παλαιότερες (ο server τις προσπερνά με skip_break=true). «Άκυρο» = τίποτα.
+     */
+    _confirmSkipBreak(err, retry, op) {
+        // Η επανάληψη προχωρά στις ΕΠΟΜΕΝΕΣ αλλαγές· αναίρεση/«μέχρι εδώ» στις παλαιότερες.
+        const next = op === 'redo' ? 'επόμενες' : 'παλαιότερες';
+        Modal.open('⚠️ Αλλαγή σε ώρα που έγινε διάλειμμα',
+            `<p>${this._esc((err.detail && err.detail.message) || err.message)}</p>`,
+            async () => {
+                Modal.close();
+                await retry();
+            },
+            { saveText: `Παράλειψη και συνέχεια με τις ${next}`, saveClass: 'btn-warning', cancelText: 'Άκυρο' });
+    },
+
+    /** « (παραλείφθηκαν N αλλαγές σε ώρα που έγινε διάλειμμα)» όταν ο server παρέλειψε. */
+    _skippedBreakNote(res) {
+        const n = Number(res && res.skipped_break) || 0;
+        // Αν το γράφει ήδη το μήνυμα του server, μην το διπλασιάσεις.
+        if (n <= 0 || /παραλείφθηκ/i.test(String((res && res.message) || ''))) return '';
+        return n === 1
+            ? ' (παραλείφθηκε 1 αλλαγή σε ώρα που έγινε διάλειμμα)'
+            : ` (παραλείφθηκαν ${n} αλλαγές σε ώρα που έγινε διάλειμμα)`;
     },
 
     _openRenameSolution(solutionId) {
@@ -914,7 +1023,7 @@ const TimetableView = {
             Modal.open(title, html, () => Modal.close(),
                 { saveText: 'Κλείσιμο', saveClass: 'btn-secondary' });
         } catch (err) {
-            Toast.error('Αποτυχία αναζήτησης θέσης: ' + err.message);
+            Toast.error('Αποτυχία αναζήτησης θέσης: ' + this._esc(err.message));
         }
     },
 
@@ -942,8 +1051,8 @@ const TimetableView = {
             const dayName = TimetableGrid.DAY_NAMES[dayOfWeek] || '';
             const period = (ctx.periods || []).find(p => p.id === periodId);
             const room = (res && res.slot && res.slot.classroom_name)
-                ? ` — αίθουσα ${res.slot.classroom_name}` : '';
-            Toast.success(`Τοποθετήθηκε: ${dayName} ${period ? period.short_name : ''}${room}`);
+                ? ` — αίθουσα ${this._esc(res.slot.classroom_name)}` : '';
+            Toast.success(`Τοποθετήθηκε: ${dayName} ${period ? this._esc(period.short_name) : ''}${room}`);
             this.refreshPalette();
             if (this._rerenderGrid) this._rerenderGrid();
             if (this._refreshHistoryButtons) this._refreshHistoryButtons();
@@ -992,7 +1101,7 @@ const TimetableView = {
             if (this._rerenderGrid) this._rerenderGrid();
             this.refreshPalette();
         } catch (err) {
-            Toast.error('Η ανανέωση απέτυχε: ' + err.message);
+            Toast.error('Η ανανέωση απέτυχε: ' + this._esc(err.message));
         }
     },
 
@@ -1004,10 +1113,10 @@ const TimetableView = {
             const fresh = await API.solver.getSolution(ctx.solutionId);
             ctx.slots.length = 0;
             Array.prototype.push.apply(ctx.slots, fresh.slots);
-            Toast.success(res.message || 'Οι ώρες προστέθηκαν στην παλέτα');
+            Toast.success(this._esc(res.message || 'Οι ώρες προστέθηκαν στην παλέτα'));
             this.refreshPalette();
         } catch (err) {
-            Toast.error('Αποτυχία συμπλήρωσης ωρών: ' + err.message);
+            Toast.error('Αποτυχία συμπλήρωσης ωρών: ' + this._esc(err.message));
         }
     },
 
