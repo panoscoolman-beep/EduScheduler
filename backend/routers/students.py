@@ -105,7 +105,9 @@ def update_availability(student_id: int, data: StudentAvailabilityBulkUpdate, db
         raise HTTPException(status_code=404, detail="Student not found")
 
     from backend.models import StudentAvailability
+    from backend.routers.teachers import require_known_periods
 
+    require_known_periods(db, [a.period_id for a in data.availabilities])
     term_id = get_active_term_id(db)
 
     # Delete existing availability FOR THE ACTIVE SCENARIO ONLY

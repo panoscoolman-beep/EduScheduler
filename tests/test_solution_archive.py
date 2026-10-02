@@ -133,8 +133,12 @@ def test_archived_programme_stops_holding_palette_hours(client):
 
     after = lesson_impact(client.session, lesson.id)
     assert [r["solution_name"] for r in after["solutions"]] == ["ΧΕΙΜΕΡΙΝΟ"]
-    assert after["trim"]["blocked_reason"] == "no_placed_hours"    # → πρόταση διαγραφής
-    assert after["delete"]["requires_force"] is False              # καμία τοποθετημένη πια
+    assert after["trim"]["blocked_reason"] == "no_placed_hours"    # δεν «κρατά» πια ώρες
+    # …αλλά μια ΔΙΑΓΡΑΦΗ θα έσβηνε και τις 3 ώρες του αρχειοθετημένου (FK cascade):
+    # θέλει ρητή επιβεβαίωση και τις αναφέρει χωριστά (πριν: σιωπηλή απώλεια).
+    assert after["delete"]["requires_force"] is True
+    assert after["archived"] == {"placed": 3, "solutions": [
+        {"solution_id": old.id, "solution_name": "Παλιό 8/5", "placed": 3}]}
 
 
 def test_archived_programme_gets_no_new_slots_from_sync(client):

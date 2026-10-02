@@ -9,9 +9,16 @@
 πλήθος τοποθετημένων ωρών σε οποιοδήποτε πρόγραμμα του σεναρίου. Έτσι δεν
 χάνεται ποτέ ώρα που χρησιμοποιείται κάπου — και το sync_lesson_slot_count
 σβήνει έτσι κι αλλιώς μόνο μη τοποθετημένες ώρες.
+
+Αρχειοθετημένα προγράμματα: ΔΕΝ μετρούν στον πίνακα, στα σύνολα και στο
+καθάρισμα (δεν «κρατούν» ώρες — σκοπός της αρχειοθέτησης). Η ΔΙΑΓΡΑΦΗ όμως
+σβήνει (FK cascade) τις ώρες της κάρτας σε ΚΑΘΕ πρόγραμμα, και σε αυτά. Γι'
+αυτό η ενότητα `delete` μετρά όλα τα προγράμματα και το `archived` δείχνει
+χωριστά τι χάνεται από τα αρχειοθετημένα — ίδια επιβεβαίωση (`requires_force`).
 """
 from __future__ import annotations
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from backend.models import (
@@ -60,6 +67,44 @@ def _solution_rows(db: Session, lesson: Lesson) -> list[dict]:
     return rows
 
 
+def _delete_scope(db: Session, lesson: Lesson, shown_ids: set[int]) -> tuple[dict, dict]:
+    """(delete, archived): τι σβήνει η διαγραφή της κάρτας.
+
+    `delete` = ΟΛΕΣ οι τοποθετημένες ώρες της σε κάθε πρόγραμμα (ό,τι σβήνει
+    το FK cascade). `archived` = όσες από αυτές είναι σε προγράμματα εκτός
+    πίνακα (`shown_ids`) — στην πράξη τα αρχειοθετημένα — ανά πρόγραμμα."""
+    placed = {
+        sid: int(n)
+        for sid, n in db.query(TimetableSlot.solution_id, func.count(TimetableSlot.id))
+        .filter(TimetableSlot.lesson_id == lesson.id,
+                TimetableSlot.is_unplaced == False)  # noqa: E712
+        .group_by(TimetableSlot.solution_id)
+        .all()
+    }
+    hidden_ids = [sid for sid in placed if sid not in shown_ids]
+    archived_rows = []
+    if hidden_ids:
+        for sol in (db.query(TimetableSolution)
+                    .filter(TimetableSolution.id.in_(hidden_ids))
+                    .order_by(TimetableSolution.id.desc()).all()):
+            archived_rows.append({"solution_id": sol.id, "solution_name": sol.name,
+                                  "placed": placed[sol.id]})
+    total = sum(placed.values())
+    delete = {
+        "placed_total": total,
+        "solutions_with_placed": len(placed),
+        "requires_force": total > 0,
+    }
+    archived = {"placed": sum(r["placed"] for r in archived_rows), "solutions": archived_rows}
+    return delete, archived
+
+
+def archived_phrase(archived: dict) -> str:
+    """«2 σε αρχειοθετημένα προγράμματα («Παλιό» 2)» — για τα μηνύματα."""
+    names = ", ".join(f"«{r['solution_name']}» {r['placed']}" for r in archived["solutions"])
+    return f"{archived['placed']} σε αρχειοθετημένα προγράμματα ({names})"
+
+
 def _trim_plan(periods_per_week: int, max_placed: int, max_total: int | None = None) -> dict:
     """Μέχρι πού μπορούν να κοπούν οι ώρες χωρίς να χαθεί τοποθετημένη ώρα.
 
@@ -106,6 +151,7 @@ def lesson_impact(db: Session, lesson_id: int) -> dict | None:
         if lesson.class_id else 0
     )
     term = db.query(Term).filter(Term.id == lesson.term_id).first()
+    delete, archived = _delete_scope(db, lesson, {r["solution_id"] for r in rows})
 
     return {
         "lesson": {
@@ -127,23 +173,21 @@ def lesson_impact(db: Session, lesson_id: int) -> dict | None:
         },
         "trim": _trim_plan(int(lesson.periods_per_week), max_placed,
                            max([r["placed"] + r["unplaced"] for r in rows], default=0)),
-        "delete": {
-            "placed_total": placed_total,
-            "solutions_with_placed": sum(1 for r in rows if r["placed"]),
-            "requires_force": placed_total > 0,
-        },
+        "delete": delete,
+        "archived": archived,
     }
 
 
 # ─── μαζικό «🧹 Καθάρισμα Παλέτας» ────────────────────────────────────
 
 
-def _suggestion(trim: dict, placed_total: int) -> str:
+def _suggestion(trim: dict, placed_total: int, archived_placed: int = 0) -> str:
     """Ασφαλής πρόταση: 'trim' (σβήνει μόνο ώρες Παλέτας) | 'delete' (καμία
-    τοποθετημένη ώρα πουθενά) | 'keep' (οι ώρες χρειάζονται αλλού)."""
+    τοποθετημένη ώρα πουθενά — ούτε σε αρχειοθετημένο πρόγραμμα, που η
+    διαγραφή θα το άδειαζε σιωπηλά) | 'keep' (οι ώρες χρειάζονται αλλού)."""
     if trim["can_trim"]:
         return "trim"
-    return "delete" if placed_total == 0 else "keep"
+    return "delete" if placed_total == 0 and archived_placed == 0 else "keep"
 
 
 def palette_review(db: Session, term_id: int) -> dict:
@@ -168,6 +212,20 @@ def palette_review(db: Session, term_id: int) -> dict:
         ).filter(TimetableSlot.solution_id.in_(solution_ids)).all():
             pair = counts.setdefault(lesson_id, {}).setdefault(sol_id, [0, 0])
             pair[1 if unplaced else 0] += 1
+    # Τοποθετημένες ώρες σε προγράμματα ΕΚΤΟΣ ροής (αρχειοθετημένα): δεν
+    # «κρατούν» ώρες για το trim, αλλά μια διαγραφή θα τις έσβηνε.
+    archived: dict[int, dict[int, int]] = {}
+    lesson_ids = [lesson.id for lesson in lessons]
+    if lesson_ids:
+        hidden_q = db.query(TimetableSlot.lesson_id, TimetableSlot.solution_id).filter(
+            TimetableSlot.lesson_id.in_(lesson_ids),
+            TimetableSlot.is_unplaced == False,  # noqa: E712
+        )
+        if solution_ids:
+            hidden_q = hidden_q.filter(TimetableSlot.solution_id.notin_(solution_ids))
+        for lesson_id, sol_id in hidden_q.all():
+            per_sol = archived.setdefault(lesson_id, {})
+            per_sol[sol_id] = per_sol.get(sol_id, 0) + 1
     students: dict[int, int] = {}
     for (class_id,) in db.query(StudentClassEnrollment.class_id).all():
         students[class_id] = students.get(class_id, 0) + 1
@@ -182,6 +240,7 @@ def palette_review(db: Session, term_id: int) -> dict:
         max_placed = max((p for p, _ in per_solution.values()), default=0)
         max_total = max((p + u for p, u in per_solution.values()), default=0)
         trim = _trim_plan(int(lesson.periods_per_week), max_placed, max_total)
+        archived_placed = sum(archived.get(lesson.id, {}).values())
         items.append({
             "lesson_id": lesson.id,
             "subject_name": lesson.subject.name if lesson.subject else "",
@@ -191,9 +250,12 @@ def palette_review(db: Session, term_id: int) -> dict:
             "periods_per_week": int(lesson.periods_per_week),
             "placed_total": placed_total,
             "unplaced_total": unplaced,
-            "max_placed": max_placed,
+            # Αν τις ώρες τις «κρατά» ΜΟΝΟ αρχειοθετημένο πρόγραμμα, δείχνει τις
+            # δικές του (το «✋ Κράτα — N ώρες … σε άλλο πρόγραμμα» μένει αληθινό).
+            "max_placed": max_placed or max(archived.get(lesson.id, {}).values(), default=0),
+            "archived_placed": archived_placed,
             "trim": trim,
-            "suggestion": _suggestion(trim, placed_total),
+            "suggestion": _suggestion(trim, placed_total, archived_placed),
         })
     order = {"trim": 0, "delete": 1, "keep": 2}
     items.sort(key=lambda i: (order[i["suggestion"]], i["subject_name"], i["class_name"]))

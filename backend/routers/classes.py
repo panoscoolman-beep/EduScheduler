@@ -17,7 +17,7 @@ from backend.database import get_db
 from backend.services import lesson_roster
 from backend.services import archive as archive_svc
 from backend.services import delete_guards as guards
-from backend.models import SchoolClass, Student, StudentClassEnrollment
+from backend.models import Classroom, SchoolClass, Student, StudentClassEnrollment
 from backend.schemas import (
     SchoolClassCreate,
     SchoolClassResponse,
@@ -40,6 +40,13 @@ def _get_student_or_404(db: Session, student_id: int) -> Student:
     if not student:
         raise HTTPException(status_code=404, detail="Ο μαθητής δεν βρέθηκε")
     return student
+
+
+def _require_home_room(db: Session, home_room_id: int | None) -> None:
+    """Άγνωστη αίθουσα βάσης → 400 (πριν: IntegrityError → σκέτο 500)."""
+    if home_room_id is not None and not db.query(Classroom.id).filter(
+            Classroom.id == home_room_id).first():
+        raise HTTPException(status_code=400, detail="Η αίθουσα βάσης δεν βρέθηκε")
 
 
 def _require_students_exist(db: Session, student_ids: list[int]) -> list[int]:
@@ -127,6 +134,7 @@ def create_class(data: SchoolClassCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail=f"Υπάρχει ήδη τάξη με συντομογραφία '{data.short_name}'")
 
     # Έλεγχος μαθητών ΠΡΙΝ γραφτεί οτιδήποτε — άγνωστο id = 400, καθαρό DB.
+    _require_home_room(db, data.home_room_id)
     student_ids = _require_students_exist(db, data.student_ids)
     class_data = data.model_dump(exclude={"student_ids", "student_count"})
     school_class = SchoolClass(**class_data)
@@ -142,6 +150,11 @@ def create_class(data: SchoolClassCreate, db: Session = Depends(get_db)):
 @router.put("/{class_id}", response_model=SchoolClassResponse)
 def update_class(class_id: int, data: SchoolClassUpdate, db: Session = Depends(get_db)):
     school_class = _get_class_or_404(db, class_id)
+    # Ίδιος έλεγχος με το POST (πριν: IntegrityError → σκέτο 500).
+    if db.query(SchoolClass).filter(SchoolClass.short_name == data.short_name,
+                                    SchoolClass.id != class_id).first():
+        raise HTTPException(status_code=409, detail=f"Υπάρχει ήδη τάξη με συντομογραφία '{data.short_name}'")
+    _require_home_room(db, data.home_room_id)
 
     class_data = data.model_dump(exclude={"student_ids", "student_count"})
     for key, value in class_data.items():

@@ -10,12 +10,20 @@
 unit-testable χωρίς ζωντανό CRM. Το EDS backend φτάνει το CRM api μέσω του
 κοινού docker network `korifi-integration` (container name).
 
+Συνδέσεις του CRM (GET /api/eds-sync/students/links, fetch_crm_links()): ένας
+μαθητής του CRM που έχει «🔗 συνδεθεί» με μαθητή του EDS γραμμένο αλλιώς
+(Γεώργιος/Γιώργος) είναι «υπάρχει ήδη» — δεν ξαναφτιάχνεται. Fail-soft: παλιό
+CRM χωρίς το endpoint (404) ή οποιοδήποτε σφάλμα → αντιστοίχιση μόνο με όνομα,
+δηλαδή ακριβώς η παλιά συμπεριφορά.
+
 Env:
     KORIFI_API_BASE   default http://korifi-crm-v2-api-1:8000
     KORIFI_API_TOKEN  ο ίδιος bearer του CRM (fail-closed: χωρίς αυτό, unavailable)
 """
 from __future__ import annotations
 
+import logging
+import math
 import os
 import unicodedata
 from dataclasses import dataclass, field
@@ -26,6 +34,7 @@ from sqlalchemy.orm import Session
 from backend.models import Student
 
 DEFAULT_CRM_BASE = "http://korifi-crm-v2-api-1:8000"
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +51,19 @@ def _normalize_gr(s: str) -> str:
 
 def _name_key(first: str, last: str) -> str:
     return f"{_normalize_gr(first)} {_normalize_gr(last)}".strip()
+
+
+def _contact(value):
+    """email/τηλέφωνο από το CRM. Ένα bug του CRM (pandas NaN → κείμενο «nan»)
+    έγραφε «nan» σε κενά πεδία επικοινωνίας: «nan» (οποιαδήποτε κεφαλαία, με ή
+    χωρίς κενά γύρω) ή NaN αριθμός = ΚΕΝΟ. Μόνο ακριβές ταίριασμα — «Nancy»,
+    «banana», «nan2» μένουν ως έχουν· κάθε άλλη τιμή όπως πριν (`or None`).
+    Τα ονόματα δεν περνούν ποτέ από εδώ."""
+    if isinstance(value, str) and value.strip().lower() == "nan":
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value or None
 
 
 # ---------------------------------------------------------------------------
@@ -98,20 +120,36 @@ class PreviewResult:
 # Pure classification (no DB, no HTTP) — the testable core
 # ---------------------------------------------------------------------------
 
-def classify(crm_students: list[dict], eds_students: list) -> list[ImportRow]:
+def classify(crm_students: list[dict], eds_students: list,
+             links: Optional[dict] = None) -> list[ImportRow]:
     """Ταξινόμησε κάθε CRM μαθητή σε 'new' ή 'exists' (κατά κανονικοποιημένο
     ονοματεπώνυμο). Pure: δέχεται λίστες, δεν αγγίζει DB/δίκτυο.
 
     De-dup: αν το CRM στέλνει τον ίδιο μαθητή δύο φορές (π.χ. πολλαπλές
     εγγραφές τμημάτων), κρατιέται μία φορά.
+
+    `links` = {crm_id: eds_id} (συνδέσεις του CRM): μαθητής συνδεδεμένος με
+    μαθητή που ΥΠΑΡΧΕΙ εδώ είναι 'exists' με εκείνο το id, όποια κι αν είναι η
+    γραφή του ονόματος. Μπαίνουν πρώτοι, ώστε το de-dup κατά όνομα να κρατά
+    αυτούς και όχι έναν ασύνδετο συνονόματο. Σύνδεση προς μαθητή που δεν
+    υπάρχει πια εδώ αγνοείται (ισχύει το όνομα). Χωρίς links = η παλιά λογική.
     """
     existing = {}
     for s in eds_students:
         existing[_name_key(s.first_name, s.last_name)] = s.id
+    eds_ids = {s.id for s in eds_students}
+
+    def linked_id(cs: dict) -> Optional[int]:
+        try:
+            eds_id = (links or {}).get(int(cs.get("id")))
+        except (TypeError, ValueError):
+            return None
+        return eds_id if eds_id in eds_ids else None
 
     rows: list[ImportRow] = []
     seen: set[str] = set()
-    for cs in crm_students:
+    # sorted() είναι σταθερό: χωρίς συνδέσεις η σειρά (και το de-dup) μένει ίδια.
+    for cs in sorted(crm_students, key=lambda cs: linked_id(cs) is None):
         first = (cs.get("first_name") or "").strip()
         last = (cs.get("last_name") or "").strip()
         if not first or not last:
@@ -120,11 +158,13 @@ def classify(crm_students: list[dict], eds_students: list) -> list[ImportRow]:
         if key in seen:
             continue
         seen.add(key)
-        eds_id = existing.get(key)
+        eds_id = linked_id(cs)
+        if eds_id is None:
+            eds_id = existing.get(key)
         rows.append(ImportRow(
             first_name=first, last_name=last,
-            email=(cs.get("email") or None),
-            phone=(cs.get("phone") or None),
+            email=_contact(cs.get("email")),
+            phone=_contact(cs.get("phone")),
             crm_id=cs.get("id"),
             status="exists" if eds_id else "new",
             eds_student_id=eds_id,
@@ -172,6 +212,28 @@ def fetch_crm_students() -> tuple[list[dict], Optional[str]]:
         return [], f"Αδύνατη σύνδεση με το CRM: {e}"
 
 
+def fetch_crm_links() -> dict[int, int]:
+    """{crm_id: eds_id} — οι συνδέσεις μαθητών του CRM με μαθητές του EDS
+    (GET /api/eds-sync/students/links). ΠΟΤΕ δεν σηκώνει: παλιό CRM χωρίς το
+    endpoint (404), δίκτυο, απρόσμενη μορφή → {} = αντιστοίχιση μόνο με
+    όνομα, δηλαδή ακριβώς η συμπεριφορά πριν υπάρξει το endpoint."""
+    base, token = _crm_config()
+    if not token:
+        return {}
+    try:
+        import httpx
+
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(f"{base}/api/eds-sync/students/links",
+                              headers={"Authorization": f"Bearer {token}"})
+            resp.raise_for_status()
+            body = resp.json()
+        return {int(k): int(v) for k, v in body.items() if v is not None}
+    except Exception as exc:  # noqa: BLE001 — fail-soft
+        _log.warning("Συνδέσεις μαθητών από το CRM μη διαθέσιμες (μόνο κατά όνομα): %s", exc)
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Two-phase public API
 # ---------------------------------------------------------------------------
@@ -182,7 +244,7 @@ def preview(db: Session) -> PreviewResult:
     if err:
         return PreviewResult(available=False, fatal_error=err)
     eds_students = db.query(Student).all()
-    return PreviewResult(rows=classify(crm_students, eds_students))
+    return PreviewResult(rows=classify(crm_students, eds_students, fetch_crm_links()))
 
 
 def commit(students: list[dict], db: Session) -> dict:
@@ -204,8 +266,8 @@ def commit(students: list[dict], db: Session) -> dict:
                 continue
             existing.add(key)
             db.add(Student(first_name=first, last_name=last,
-                           email=(s.get("email") or None),
-                           phone=(s.get("phone") or None)))
+                           email=_contact(s.get("email")),
+                           phone=_contact(s.get("phone"))))
             created += 1
         db.commit()
         return {"status": "ok", "created": created, "skipped": skipped}

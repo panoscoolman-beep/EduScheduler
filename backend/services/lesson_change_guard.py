@@ -109,6 +109,8 @@ def change_conflicts(db: Session, lesson: Lesson, new_teacher_id: int, new_class
 def conflicts_message(conflicts: list[dict]) -> str:
     lines = "; ".join(f"{c['when']} ({c['solution']}): {c['reason']}" for c in conflicts[:5])
     more = f" και άλλες {len(conflicts) - 5}" if len(conflicts) > 5 else ""
+    # Χωρίς «αναιρείται από το 🕘 Ιστορικό»: η αλλαγή καθηγητή/τμήματος δεν
+    # γράφεται στο ιστορικό, οπότε η αναίρεση θα ξανάβαζε την ώρα στη θέση
+    # που συγκρούεται (πλέον απορρίπτεται με 409 — βλ. slot_history).
     return (f"Η αλλαγή συγκρούεται σε {len(conflicts)} τοποθετημένες ώρες — {lines}{more}. "
-            "Αν συνεχίσεις, αυτές οι ώρες πάνε στην Παλέτα για να τις ξανατοποθετήσεις "
-            "(αναιρείται από το 🕘 Ιστορικό).")
+            "Αν συνεχίσεις, αυτές οι ώρες πάνε στην Παλέτα για να τις ξανατοποθετήσεις.")

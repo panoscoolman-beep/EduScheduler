@@ -80,8 +80,9 @@ class PeriodResponse(PeriodBase):
 class TeacherBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, examples=["Γιάννης Νικολάου"])
     short_name: str = Field(..., min_length=1, max_length=20, examples=["ΓΝ"])
-    email: str | None = None
-    phone: str | None = None
+    # Όρια = στήλες της βάσης (πριν: 500 αντί για 422). Τηλέφωνο 100 όπως στο CRM.
+    email: str | None = Field(None, max_length=200)
+    phone: str | None = Field(None, max_length=100)
     max_periods_per_day: int | None = Field(None, ge=1, le=12)
     max_periods_per_week: int | None = Field(None, ge=1, le=60)
     max_days_per_week: int | None = Field(None, ge=1, le=7)
@@ -158,7 +159,7 @@ class SubjectBase(BaseModel):
     short_name: str = Field(..., min_length=1, max_length=20, examples=["ΜΑΘ"])
     color: str = Field("#8B5CF6", pattern=r"^#[0-9A-Fa-f]{6}$")
     requires_special_room: bool = False
-    special_room_type: str | None = None
+    special_room_type: str | None = Field(None, max_length=50)
 
 
 class SubjectCreate(SubjectBase):
@@ -177,8 +178,9 @@ class SubjectResponse(SubjectBase):
 class StudentBase(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
-    email: str | None = None
-    phone: str | None = None
+    # Όρια = στήλες της βάσης (πριν: 500 αντί για 422). Τηλέφωνο 100 όπως στο CRM.
+    email: str | None = Field(None, max_length=200)
+    phone: str | None = Field(None, max_length=100)
     grade: str | None = Field(None, max_length=60, examples=["Α΄ Λυκείου"])
     track: str | None = Field(None, max_length=120, examples=["Θετικών Σπουδών (Θετική)"])
     max_days_per_week: int | None = Field(None, ge=1, le=7)
@@ -240,7 +242,7 @@ class ClassroomBase(BaseModel):
     short_name: str = Field(..., min_length=1, max_length=20, examples=["Α1"])
     capacity: int = Field(30, ge=1, le=500)
     room_type: str = Field("regular", pattern=r"^(regular|lab|gym|computer_lab)$")
-    building: str | None = None
+    building: str | None = Field(None, max_length=100)
 
 
 class ClassroomCreate(ClassroomBase):
@@ -264,7 +266,7 @@ class LessonBase(BaseModel):
     classroom_id: int | None = None
     periods_per_week: int = Field(1, ge=1, le=20)
     duration: int = Field(1, ge=1, le=4)
-    distribution: str | None = Field(None, examples=["2,2,1"])
+    distribution: str | None = Field(None, max_length=50, examples=["2,2,1"])
     is_locked: bool = False
 
 
@@ -296,7 +298,7 @@ class ConstraintBase(BaseModel):
     weight: int = Field(50, ge=0, le=100)
     is_active: bool = True
     entity_id: int | None = None
-    entity_type: str | None = None
+    entity_type: str | None = Field(None, max_length=50)
 
 
 class ConstraintCreate(ConstraintBase):
@@ -471,7 +473,7 @@ _HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
 class SchoolSettingsBase(BaseModel):
     school_name: str = Field("Το Σχολείο μου", min_length=1, max_length=200)
     days_per_week: int = Field(5, ge=1, le=7)
-    academic_year: str | None = None
+    academic_year: str | None = Field(None, max_length=20)   # = VARCHAR(20) (πριν: 500)
     institution_type: str = Field("frontistirio", pattern=r"^(frontistirio|school)$")
     # Ωράριο λειτουργίας (μόνο εμφάνιση): «14:00» / «22:00»· κενό = όλες οι ώρες.
     visible_from: str | None = Field(None, pattern=_HHMM, examples=["14:00"])

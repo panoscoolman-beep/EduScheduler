@@ -7,9 +7,12 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import (
-    Period, TimetableSlot, TeacherAvailability, StudentAvailability,
+    Classroom, Period, Term, TimetableSlot, TimetableSolution, TeacherAvailability,
+    StudentAvailability,
 )
 from backend.schemas import PeriodCreate, PeriodResponse
+from backend.services import slot_history
+from backend.services.placement_conflicts import day_name
 
 router = APIRouter()
 
@@ -36,11 +39,103 @@ def create_period(data: PeriodCreate, db: Session = Depends(get_db)):
     return period
 
 
+BREAK_UNPLACE_REASON = "Η «{name}» έγινε διάλειμμα — ήταν {day} {name}, {room}{lock}"
+_REASON_MAX = TimetableSlot.__table__.c.unplaced_reason.type.length or 500
+
+
+def _break_reason(db: Session, period: Period, slot: TimetableSlot) -> str:
+    """Η αιτία στην κάρτα της Παλέτας κρατά ΚΑΙ την παλιά θέση: η εγγραφή του
+    ιστορικού μπορεί να χαθεί (μια νέα αλλαγή σβήνει τις παραλειμμένες)."""
+    room = db.query(Classroom).filter(Classroom.id == slot.classroom_id).first()
+    reason = BREAK_UNPLACE_REASON.format(
+        name=period.name, day=day_name(slot.day_of_week), room=room.name if room else "—",
+        lock=", 🔒" if slot.is_locked else "")
+    return reason if len(reason) <= _REASON_MAX else reason[:_REASON_MAX - 1] + "…"
+
+
+def _break_usage(db: Session, period_id: int) -> tuple[list, list[dict]]:
+    """Τοποθετημένες ώρες στην `period_id` σε ΟΛΑ τα προγράμματα/σενάρια:
+    ([(slot, archived)], [ανά πρόγραμμα: όνομα, σενάριο, αρχειοθετημένο, πλήθος])."""
+    rows = (
+        db.query(TimetableSlot, TimetableSolution, Term)
+        .join(TimetableSolution, TimetableSolution.id == TimetableSlot.solution_id)
+        .outerjoin(Term, Term.id == TimetableSolution.term_id)
+        .filter(TimetableSlot.period_id == period_id,
+                TimetableSlot.is_unplaced == False)  # noqa: E712
+        .order_by(TimetableSolution.id, TimetableSlot.id)
+        .all()
+    )
+    programmes: dict[int, dict] = {}
+    for _slot, sol, term in rows:
+        item = programmes.setdefault(sol.id, {
+            "solution_id": sol.id, "solution_name": sol.name,
+            "term_id": sol.term_id, "term_name": term.name if term else "",
+            "archived": sol.archived_at is not None, "slots": 0,
+        })
+        item["slots"] += 1
+    return [(slot, sol.archived_at is not None) for slot, sol, _term in rows], list(programmes.values())
+
+
+def _break_message(period: Period, slots: int, programmes: list[dict]) -> str:
+    listing = ", ".join(
+        f"«{p['solution_name']}» (σενάριο «{p['term_name']}»"
+        + (", αρχειοθετημένο" if p["archived"] else "") + f"): {p['slots']}"
+        for p in programmes)
+    active = sum(p["slots"] for p in programmes if not p["archived"])
+    archived = slots - active
+    text = (f"Η ώρα «{period.name}» έχει {slots} τοποθετημένα μαθήματα σε "
+            f"{len(programmes)} πρόγραμμα(τα): {listing}.")
+    if active:
+        text += (f" Ως διάλειμμα θα χάνονταν από το πρόγραμμα και τις εκτυπώσεις: αν συνεχίσεις, "
+                 f"οι {active} ώρες των ενεργών προγραμμάτων πάνε στην Παλέτα και η παλιά τους "
+                 "θέση (μέρα, ώρα, αίθουσα, 🔒) μένει στο 🕘 Ιστορικό και στην κάρτα — αν την "
+                 "ξανακάνεις διδακτική ώρα, επανέρχονται με «↩️ Αναίρεση». Οι εκκρεμείς "
+                 "«Επαναλήψεις» (↪) αυτών των προγραμμάτων χάνονται.")
+    if archived:
+        text += (f" Τα αρχειοθετημένα προγράμματα ΔΕΝ αλλάζουν: όσο η ώρα είναι διάλειμμα οι "
+                 f"{archived} ώρες τους απλώς δεν φαίνονται και ξαναεμφανίζονται μόλις ξαναγίνει "
+                 "διδακτική.")
+    return text
+
+
 @router.put("/{period_id}", response_model=PeriodResponse)
-def update_period(period_id: int, data: PeriodCreate, db: Session = Depends(get_db)):
+def update_period(
+    period_id: int,
+    data: PeriodCreate,
+    force: bool = Query(False, description="Confirm: active programmes' lessons go to the palette"),
+    db: Session = Depends(get_db),
+):
+    """Αλλαγή ώρας. Αν μια ώρα με τοποθετημένα μαθήματα γίνεται «Διάλειμμα»,
+    αυτά θα εξαφανίζονταν από πλέγμα/εκτυπώσεις (μένοντας όμως στο .ics και
+    στις δημοσιεύσεις). Χωρίς `?force=true` → 409 + πλήθη ανά πρόγραμμα. Με
+    force: οι ώρες των ΕΝΕΡΓΩΝ προγραμμάτων (όλων των σεναρίων) πάνε στην Παλέτα
+    γραμμένες στο 🕘 ιστορικό (ίδια διαδρομή με το χειροκίνητο «στην Παλέτα»),
+    ώστε να επανέλθουν με αναίρεση αν η ώρα ξαναγίνει διδακτική· τα
+    ΑΡΧΕΙΟΘΕΤΗΜΕΝΑ δεν αγγίζονται ποτέ (απλώς κρύβονται όσο είναι διάλειμμα,
+    όπως πάντα). Δεν χάνεται καμία ώρα ούτε η παλιά της θέση."""
     period = db.query(Period).filter(Period.id == period_id).first()
     if not period:
         raise HTTPException(status_code=404, detail="Η ώρα δεν βρέθηκε")
+    if data.is_break and not period.is_break:
+        placed, programmes = _break_usage(db, period_id)
+        if placed and not force:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "period_in_use",
+                    "requires_force": True,
+                    "message": _break_message(period, len(placed), programmes),
+                    "slots": len(placed),
+                    "solutions": len(programmes),
+                    "programmes": programmes,
+                },
+            )
+        for slot, archived in placed:
+            if not archived:
+                # Ίδια διαδρομή με το χειροκίνητο «στην Παλέτα»: εγγραφή 'unplace'
+                # με την παλιά θέση + 🔒 (το «↩️» τα επαναφέρει μαζί).
+                slot_history.unplace_placed_slot(db, slot, _break_reason(db, period, slot),
+                                                 unlock=True)
     for key, value in data.model_dump().items():
         setattr(period, key, value)
     db.commit()

@@ -8,6 +8,10 @@ fall outside the period range are dropped (availability) or unplaced (slots).
 
 A uniform shift preserves the relative structure, so a previously conflict-free
 program stays conflict-free at the new hours (only out-of-range slots drop out).
+
+Το 🕘 ιστορικό αλλαγών (undo/redo) των προγραμμάτων μετατοπίζεται ΜΑΖΙ με τα
+slots, με τον ίδιο χάρτη και στην ίδια συναλλαγή (slot_history.remap_periods)·
+αλλιώς ένα Ctrl+Z έβαζε την κάρτα στην ώρα ΠΡΙΝ τη μετατόπιση.
 """
 from sqlalchemy.orm import Session
 
@@ -15,6 +19,7 @@ from backend.models import (
     Period, TeacherAvailability, StudentAvailability,
     TimetableSolution, TimetableSlot,
 )
+from backend.services import slot_history
 
 
 def _build_period_map(db: Session, offset: int):
@@ -47,7 +52,7 @@ def shift_term_times(db: Session, term_id: int, offset: int, shift_solutions: bo
             "θα έβγαζε ΟΛΕΣ τις ώρες του σεναρίου εκτός εύρους — καμία αλλαγή."
         )
     res = {"availability_moved": 0, "availability_dropped": 0,
-           "slots_moved": 0, "slots_unplaced": 0}
+           "slots_moved": 0, "slots_unplaced": 0, "history_remapped": 0}
 
     # ── Availability: snapshot → delete → re-insert shifted (avoids unique clashes)
     for model, fk in ((TeacherAvailability, "teacher_id"), (StudentAvailability, "student_id")):
@@ -93,5 +98,7 @@ def shift_term_times(db: Session, term_id: int, offset: int, shift_solutions: bo
                 else:
                     s.period_id = np
                     res["slots_moved"] += 1
+            # Το ιστορικό ακολουθεί τα slots (ίδιος χάρτης, ίδια συναλλαγή).
+            res["history_remapped"] = slot_history.remap_periods(db, sol_ids, target)
 
     return res

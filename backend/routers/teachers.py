@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.services import archive as archive_svc
 from backend.services import delete_guards as guards
-from backend.models import Teacher, TeacherAvailability
+from backend.models import Period, Teacher, TeacherAvailability
 from backend.schemas import (
     TeacherCreate,
     TeacherResponse,
@@ -18,6 +18,18 @@ from backend.schemas import (
 from backend.services.term_context import get_active_term_id
 
 router = APIRouter()
+
+
+def require_known_periods(db: Session, period_ids: list[int]) -> None:
+    """Άγνωστη ώρα στη διαθεσιμότητα → 400 (πριν: IntegrityError → 500)."""
+    wanted = set(period_ids)
+    if not wanted:
+        return
+    found = {pid for (pid,) in db.query(Period.id).filter(Period.id.in_(wanted)).all()}
+    missing = sorted(wanted - found)
+    if missing:
+        raise HTTPException(status_code=400,
+                            detail=f"Άγνωστες ώρες: {', '.join(str(m) for m in missing)}")
 
 
 @router.get("/", response_model=list[TeacherResponse])
@@ -66,6 +78,10 @@ def update_teacher(teacher_id: int, data: TeacherCreate, db: Session = Depends(g
     teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Ο καθηγητής δεν βρέθηκε")
+    # Ίδιος έλεγχος με το POST (πριν: IntegrityError → σκέτο 500).
+    if db.query(Teacher).filter(Teacher.short_name == data.short_name,
+                                Teacher.id != teacher_id).first():
+        raise HTTPException(status_code=409, detail=f"Υπάρχει ήδη καθηγητής με συντομογραφία '{data.short_name}'")
     for key, value in data.model_dump().items():
         setattr(teacher, key, value)
     db.commit()
@@ -111,6 +127,7 @@ def update_availability(teacher_id: int, data: TeacherAvailabilityBulkUpdate, db
     if not teacher:
         raise HTTPException(status_code=404, detail="Ο καθηγητής δεν βρέθηκε")
 
+    require_known_periods(db, [a.period_id for a in data.availabilities])
     term_id = get_active_term_id(db)
 
     # Delete existing availability FOR THE ACTIVE SCENARIO ONLY

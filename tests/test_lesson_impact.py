@@ -271,3 +271,59 @@ def test_surplus_palette_hours_above_the_weekly_hours_are_removable(client):
     res = client.post(f"/api/lessons/{lesson.id}/trim-unplaced").json()
     assert res["periods_per_week"] == 1 and res["removed"] == 1
     assert _counts(client, sol.id, lesson.id) == (1, 0)            # η τοποθετημένη έμεινε
+
+
+# ─── Αρχειοθετημένα προγράμματα: η διαγραφή θα τα άδειαζε (G3-04 / G2-09) ──────
+
+
+@pytest.fixture()
+def archived_env(client):
+    """Οι 2 ώρες του μαθήματος είναι τοποθετημένες ΜΟΝΟ σε αρχειοθετημένο
+    πρόγραμμα· στο τρέχον περιμένουν στην Παλέτα."""
+    import datetime as _dt
+
+    lesson = _lesson(client, ppw=2)
+    live = _solution(client, "ΧΕΙΜΕΡΙΝΟ")
+    old = _solution(client, "Παλιό")
+    old.archived_at = _dt.datetime(2026, 9, 20)
+    client.session.commit()
+    _slots(client, old, lesson, placed=2)
+    _slots(client, live, lesson, unplaced=2)
+    return client, lesson, live, old
+
+
+def test_impact_reports_hours_of_archived_programmes_and_requires_force(archived_env):
+    c, lesson, live, old = archived_env
+    body = c.get(f"/api/lessons/{lesson.id}/impact").json()
+    assert [r["solution_name"] for r in body["solutions"]] == ["ΧΕΙΜΕΡΙΝΟ"]   # πίνακας: όπως πριν
+    assert body["totals"]["placed"] == 0 and body["trim"]["blocked_reason"] == "no_placed_hours"
+    assert body["delete"] == {"placed_total": 2, "solutions_with_placed": 1, "requires_force": True}
+    assert body["archived"] == {"placed": 2, "solutions": [
+        {"solution_id": old.id, "solution_name": "Παλιό", "placed": 2}]}
+
+
+def test_delete_with_hours_only_in_an_archived_programme_needs_force(archived_env):
+    c, lesson, live, old = archived_env
+    res = c.delete(f"/api/lessons/{lesson.id}")
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["requires_force"] is True and "«Παλιό» 2" in detail["message"]
+    assert _counts(c, old.id, lesson.id) == (2, 0)                     # τίποτα δεν σβήστηκε
+    assert c.delete(f"/api/lessons/{lesson.id}?force=true").status_code == 204
+    assert _counts(c, old.id, lesson.id) == (0, 0)
+
+
+def test_palette_cleanup_never_deletes_hours_of_archived_programmes(archived_env):
+    c, lesson, live, old = archived_env
+    review = c.get("/api/lessons/palette-review?term_id=1").json()
+    item = next(i for i in review["items"] if i["lesson_id"] == lesson.id)
+    assert item["suggestion"] == "keep" and item["archived_placed"] == 2
+    assert item["max_placed"] == 2                 # «✋ Κράτα — 2 ώρες … σε άλλο πρόγραμμα»
+    assert review["totals"]["deletable"] == 0
+
+    res = c.post("/api/lessons/palette-cleanup", json={"delete_ids": [lesson.id]}).json()
+    assert res["deleted"] == 0
+    assert "αρχειοθετημένα" in res["skipped"][0]["reason"]
+    assert "ΔΕΝ διαγράφηκαν" in res["message"]
+    assert _counts(c, old.id, lesson.id) == (2, 0)
+    assert c.session.query(Lesson).filter(Lesson.id == lesson.id).first() is not None
