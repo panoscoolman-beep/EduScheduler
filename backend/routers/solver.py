@@ -5,6 +5,7 @@ Solver API — Generate timetables and check status.
 import json
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
@@ -228,6 +229,17 @@ def solver_status(solution_id: int, db: Session = Depends(get_db)):
         message = f"Ολοκληρώθηκε ({solution.status}) — {placed} μαθήματα τοποθετήθηκαν."
         if unplaced:
             message += f" {unplaced} στο parking lot."
+        # Ό,τι πρέπει να ξέρει ο χρήστης για τη λύση (σκληρός κανόνας που
+        # εφαρμόστηκε ως μαλακός, κλειδωμένες ώρες που ήδη συμπίπτουν, «Max/Εβδ.»).
+        try:
+            meta = json.loads(solution.metadata_json or "{}")
+        except ValueError:
+            meta = {}
+        warnings = (meta.get("warnings") if isinstance(meta, dict) else None) or []
+        if warnings:
+            message += "\n⚠️ " + "\n⚠️ ".join(str(w) for w in warnings[:3])
+            if len(warnings) > 3:
+                message += f"\n…και {len(warnings) - 3} ακόμη."
     else:
         meta = {}
         try:
@@ -296,6 +308,9 @@ def regenerate_with_locks(
             "day_of_week": s.day_of_week,
             "period_id": s.period_id,
             "classroom_id": s.classroom_id,
+            # Σταθερή για τον solver, αλλά στο νέο πρόγραμμα κρατά τη ΔΙΚΗ της
+            # σήμανση 🔒 (στο «Γέμισε τα κενά» δεν κλειδώνουν όλες).
+            "is_locked": bool(s.is_locked),
         }
         for s in locked_slots
     ]
@@ -546,7 +561,20 @@ def update_solution_slot(
     if not slot:
         raise HTTPException(status_code=404, detail="Το slot δεν βρέθηκε")
 
-    target_room = resolve_and_validate_target_room(db, slot, data)
+    # 🔓 Σκέτο ξεκλείδωμα (ίδιο κελί, ίδια αίθουσα): δεν μετακινεί τίποτα, άρα
+    # δεν ξαναελέγχεται η θέση. Αλλιώς μια κλειδωμένη κάρτα που το κελί της
+    # «χάλασε» αργότερα (νέο κώλυμα, εγγραφή μαθητή…) δεν ξεκλείδωνε ποτέ —
+    # ούτε μετακινούνταν ούτε έβγαινε στην Παλέτα. Κλείδωμα και κάθε
+    # μετακίνηση περνούν πάντα τον πλήρη έλεγχο.
+    pure_unlock = (
+        slot.is_locked and data.is_locked is False and not slot.is_unplaced
+        and data.day_of_week == slot.day_of_week and data.period_id == slot.period_id
+        and data.classroom_id in (None, slot.classroom_id)
+    )
+    if pure_unlock:
+        target_room = slot.classroom_id
+    else:
+        target_room = resolve_and_validate_target_room(db, slot, data)
 
     prev_state = {
         "day_of_week": slot.day_of_week,
@@ -875,52 +903,59 @@ def sync_solution_lesson_slots(
     }
 
 
+def _history_step_response(db: Session, solution_id: int, result, skip_break: bool,
+                           done_message: str, nothing_message: str):
+    """Κοινή απάντηση undo/redo. `skipped_break` = πόσες αλλαγές σε ώρα που είναι
+    τώρα διάλειμμα παραλείφθηκαν με ρητή επιβεβαίωση (`?skip_break=true`)."""
+    if not result.entry:
+        if not skip_break:
+            raise HTTPException(status_code=400, detail=nothing_message)
+        db.commit()  # οι επιβεβαιωμένες παραλείψεις κρατιούνται
+        return JSONResponse(status_code=400, content={
+            "detail": nothing_message, "skipped_break": result.skipped_break})
+    db.commit()
+    message = done_message
+    if result.skipped_break:
+        message += f" (παραλείφθηκαν {result.skipped_break} αλλαγές σε ώρες-διαλείμματα)"
+    return {
+        "status": "ok",
+        "message": message,
+        "slot_id": result.entry.slot_id,
+        "history": slot_history_svc.history_summary(db, solution_id),
+        "skipped_break": result.skipped_break,
+    }
+
+
 @router.post("/solutions/{solution_id}/undo")
-def undo_last_edit(solution_id: int, db: Session = Depends(get_db)):
-    """Roll back the most recent manual edit to this solution."""
+def undo_last_edit(solution_id: int, skip_break: bool = False, db: Session = Depends(get_db)):
+    """Roll back the most recent manual edit to this solution.
+
+    Αλλαγή που θα έβαζε κάρτα σε ώρα που είναι τώρα διάλειμμα → 409
+    `break_hour`· με `?skip_break=true` παραλείπεται και αναιρείται η επόμενη
+    εφαρμόσιμη (βλ. slot_history)."""
     solution = (
         db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
     )
     if not solution:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
 
-    entry = slot_history_svc.undo(db, solution_id)
-    if not entry:
-        raise HTTPException(
-            status_code=400, detail="Δεν υπάρχει αλλαγή προς αναίρεση"
-        )
-    db.commit()
-    summary = slot_history_svc.history_summary(db, solution_id)
-    return {
-        "status": "ok",
-        "message": "Η αλλαγή αναιρέθηκε",
-        "slot_id": entry.slot_id,
-        "history": summary,
-    }
+    result = slot_history_svc.undo_step(db, solution_id, skip_break=skip_break)
+    return _history_step_response(db, solution_id, result, skip_break,
+                                  "Η αλλαγή αναιρέθηκε", "Δεν υπάρχει αλλαγή προς αναίρεση")
 
 
 @router.post("/solutions/{solution_id}/redo")
-def redo_last_undo(solution_id: int, db: Session = Depends(get_db)):
-    """Re-apply the most recent undone edit."""
+def redo_last_undo(solution_id: int, skip_break: bool = False, db: Session = Depends(get_db)):
+    """Re-apply the most recent undone edit (`?skip_break=true`: όπως στο undo)."""
     solution = (
         db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
     )
     if not solution:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
 
-    entry = slot_history_svc.redo(db, solution_id)
-    if not entry:
-        raise HTTPException(
-            status_code=400, detail="Δεν υπάρχει αλλαγή προς επανάληψη"
-        )
-    db.commit()
-    summary = slot_history_svc.history_summary(db, solution_id)
-    return {
-        "status": "ok",
-        "message": "Η αλλαγή επαναλήφθηκε",
-        "slot_id": entry.slot_id,
-        "history": summary,
-    }
+    result = slot_history_svc.redo_step(db, solution_id, skip_break=skip_break)
+    return _history_step_response(db, solution_id, result, skip_break,
+                                  "Η αλλαγή επαναλήφθηκε", "Δεν υπάρχει αλλαγή προς επανάληψη")
 
 
 @router.get("/solutions/{solution_id}/history")
@@ -931,13 +966,19 @@ def get_history(solution_id: int, limit: int = 20, db: Session = Depends(get_db)
 
 
 @router.post("/solutions/{solution_id}/history/undo-to/{entry_id}")
-def undo_to_entry(solution_id: int, entry_id: int, db: Session = Depends(get_db)):
+def undo_to_entry(solution_id: int, entry_id: int, skip_break: bool = False,
+                  db: Session = Depends(get_db)):
     """Αναίρεση μιας αλλαγής ΚΑΙ όλων των νεότερων — όλες ή καμία.
-    Αναστρέψιμο με «↪ Επανάληψη»."""
+    Αναστρέψιμο με «↪ Επανάληψη». Ώρα-διάλειμμα στη διαδρομή → 409 `break_hour`·
+    με `?skip_break=true` οι αλλαγές αυτές παραλείπονται και συνεχίζει ως εκεί."""
     _get_solution_or_404_local(db, solution_id)
     try:
-        count = slot_history_svc.undo_to(db, solution_id, entry_id)
+        count, skipped = slot_history_svc.undo_to_counts(
+            db, solution_id, entry_id, skip_break=skip_break)
         db.commit()
+    except slot_history_svc.BreakHourConflict:
+        db.rollback()
+        raise
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc))
@@ -945,10 +986,14 @@ def undo_to_entry(solution_id: int, entry_id: int, db: Session = Depends(get_db)
         db.rollback()
         raise HTTPException(status_code=409,
                             detail="Η αναίρεση δεν μπορεί να γίνει — κάτι άλλαξε στο μεταξύ. Τίποτα δεν πειράχτηκε.")
+    message = f"Αναιρέθηκαν {count} αλλαγές — ξαναγίνονται με «↪ Επανάληψη»."
+    if skipped:
+        message += f" Παραλείφθηκαν {skipped} αλλαγές σε ώρες-διαλείμματα."
     return {
         "status": "ok", "undone": count,
-        "message": f"Αναιρέθηκαν {count} αλλαγές — ξαναγίνονται με «↪ Επανάληψη».",
+        "message": message,
         "history": slot_history_svc.history_summary(db, solution_id),
+        "skipped_break": skipped,
     }
 
 

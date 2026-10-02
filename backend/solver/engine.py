@@ -7,6 +7,7 @@ and solves it to produce an optimal timetable.
 
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass, field
 
 from ortools.sat.python import cp_model
@@ -19,7 +20,9 @@ from backend.models import (
     StudentClassEnrollment, StudentAvailability
 )
 from backend.services import lesson_roster
+from backend.services import placement_conflicts as pc
 from backend.services.operating_hours import closed_cells
+from backend.solver.hard_rules import parse_constraints, phrase as rules_phrase
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,11 @@ class TimetableSolver:
     # the solver always prefers placing whenever feasible. Tuned to be
     # an order of magnitude larger than typical soft-constraint weights.
     UNPLACED_PENALTY: int = 100_000
+
+    # Δύο blocks της ίδιας κάρτας (π.χ. «2×2ωρα») την ίδια μέρα: ισχυρή ποινή,
+    # πάνω από ό,τι κερδίζουν μαζί οι μαλακοί κανόνες (βάρη ≤100 ανά μονάδα)
+    # αλλά πολύ κάτω από το UNPLACED_PENALTY — μένει προτίμηση, ποτέ αδύνατο.
+    SAME_DAY_BLOCKS_PENALTY: int = 500
 
     def __init__(self, db: Session, max_time_seconds: int = 120,
                  mode: str = "strict",
@@ -118,6 +126,24 @@ class TimetableSolver:
         self._locked_student_days: dict[int, set[int]] = {}
         self._student_unavailable: set[tuple[int, int, int]] = set() # (student_id, day, period_id)
         self._teaching_period_ids: list[int] = []
+        # Σκληροί κανόνες χρήστη (βλ. hard_rules.py) + προειδοποιήσεις προς τον χρήστη.
+        self._hard_rules: list = []
+        self._hard_as_soft: set[int] = set()   # id() σκληρών γραμμών που εφαρμόζονται ως μαλακές
+        self._warnings: list[str] = []
+        # Κλειδωμένα κελιά (lesson, day, period, room) που γίνονται x == 1.
+        self._forced_keys: set[tuple[int, int, int, int]] = set()
+        # Κλειδωμένες ώρες που ΗΔΗ συγκρούονται μεταξύ τους (κρατιούνται όπως ήταν).
+        self._kept_overlaps: list[tuple] = []
+        # «Max/Εβδ.» καθηγητή που δεσμεύει: teacher_id -> (ώρες καρτών, «Max/Εβδ.», όριο
+        # στο μοντέλο = max(Max/Εβδ., κλειδωμένες ώρες του)).
+        self._weekly_cap_binding: dict[int, tuple[int, int, int]] = {}
+        # Μερικώς κλειδωμένη κάρτα με blocks (π.χ. «2,2» με το ένα δίωρο κλειδωμένο):
+        # οι κλειδωμένες ώρες «καρφώνονται» και τα blocks που λείπουν κρατούν το μήκος τους.
+        self._locked_pins: dict[int, list[tuple[int, int, int]]] = {}
+        self._locked_remainder: dict[int, list[int]] = {}
+        self._locked_runs_per_day: dict[int, Counter] = {}
+        # lesson_id -> ({day: [start vars]}, πλήθος μη κλειδωμένων blocks) — βλ. _apply_block_day_spread
+        self._block_starts_by_day: dict[int, tuple[dict[int, list], int]] = {}
 
     def solve(self) -> SolverResult:
         """Run the full solve pipeline."""
@@ -131,9 +157,12 @@ class TimetableSolver:
             self._index_locked()
             self._create_variables()
             self._apply_hard_constraints()
+            self._apply_hard_user_rules()
+            self._apply_teacher_weekly_max()
             self._apply_locked_assignments()
             self._apply_warm_start_hints()
             self._apply_soft_constraints()
+            self._apply_block_day_spread()
 
             # Objective: minimize total penalty
             if self.penalties:
@@ -178,6 +207,11 @@ class TimetableSolver:
         self.student_availabilities = sa_q.all()
         self.enrollments = self.db.query(StudentClassEnrollment).all()
         self.constraints = self.db.query(Constraint).filter(Constraint.is_active == True).all()
+        # «Σκληροί» κανόνες χρήστη: μέχρι τώρα αγνοούνταν εντελώς.
+        parsed = parse_constraints(self.constraints)
+        self._hard_rules = parsed.hard_rules
+        self._hard_as_soft = {id(c) for c in parsed.as_soft}
+        self._warnings.extend(parsed.warnings)
 
         settings = self.db.query(SchoolSettings).first()
         self.days_per_week = settings.days_per_week if settings else 5
@@ -327,6 +361,81 @@ class TimetableSolver:
             self._locked_teacher_days.setdefault(lesson.teacher_id, set()).add(day)
             for sid in roster.get(lesson.id, ()):
                 self._locked_student_days.setdefault(sid, set()).add(day)
+        self._match_locked_to_blocks(lesson_by_id)
+
+    @staticmethod
+    def _declared_blocks(lesson: Lesson) -> list[int] | None:
+        """Η «Κατανομή» της κάρτας αν είναι έγκυρη (άθροισμα = ώρες/εβδ.), αλλιώς None."""
+        if not lesson.distribution:
+            return None
+        try:
+            blocks = [int(v.strip()) for v in lesson.distribution.split(",") if v.strip()]
+        except ValueError:
+            return None
+        return blocks if blocks and sum(blocks) == lesson.periods_per_week else None
+
+    def _match_locked_to_blocks(self, lesson_by_id: dict) -> None:
+        """Μερικώς κλειδωμένη κάρτα με blocks: κάθε συνεχόμενη σειρά κλειδωμένων
+        ωρών της ίδιας μέρας «καλύπτει» ένα block ίδιου μήκους της κατανομής.
+        Αν όλες ταιριάζουν και μένει block ≥2 ωρών, οι κλειδωμένες ώρες
+        «καρφώνονται» εκεί που είναι και τα υπόλοιπα blocks κρατούν το μήκος
+        τους — αλλιώς το υπόλοιπο «2» έμπαινε σπασμένο σε μονόωρα. Σε κάθε άλλη
+        περίπτωση (δεν ταιριάζουν, διπλές εγγραφές, άκυρο κελί) μένει η παλιά
+        συμπεριφορά: όλες οι ώρες μονόωρες."""
+        period_index = {p.id: i for i, p in enumerate(self.periods)}
+        entries_by_lesson: dict[int, list[dict]] = {}
+        for e in self.locked_assignments:
+            if e.get("lesson_id") in lesson_by_id:
+                entries_by_lesson.setdefault(e["lesson_id"], []).append(e)
+        for lesson_id, entries in entries_by_lesson.items():
+            lesson = lesson_by_id[lesson_id]
+            blocks = self._declared_blocks(lesson)
+            if not blocks or max(blocks) < 2:
+                continue
+            room_ids = {r.id for r in self._get_available_rooms(lesson)}
+            pins = []
+            for e in entries:
+                day, pid, rid = e.get("day_of_week"), e.get("period_id"), e.get("classroom_id")
+                if (day is None or not 0 <= day < self.days_per_week
+                        or pid not in period_index or rid not in room_ids):
+                    pins = None
+                    break
+                pins.append((day, pid, rid))
+            if not pins or len({(d, p) for d, p, _ in pins}) != len(pins):
+                continue
+            by_day: dict[int, list[int]] = {}
+            for day, pid, _ in pins:
+                by_day.setdefault(day, []).append(period_index[pid])
+            runs: list[tuple[int, int]] = []          # (day, μήκος σειράς)
+            for day, idxs in by_day.items():
+                idxs.sort()
+                length = 1
+                for prev, cur in zip(idxs, idxs[1:]):
+                    if cur == prev + 1:
+                        length += 1
+                    else:
+                        runs.append((day, length))
+                        length = 1
+                runs.append((day, length))
+            remaining = Counter(blocks)
+            matched = True
+            for _, length in runs:
+                if remaining[length] <= 0:
+                    matched = False
+                    break
+                remaining[length] -= 1
+            if not matched:
+                continue
+            remainder = []
+            for b in blocks:  # με τη σειρά της κατανομής
+                if remaining[b] > 0:
+                    remainder.append(b)
+                    remaining[b] -= 1
+            if not any(b >= 2 for b in remainder):
+                continue
+            self._locked_pins[lesson_id] = pins
+            self._locked_remainder[lesson_id] = remainder
+            self._locked_runs_per_day[lesson_id] = Counter(day for day, _ in runs)
 
     def _get_available_rooms(self, lesson: Lesson) -> list[Classroom]:
         """Get rooms that can host this lesson (+ όσες έχει κλειδώσει ο χρήστης)."""
@@ -344,6 +453,11 @@ class TimetableSolver:
         """Convert a distribution string like '2,1' to a list of block lengths [2, 1]."""
         locked = getattr(self, "_locked_count", {}).get(lesson.id, 0)
         if locked:
+            remainder = getattr(self, "_locked_remainder", {}).get(lesson.id)
+            if remainder is not None:
+                # Κλειδωμένες ώρες «καρφωμένες» ως μονόωρα + τα blocks που λείπουν
+                # με το δικό τους μήκος (βλ. _match_locked_to_blocks).
+                return [1] * locked + list(remainder)
             # Κλειδωμένες ώρες: μονόωρα blocks, ώστε να «χωράει» όπως τις έβαλε ο
             # χρήστης (π.χ. δίωρο σπασμένο σε δύο μέρες) — και όχι λιγότερα από αυτές.
             return [1] * max(lesson.periods_per_week, locked)
@@ -378,8 +492,13 @@ class TimetableSolver:
         for lesson in self.lessons:
             blocks = self._parse_distribution(lesson)
             available_rooms = self._get_available_rooms(lesson)
+            pins = self._locked_pins.get(lesson.id, ())
+            starts_by_day = {} if self._spreads_blocks(lesson) else None
 
             for b_idx, L in enumerate(blocks):
+                if b_idx < len(pins):
+                    self._create_pinned_block(lesson, b_idx, pins[b_idx])
+                    continue
                 # We need exactly one start var for this block
                 block_start_vars = []
                 for day in days:
@@ -389,6 +508,8 @@ class TimetableSolver:
                             var_name = f"b_l{lesson.id}_b{b_idx}_d{day}_p{p_start.id}_r{room.id}"
                             b_var = self.model.NewBoolVar(var_name)
                             block_start_vars.append(b_var)
+                            if starts_by_day is not None:
+                                starts_by_day.setdefault(day, []).append(b_var)
 
                             # Record that this start var covers subsequent periods
                             for offset in range(L):
@@ -418,6 +539,9 @@ class TimetableSolver:
                         (lesson.id, b_idx, L, placed, None)
                     )
 
+            if starts_by_day is not None:
+                self._block_starts_by_day[lesson.id] = (starts_by_day, len(blocks) - len(pins))
+
             # Map the block coverage to x
             for day in days:
                 for p in self.periods:
@@ -437,9 +561,55 @@ class TimetableSolver:
                             # (since blocks of the same lesson cannot overlap because x is boolean)
                             self.model.Add(x_var == sum(covering_vars))
 
+    def _spreads_blocks(self, lesson: Lesson) -> bool:
+        """Κάρτα με ≥2 blocks όπου υπάρχει block ≥2 ωρών (π.χ. «2,2», «2,1»):
+        τα blocks της πάνε σε διαφορετικές μέρες όταν γίνεται (βλ.
+        _apply_block_day_spread). Όχι για «1,1,1» (όπως πριν) ούτε όταν τα
+        blocks είναι περισσότερα από τις μέρες."""
+        if lesson.id in self._locked_pins:
+            n_blocks = (sum(self._locked_runs_per_day[lesson.id].values())
+                        + len(self._locked_remainder[lesson.id]))
+            return n_blocks <= self.days_per_week
+        if self._locked_count.get(lesson.id):
+            return False  # κλειδωμένη χωρίς ταίριασμα: όλα μονόωρα, όπως πριν
+        blocks = self._declared_blocks(lesson)
+        return bool(blocks) and len(blocks) >= 2 and max(blocks) >= 2 and len(blocks) <= self.days_per_week
+
+    def _create_pinned_block(self, lesson: Lesson, b_idx: int, pin: tuple[int, int, int]) -> None:
+        """Μονόωρο block μιας κλειδωμένης ώρας: ένα μόνο start var, στη θέση της."""
+        day, period_id, room_id = pin
+        b_var = self.model.NewBoolVar(f"b_l{lesson.id}_b{b_idx}_d{day}_p{period_id}_r{room_id}")
+        self._covers.setdefault((lesson.id, day, period_id, room_id), []).append(b_var)
+        # Κλειδωμένη ώρα: πάντα εκεί (όπως και το x == 1 του _apply_locked_assignments).
+        self.model.AddExactlyOne([b_var])
+
+    def _at_most_one(self, keys: list[tuple], kind: str, owner_id: int, day: int, period: Period) -> None:
+        """«Το πολύ ένα» σε (καθηγητή|τμήμα|αίθουσα|μαθητή, μέρα, ώρα).
+
+        Εξαίρεση: αν ΔΥΟ ή περισσότερες ΚΛΕΙΔΩΜΕΝΕΣ ώρες συγκρούονται ήδη εδώ
+        (π.χ. ο μαθητής γράφτηκε αργότερα και σε δεύτερο τμήμα της ίδιας ώρας),
+        μένουν όπως τις άφησε ο χρήστης και απλώς τίποτα άλλο δεν μπαίνει σε αυτό
+        το κελί — αλλιώς όλο το «Γέμισε τα κενά» / Lock & Regenerate έβγαινε
+        αδύνατο χωρίς εξήγηση. Με ≤1 κλειδωμένη το μοντέλο είναι ίδιο με πριν."""
+        forced = [k for k in keys if k in self._forced_keys] if self._forced_keys else []
+        if len(forced) >= 2:
+            for k in keys:
+                if k not in self._forced_keys:
+                    self.model.Add(self.x[k] == 0)
+            self._kept_overlaps.append((kind, owner_id, day, period, [k[0] for k in forced]))
+            return
+        self.model.Add(sum(self.x[k] for k in keys) <= 1)
+
     def _apply_hard_constraints(self):
         """Apply all hard (non-negotiable) constraints."""
         days = range(self.days_per_week)
+        # Κλειδωμένα κελιά που θα γίνουν x == 1 (βλ. _apply_locked_assignments).
+        self._forced_keys = {
+            key for key in (
+                (e.get("lesson_id"), e.get("day_of_week"), e.get("period_id"), e.get("classroom_id"))
+                for e in self.locked_assignments
+            ) if key in self.x
+        }
 
         # H1: (Removed) Each lesson is scheduled exactly periods_per_week times.
         # This is now implicitly enforced by the Block Distribution mechanics in _create_variables.
@@ -448,41 +618,41 @@ class TimetableSolver:
         for teacher_id, teacher_lessons in self._lessons_by_teacher.items():
             for day in days:
                 for period in self.periods:
-                    vars_at_slot = []
+                    keys_at_slot = []
                     for lesson in teacher_lessons:
                         available_rooms = self._get_available_rooms(lesson)
                         for room in available_rooms:
                             key = (lesson.id, day, period.id, room.id)
                             if key in self.x:
-                                vars_at_slot.append(self.x[key])
-                    if vars_at_slot:
-                        self.model.Add(sum(vars_at_slot) <= 1)
+                                keys_at_slot.append(key)
+                    if keys_at_slot:
+                        self._at_most_one(keys_at_slot, "teacher", teacher_id, day, period)
 
         # H3: No class clash — at most 1 lesson per class per (day, period)
         for class_id, class_lessons in self._lessons_by_class.items():
             for day in days:
                 for period in self.periods:
-                    vars_at_slot = []
+                    keys_at_slot = []
                     for lesson in class_lessons:
                         available_rooms = self._get_available_rooms(lesson)
                         for room in available_rooms:
                             key = (lesson.id, day, period.id, room.id)
                             if key in self.x:
-                                vars_at_slot.append(self.x[key])
-                    if vars_at_slot:
-                        self.model.Add(sum(vars_at_slot) <= 1)
+                                keys_at_slot.append(key)
+                    if keys_at_slot:
+                        self._at_most_one(keys_at_slot, "class", class_id, day, period)
 
         # H4: No room clash — at most 1 lesson per room per (day, period)
         for room in self.classrooms:
             for day in days:
                 for period in self.periods:
-                    vars_at_slot = [
-                        self.x[l.id, day, period.id, room.id]
+                    keys_at_slot = [
+                        (l.id, day, period.id, room.id)
                         for l in self.lessons
                         if (l.id, day, period.id, room.id) in self.x
                     ]
-                    if vars_at_slot:
-                        self.model.Add(sum(vars_at_slot) <= 1)
+                    if keys_at_slot:
+                        self._at_most_one(keys_at_slot, "room", room.id, day, period)
 
         # H0: Ωράριο λειτουργίας — κανένα μάθημα εκτός ωραρίου της μέρας.
         # Εξαίρεση: ό,τι έχει κλειδώσει ρητά ο χρήστης (Lock & Regenerate /
@@ -527,15 +697,15 @@ class TimetableSolver:
         for student_id, student_lessons in self._lessons_by_student.items():
             for day in days:
                 for period in self.periods:
-                    vars_at_slot = []
+                    keys_at_slot = []
                     for lesson in student_lessons:
                         available_rooms = self._get_available_rooms(lesson)
                         for room in available_rooms:
                             key = (lesson.id, day, period.id, room.id)
                             if key in self.x:
-                                vars_at_slot.append(self.x[key])
-                    if vars_at_slot:
-                        self.model.Add(sum(vars_at_slot) <= 1)
+                                keys_at_slot.append(key)
+                    if keys_at_slot:
+                        self._at_most_one(keys_at_slot, "student", student_id, day, period)
 
         # H8: Student availability — block unavailable slots
         for student_id, student_lessons in self._lessons_by_student.items():
@@ -606,6 +776,59 @@ class TimetableSolver:
                 
                 self.model.Add(sum(days_working_vars) <= max(
                     student.max_days_per_week, len(self._locked_student_days.get(student.id, ()))))
+
+    def _apply_hard_user_rules(self):
+        """Κανόνες χρήστη αποθηκευμένοι ως «Σκληρός» (no_late_day,
+        teacher_preferred_days): τα κελιά που απαγορεύουν μένουν κενά για τα
+        μαθήματα που αφορούν. Εξαίρεση, όπως στα κωλύματα (H5/H8) και στο
+        ωράριο (H0): ό,τι έχει κλειδώσει ρητά ο χρήστης μένει εκεί που είναι."""
+        if not self._hard_rules:
+            return
+        for rule in self._hard_rules:
+            for lesson in self.lessons:
+                if not rule.covers(lesson):
+                    continue
+                rooms = self._get_available_rooms(lesson)
+                for day in range(self.days_per_week):
+                    for p_idx, period in enumerate(self.periods):
+                        if (not rule.forbids(day, p_idx)
+                                or (lesson.id, day, period.id) in self._kept_cells):
+                            continue
+                        for room in rooms:
+                            key = (lesson.id, day, period.id, room.id)
+                            if key in self.x:
+                                self.model.Add(self.x[key] == 0)
+
+    def _apply_teacher_weekly_max(self):
+        """H6b: «Max/Εβδ.» του καθηγητή — δεν διδάσκει πάνω από τόσες ώρες.
+
+        Μπαίνει ΜΟΝΟ όταν οι κάρτες του ξεπερνούν το όριο (αλλιώς δεν μπορεί
+        ποτέ να δεσμεύσει και το μοντέλο μένει ίδιο). Όπως στο H6, οι
+        κλειδωμένες ώρες του χρήστη μετράνε αλλά δεν «κόβονται»: το όριο
+        ανοίγει ως εκεί. Στο permissive οι επιπλέον ώρες πάνε στην Παλέτα με
+        αιτία· στο strict το αποτέλεσμα είναι «αδύνατο» και ο Έλεγχος
+        Εφικτότητας λέει ποιος καθηγητής και γιατί."""
+        for teacher in self.teachers:
+            cap = teacher.max_periods_per_week
+            lessons = self._lessons_by_teacher.get(teacher.id)
+            if not cap or not lessons:
+                continue
+            demand = sum(sum(self._parse_distribution(lesson)) for lesson in lessons)
+            locked = sum(self._locked_count.get(lesson.id, 0) for lesson in lessons)
+            limit = max(cap, locked)
+            if demand <= limit:
+                continue
+            week_vars = [
+                self.x[key]
+                for lesson in lessons
+                for room in self._get_available_rooms(lesson)
+                for day in range(self.days_per_week)
+                for period in self.periods
+                if (key := (lesson.id, day, period.id, room.id)) in self.x
+            ]
+            if week_vars:
+                self.model.Add(sum(week_vars) <= limit)
+                self._weekly_cap_binding[teacher.id] = (demand, cap, limit)
 
     def _apply_locked_assignments(self):
         """Force the cells named in self.locked_assignments to 1.
@@ -679,7 +902,10 @@ class TimetableSolver:
     def _apply_soft_constraints(self):
         """Apply soft constraints as penalty terms in the objective."""
         days = range(self.days_per_week)
-        active_soft = [c for c in self.constraints if c.constraint_type == "soft"]
+        # + «Σκληροί» κανόνες-προτιμήσεις (κενά, ισοκατανομή…): δεν γίνονται
+        # υποχρεωτικοί, αλλά ούτε αγνοούνται πια — εφαρμόζονται ως μαλακοί.
+        active_soft = [c for c in self.constraints
+                       if c.constraint_type == "soft" or id(c) in self._hard_as_soft]
 
         for constraint in active_soft:
             rule = json.loads(constraint.rule)
@@ -709,6 +935,27 @@ class TimetableSolver:
                 # rule: {"type":"class_compactness"} — soft penalty per
                 # additional teaching day a class occupies beyond minimum
                 self._soft_class_compactness(days, weight)
+
+    def _apply_block_day_spread(self):
+        """Τα blocks μιας κάρτας (π.χ. «2×2ωρα») σε διαφορετικές μέρες.
+
+        Χωρίς αυτό, κανόνες όπως το «Συμπτυγμένο πρόγραμμα» στοίβαζαν τα δύο
+        δίωρα σε ένα τετράωρο την ίδια μέρα. Ισχυρή ΜΑΛΑΚΗ ποινή (ποτέ αδύνατο):
+        αν δεν χωράνε αλλιώς, μπαίνουν και την ίδια μέρα. Μόνο όταν ο solver
+        βελτιστοποιεί ήδη κάτι (μαλακοί κανόνες ή permissive) — χωρίς στόχο
+        δεν «στοιβάζει» ενεργά τίποτα και το μοντέλο μένει ίδιο με πριν."""
+        if not self.penalties or not self._block_starts_by_day:
+            return
+        for lesson_id, (starts_by_day, n_free) in self._block_starts_by_day.items():
+            fixed = self._locked_runs_per_day.get(lesson_id, Counter())
+            for day in range(self.days_per_week):
+                starts = starts_by_day.get(day)
+                if not starts:
+                    continue
+                const = fixed.get(day, 0)
+                excess = self.model.NewIntVar(0, n_free, f"sameday_l{lesson_id}_d{day}")
+                self.model.Add(excess >= sum(starts) + const - max(1, const))
+                self.penalties.append(excess * self.SAME_DAY_BLOCKS_PENALTY)
 
     def _build_busy_indicators(self, days: range, owner_lessons_map: dict[int, list]):
         """For each (owner_id, day, period_idx) build a BoolVar that is 1
@@ -990,12 +1237,38 @@ class TimetableSolver:
                     self.model.Add(deviation >= int(ideal_per_day) - total)
                     self.penalties.append(deviation * (weight // 2))
 
-    def _collect_unplaced(self, solver: cp_model.CpSolver) -> list[dict]:
+    def _unplaced_reason(self, lesson_id: int, placed_by_teacher: dict[int, int]) -> str:
+        """Γιατί έμεινε στην Παλέτα — με όνομα όταν φταίει «Max/Εβδ.» ή σκληρός κανόνας."""
+        reason = ("Ο solver δεν βρήκε χωρητικό slot ταυτόχρονα με "
+                  "τους υπόλοιπους περιορισμούς")
+        if not hasattr(self, "_lesson_by_id"):
+            self._lesson_by_id = {l.id: l for l in self.lessons}
+        lesson = self._lesson_by_id.get(lesson_id)
+        if lesson is None:
+            return reason
+        cap = self._weekly_cap_binding.get(lesson.teacher_id)
+        if cap and placed_by_teacher.get(lesson.teacher_id, 0) >= cap[2]:  # το όριο γέμισε
+            name = lesson.teacher.name if lesson.teacher else "ο καθηγητής"
+            return (f"Ο/Η {name} έχει {cap[0]} ώρες μαθημάτων αλλά «Max/Εβδ.» {cap[1]} — "
+                    "οι επιπλέον ώρες μένουν στην Παλέτα")
+        rules = [r for r in self._hard_rules if r.covers(lesson)]
+        if rules:
+            reason += f" ({rules_phrase(rules)})"
+        return reason
+
+    def _collect_unplaced(self, solver: cp_model.CpSolver,
+                          placed_by_lesson: dict[int, int] | None = None) -> list[dict]:
         """Build the parking-lot list. Combines:
         - lessons rejected pre-solve (no available rooms / block too long)
         - lesson blocks the solver chose to leave unplaced in permissive mode
-        """
+
+        Κάθε εγγραφή έχει `hours` = πόσες ώρες λείπουν (ένα δίωρο = 2), ώστε η
+        Παλέτα να παίρνει μία κάρτα ανά ΩΡΑ — όχι μία ανά block."""
         out: list[dict] = []
+        placed = placed_by_lesson or {}
+        placed_by_teacher: Counter = Counter()
+        for lesson in self.lessons:
+            placed_by_teacher[lesson.teacher_id] += placed.get(lesson.id, 0)
 
         # Pre-validation rejections (only populated in permissive mode —
         # strict mode short-circuits in _validate_data)
@@ -1025,12 +1298,73 @@ class TimetableSolver:
                     "lesson_id": lesson_id,
                     "block_index": b_idx,
                     "block_length": length,
-                    "reason": (
-                        "Ο solver δεν βρήκε χωρητικό slot ταυτόχρονα με "
-                        "τους υπόλοιπους περιορισμούς"
-                    ),
+                    "reason": self._unplaced_reason(lesson_id, placed_by_teacher),
                 })
 
+        # Ώρες ανά εγγραφή: block → το μήκος του· μάθημα που απορρίφθηκε πριν
+        # τον solver → όσες ώρες της κάρτας δεν μπήκαν ούτε υπάρχουν ήδη ως block.
+        ppw = {l.id: l.periods_per_week for l in self.lessons}
+        block_hours: Counter = Counter()
+        for e in out:
+            if e["block_length"] is not None:
+                e["hours"] = e["block_length"]
+                block_hours[e["lesson_id"]] += e["block_length"]
+        for e in out:
+            if e["block_length"] is None:
+                lid = e["lesson_id"]
+                e["hours"] = max(0, ppw.get(lid, 1) - placed.get(lid, 0) - block_hours[lid])
+        return out
+
+    def _overlap_warnings(self) -> list[str]:
+        """Ονομαστικά: ποιες κλειδωμένες ώρες συγκρούονταν ήδη και κρατήθηκαν."""
+        if not self._kept_overlaps:
+            return []
+        from backend.models import Student as _Student
+
+        lessons = {l.id: l for l in self.lessons}
+        teachers = {t.id: t.name for t in self.teachers}
+        classes = {c.id: c.name for c in self.classes}
+        rooms = {r.id: r.name for r in self.db.query(Classroom).all()}
+        student_ids = {owner for kind, owner, *_ in self._kept_overlaps if kind == "student"}
+        students = ({s.id: pc.student_display(s) for s in
+                     self.db.query(_Student).filter(_Student.id.in_(student_ids)).all()}
+                    if student_ids else {})
+        names = {"student": students, "teacher": teachers, "class": classes, "room": rooms}
+        groups: dict[tuple, dict] = {}
+        for kind, owner, day, period, lesson_ids in self._kept_overlaps:
+            key = (day, period.id, tuple(sorted(set(lesson_ids))))
+            group = groups.setdefault(key, {"period": period, "who": {}})
+            group["who"].setdefault(kind, []).append(names[kind].get(owner) or f"#{owner}")
+
+        def lesson_label(lid: int) -> str:
+            return self._short_label(lessons.get(lid))
+
+        words = (("student", "κοινοί μαθητές"), ("teacher", "ίδιος καθηγητής"),
+                 ("class", "ίδιο τμήμα"), ("room", "ίδια αίθουσα"))
+        out = []
+        for (day, _pid, lesson_ids), group in groups.items():
+            who = "; ".join(f"{word}: {pc.join_names(sorted(set(group['who'][kind])))}"
+                            for kind, word in words if group["who"].get(kind))
+            out.append(
+                f"Κλειδωμένες ώρες που ήδη συμπίπτουν κρατήθηκαν όπως ήταν — "
+                f"{pc.cell_label(day, group['period'])}: "
+                f"{' + '.join(lesson_label(l) for l in lesson_ids)} ({who}).")
+        return out
+
+    @staticmethod
+    def _short_label(lesson: Lesson | None) -> str:
+        """«Φυσική (Γ1)» — για μηνύματα προς τον χρήστη."""
+        subj = lesson.subject.name if lesson and lesson.subject else "?"
+        cls = lesson.school_class.name if lesson and lesson.school_class else "?"
+        return f"{subj} ({cls})"
+
+    def _result_warnings(self) -> list[str]:
+        """Ό,τι πρέπει να μάθει ο χρήστης για τη λύση (αποθηκεύεται στο metadata)."""
+        out = list(self._warnings) + self._overlap_warnings()
+        teachers = {t.id: t.name for t in self.teachers}
+        for teacher_id, (demand, cap, _limit) in self._weekly_cap_binding.items():
+            out.append(f"Καθηγητής {teachers.get(teacher_id, teacher_id)}: έχει {demand} ώρες "
+                       f"μαθημάτων αλλά «Max/Εβδ.» {cap} — οι επιπλέον ώρες έμειναν στην Παλέτα.")
         return out
 
     def _extract_result(self, solver: cp_model.CpSolver, status: int) -> SolverResult:
@@ -1056,13 +1390,15 @@ class TimetableSolver:
                         "classroom_id": room_id,
                     })
 
-            unplaced = self._collect_unplaced(solver)
+            unplaced = self._collect_unplaced(
+                solver, Counter(s["lesson_id"] for s in slots))
+            unplaced_hours = sum(e["hours"] for e in unplaced)
 
             score = solver.ObjectiveValue() if self.penalties else 0.0
-            if unplaced:
+            if unplaced_hours:
                 message = (
                     f"Βρέθηκε λύση — τοποθετήθηκαν {len(slots)} ώρες, "
-                    f"{len(unplaced)} ώρες έμειναν στο parking lot."
+                    f"{unplaced_hours} ώρες έμειναν στο parking lot."
                 )
             else:
                 message = (
@@ -1070,23 +1406,28 @@ class TimetableSolver:
                     else "Βρέθηκε λύση (μη βέλτιστη)"
                 )
 
+            stats = {
+                "wall_time": solver.WallTime(),
+                "branches": solver.NumBranches(),
+                "conflicts": solver.NumConflicts(),
+                "total_lessons_placed": len(slots),
+                "total_lessons_unplaced": len(unplaced),
+                "total_hours_unplaced": unplaced_hours,
+                "mode": self.mode,
+                "warm_start_hints_applied": getattr(
+                    self, "_warm_start_applied", 0
+                ),
+            }
+            warnings = self._result_warnings()
+            if warnings:
+                stats["warnings"] = warnings
             return SolverResult(
                 status=result_status,
                 message=message,
                 score=score,
                 slots=slots,
                 unplaced=unplaced,
-                stats={
-                    "wall_time": solver.WallTime(),
-                    "branches": solver.NumBranches(),
-                    "conflicts": solver.NumConflicts(),
-                    "total_lessons_placed": len(slots),
-                    "total_lessons_unplaced": len(unplaced),
-                    "mode": self.mode,
-                    "warm_start_hints_applied": getattr(
-                        self, "_warm_start_applied", 0
-                    ),
-                },
+                stats=stats,
             )
 
         if result_status == "timeout":
@@ -1107,15 +1448,29 @@ class TimetableSolver:
             )
 
         if result_status == "infeasible":
-            return SolverResult(
-                status="infeasible",
-                message=(
-                    "Οι περιορισμοί σου είναι αντιφατικοί — δεν υπάρχει "
-                    "πρόγραμμα που να τους ικανοποιεί όλους. Δοκίμασε να "
-                    "χαλαρώσεις constraints (π.χ. teacher availability ή "
-                    "max_periods_per_day) ή χρησιμοποίησε permissive mode."
-                ),
+            message = (
+                "Οι περιορισμοί σου είναι αντιφατικοί — δεν υπάρχει "
+                "πρόγραμμα που να τους ικανοποιεί όλους. Δοκίμασε να "
+                "χαλαρώσεις constraints (π.χ. teacher availability ή "
+                "max_periods_per_day) ή χρησιμοποίησε permissive mode."
             )
+            # Ό,τι επιβάλλεται πλέον υποχρεωτικά — ονομαστικά, για να ξέρει τι να κοιτάξει.
+            if self._hard_rules:
+                labels = ", ".join(dict.fromkeys(r.label for r in self._hard_rules))
+                message += f"\nΙσχύουν σκληροί (υποχρεωτικοί) κανόνες: {labels}."
+            teachers = {t.id: t.name for t in self.teachers}
+            for teacher_id, (demand, cap, _limit) in self._weekly_cap_binding.items():
+                message += (f"\nΚαθηγητής {teachers.get(teacher_id, teacher_id)}: έχει {demand} "
+                            f"ώρες μαθημάτων αλλά «Max/Εβδ.» {cap}.")
+            pinned = [l for l in self.lessons if l.id in self._locked_pins]
+            if pinned:
+                cards = ", ".join(
+                    f"{self._short_label(l)} → «{','.join(map(str, self._locked_remainder[l.id]))}»"
+                    for l in pinned[:5])
+                message += ("\nΚάρτες με κλειδωμένο μέρος, που το υπόλοιπο πρέπει να μπει σε "
+                            f"ολόκληρα blocks: {cards} — αν δεν χωράει, το permissive το αφήνει "
+                            "στην Παλέτα.")
+            return SolverResult(status="infeasible", message=message)
 
         return SolverResult(
             status=result_status,

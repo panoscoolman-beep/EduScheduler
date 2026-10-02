@@ -30,6 +30,19 @@ def _iso_utc(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
+# Η αιτία της Παλέτας χωράει στη στήλη (VARCHAR 500): μια λίστα μεγάλων ονομάτων
+# σκληρών κανόνων δεν πρέπει να ρίχνει ΟΛΗ τη λύση σε «error» (το Postgres
+# απορρίπτει μεγαλύτερο κείμενο με StringDataRightTruncation· το SQLite όχι).
+_REASON_MAX = TimetableSlot.__table__.c.unplaced_reason.type.length or 500
+
+
+def _fit_reason(reason):
+    if reason is None:
+        return None
+    reason = str(reason)
+    return reason if len(reason) <= _REASON_MAX else reason[:_REASON_MAX - 1] + "…"
+
+
 def _persist_solver_result(
     db: Session,
     solution: TimetableSolution,
@@ -41,7 +54,9 @@ def _persist_solver_result(
 
     When `locked_assignments` is given (regenerate flow), placed slots that
     match a locked assignment keep is_locked=True so the user's pins survive
-    into the new solution."""
+    into the new solution. An assignment may carry its source slot's own
+    `is_locked` («🧩 Γέμισε τα κενά» keeps EVERY placed hour fixed for the
+    solve, but only the ones the user had 🔒 stay locked); absent = locked."""
     # Το CHECK ck_solution_status ΔΕΝ έχει 'timeout' (ο engine το βγάζει όταν
     # το CP-SAT τελειώνει τον χρόνο χωρίς λύση). Αν γραφόταν αυτούσιο, το
     # commit έσκαγε με CheckViolation και ο χρήστης έβλεπε «Solver crashed»
@@ -79,6 +94,7 @@ def _persist_solver_result(
     locked_keys = {
         (la["lesson_id"], la["day_of_week"], la["period_id"], la["classroom_id"])
         for la in (locked_assignments or [])
+        if la.get("is_locked", True)
     }
 
     if status in ("optimal", "feasible"):
@@ -96,17 +112,20 @@ def _persist_solver_result(
                 is_unplaced=False,
                 is_locked=key in locked_keys,
             ))
-        # Unplaced rows feed the parking lot (permissive mode only)
+        # Unplaced rows feed the parking lot (permissive mode only) — ΜΙΑ
+        # γραμμή ανά ΩΡΑ (ένα δίωρο που δεν χώρεσε = 2 κάρτες στην Παλέτα),
+        # όπως τη μετράνε Παλέτα, parking_lot_sync και drag&drop.
         for entry in result.unplaced:
-            db.add(TimetableSlot(
-                solution_id=solution.id,
-                lesson_id=entry["lesson_id"],
-                day_of_week=None,
-                period_id=None,
-                classroom_id=None,
-                is_unplaced=True,
-                unplaced_reason=entry.get("reason"),
-            ))
+            for _ in range(int(entry.get("hours", 1) or 0)):
+                db.add(TimetableSlot(
+                    solution_id=solution.id,
+                    lesson_id=entry["lesson_id"],
+                    day_of_week=None,
+                    period_id=None,
+                    classroom_id=None,
+                    is_unplaced=True,
+                    unplaced_reason=_fit_reason(entry.get("reason")),
+                ))
     db.commit()
 
 
