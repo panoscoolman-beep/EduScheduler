@@ -255,6 +255,13 @@ sed -i 's/?v=55"/?v=56"/g' frontend/index.html
    με auto-restart, self-updated (v2.335+).
 4. **Frontend είναι vanilla JS** — λιγότερο maintainable από framework. Για
    τώρα δουλεύει — refactor σε React/Svelte θα ήταν επόμενη εργασία.
+5. **`protobuf` 5.26.1 (pip-audit: CVE-2025-4565, CVE-2026-0994) — αποδεκτό ρίσκο
+   (2026-10-02).** Το δένει το `ortools==9.11.4210` (`protobuf<5.27`)· δεν πιάνονται εδώ
+   (backend `upb`, κανένα `json_format.Parse`, καμία είσοδος protobuf από έξω). **Μην**
+   ανεβάσεις το OR-Tools μόνο γι' αυτό: το 9.12 αλλάζει τις λύσεις (και OPTIMAL→FEASIBLE
+   σε solve με όριο χρόνου), το 9.15 σπάει 4 tests (`Proto().SerializeToString`). Πρώτα
+   σύγκριση παλιού/νέου image σε αντίγραφο της βάσης (strict/permissive, Γέμισε τα κενά,
+   Lock & Regenerate, 3–5 επαναλήψεις). Το `pytest-asyncio` αφαιρέθηκε (θέλει `pytest<9`).
 
 ## Integration με Korifi CRM
 
