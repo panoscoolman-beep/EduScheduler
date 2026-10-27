@@ -379,6 +379,7 @@ const StudentsView = {
                 Toast.success(`✅ Εισήχθησαν ${res.created} μαθητές (${res.skipped} παραλείφθηκαν)`);
                 // Ο Πίνακας Ελέγχου να μη λέει «νέοι μαθητές στο CRM» για 5′ ακόμα.
                 if (typeof DashboardView !== 'undefined') DashboardView._crmCache = null;
+                if (typeof App !== 'undefined' && App.refreshAttention) App.refreshAttention({ force: true });
                 Modal.close();
                 await this.render(container);
             } catch (err) {

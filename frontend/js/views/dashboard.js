@@ -119,6 +119,7 @@ const DashboardView = {
 
         if (!working) {
             this._fillAttention([], { ok: 'Δεν υπάρχει πρόγραμμα ακόμα — ξεκίνα από τη «Δημιουργία».' });
+            App.setAttentionCount(0);
             document.getElementById('dash-day').innerHTML = '<span class="text-muted">Χωρίς πρόγραμμα.</span>';
             document.getElementById('dash-now').innerHTML = '<span class="text-muted">—</span>';
             return;
@@ -147,7 +148,31 @@ const DashboardView = {
             solutionId: working.id, preview, slots: workSol ? workSol.slots : [], gaps, crmNew,
         });
         this._fillAttention(rows, { ok: '✓ Όλα εντάξει — τίποτα δεν περιμένει.' });
+        App.setAttentionCount(rows.length);   // το ίδιο νούμερο στο σήμα της κάτω μπάρας
         this._fillDay(daySol, periods, classrooms, day, pick);
+    },
+
+    /**
+     * Πόσα θέματα θα έδειχνε το «Χρειάζεται προσοχή» (για το σήμα στα «Περισσότερα» /
+     * «Πίνακας Ελέγχου»): ίδιες αναγνώσεις, ίδιοι κανόνες (attentionRows), χωρίς σχεδίαση.
+     */
+    async attentionCount() {
+        const solutions = await API.solver.listSolutions();
+        const active = (solutions || []).filter(s => !s.archived);
+        const workingId = TimetableHelpers.defaultSolutionId(active, App._currentSolutionId);
+        if (workingId == null) return 0;
+        const [workSol, preview, gaps, crmNew] = await Promise.all([
+            API.solver.getSolution(workingId).catch(() => null),
+            API.solver.publishPreview(workingId).catch(() => null),
+            API.solver.gaps(workingId).catch(() => null),
+            Promise.race([
+                this._crmNewCount(),
+                new Promise(resolve => setTimeout(() => resolve(0), this.CRM_WAIT_MS)),
+            ]),
+        ]);
+        return this.attentionRows({
+            solutionId: workingId, preview, slots: workSol ? workSol.slots : [], gaps, crmNew,
+        }).length;
     },
 
     /**

@@ -173,11 +173,21 @@ def test_classroom_message_lists_archived_programmes_and_home_rooms(env):
                                   classroom_id=env.ids["room"], is_unplaced=False))
     env.session.get(SchoolClass, env.ids["class"]).home_room_id = env.ids["room"]
     env.session.commit()
-    detail = env.delete(f"/api/classrooms/{env.ids['room']}").json()["detail"]
-    assert "3 ώρες σε 2 πρόγραμμα(τα)" in detail["message"]
-    assert "«ΠΑΛΙΟ» (αρχειοθετημένο): 1" in detail["message"]
-    assert "αίθουσα-βάση 1 τμημάτων" in detail["message"]
-    assert detail["usage"]["home_room_of_classes"] == 1
+    # Αρχειοθετημένο πρόγραμμα = αρχείο παλιού ωρολογίου: άρνηση ΚΑΙ με force,
+    # το μήνυμα στέλνει στην 📦 Αρχειοθέτηση της αίθουσας.
+    for query in ("", "?force=true"):
+        res = env.delete(f"/api/classrooms/{env.ids['room']}{query}")
+        assert res.status_code == 409
+        detail = res.json()["detail"]
+        assert detail["code"] == "classroom_in_archived" and detail["requires_force"] is False
+        assert "αρχειοθετημένα προγράμματα: «ΠΑΛΙΟ»" in detail["message"]
+        assert "«ΧΕΙΜΕΡΙΝΟ»" not in detail["message"]                 # μόνο τα αρχειοθετημένα
+        assert "📦 Αρχειοθέτηση" in detail["message"]
+        assert detail["usage"]["home_room_of_classes"] == 1
+        assert detail["usage"]["placed"] == 3
+    env.session.expire_all()
+    assert env.session.get(Classroom, env.ids["room"]) is not None
+    assert sum(1 for s in _slots(env) if not s.is_unplaced) == 3      # ανέγγιχτο
 
 
 def test_classroom_pinned_to_cards_needs_force_even_without_placed_hours(env):

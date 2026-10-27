@@ -75,7 +75,8 @@ def update_classroom(classroom_id: int, data: ClassroomCreate, db: Session = Dep
 def delete_classroom(classroom_id: int, force: bool = False, db: Session = Depends(get_db)):
     """Οι ώρες που είναι τοποθετημένες εδώ θα έμεναν «τοποθετημένες χωρίς
     αίθουσα». Χωρίς `?force=true` → 409 + πλήθη· με force → γυρίζουν στην
-    Παλέτα πριν σβηστεί η αίθουσα (δεν χάνεται ώρα)."""
+    Παλέτα πριν σβηστεί η αίθουσα (δεν χάνεται ώρα). Με ώρες σε αρχειοθετημένο
+    πρόγραμμα → 409 `classroom_in_archived` και με force (→ 📦 Αρχειοθέτηση)."""
     classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
     if not classroom:
         raise HTTPException(status_code=404, detail="Η αίθουσα δεν βρέθηκε")

@@ -190,6 +190,7 @@ const GenerateView = {
 
             if (result.status === 'optimal' || result.status === 'feasible') {
                 message.textContent = result.message;
+                App.refreshAttention({ force: true });   // νέο πρόγραμμα: Παλέτα/δημοσίευση αλλάζουν
                 if (result.unplaced_count > 0) {
                     Toast.info(TimetableHelpers.esc(result.message));
                 } else {

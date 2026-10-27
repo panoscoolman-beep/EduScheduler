@@ -262,6 +262,22 @@ button.nav-item {
     flex-shrink: 0;
 }
 
+/* Σήμα «Χρειάζεται προσοχή»: πόσα θέματα δείχνει ο Πίνακας Ελέγχου (κρυφό στο 0). */
+.nav-badge, .bn-badge {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--warning);
+    color: #1a1200;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+.nav-badge { margin-left: auto; }
+.nav-badge[hidden], .bn-badge[hidden] { display: none; }
+
 .sidebar-footer {
     padding: var(--space-md);
     border-top: 1px solid var(--border-subtle);
@@ -1508,6 +1524,7 @@ button.status-chip { cursor: pointer; font-family: inherit; }
         -webkit-backdrop-filter: blur(12px);
     }
     .bottom-nav-item {
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1531,6 +1548,7 @@ button.status-chip { cursor: pointer; font-family: inherit; }
         padding: 0 8px;
         border-radius: 999px;
     }
+    .bn-badge { position: absolute; top: 4px; left: calc(50% + 6px); }
 
     .toast-container {
         top: auto;

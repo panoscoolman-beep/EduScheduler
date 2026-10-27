@@ -45,6 +45,11 @@ const App = {
     ],
     BOTTOM_VIEWS: ['today', 'timetable', 'students'],
 
+    // Σήμα «Χρειάζεται προσοχή» στα «Περισσότερα» (κινητό) και στον «Πίνακα Ελέγχου» (πλαϊνή).
+    ATTENTION_STALE_MS: 60 * 1000,       // στην πλοήγηση ξαναμετρά μόνο αν πέρασε τόσο
+    ATTENTION_EVERY_MS: 5 * 60 * 1000,   // και κάθε τόσο έτσι κι αλλιώς
+    _attention: { at: 0, count: 0, busy: false, again: false },
+
     init() {
         VersionCheck.start();
         Modal.init();
@@ -56,6 +61,43 @@ const App = {
         window.addEventListener('popstate', () => this._onPopState());
         // …/#today → κατευθείαν στο «Σήμερα» (σελιδοδείκτης κινητού / εγκατεστημένη εφαρμογή).
         this.navigateTo(this.viewFromHash(window.location.hash) || 'dashboard', { history: 'replace' });
+        setInterval(() => this.refreshAttention({ force: true }), this.ATTENTION_EVERY_MS);
+    },
+
+    /** Γράφει το σήμα (0 = κρυφό) — ό,τι μετρά ο Πίνακας Ελέγχου στο «Χρειάζεται προσοχή». */
+    setAttentionCount(n) {
+        this._attention.at = Date.now();
+        this._attention.count = n;
+        const what = n === 1 ? '1 θέμα χρειάζεται προσοχή' : `${n} θέματα χρειάζονται προσοχή`;
+        [['bn-more-badge', 'bn-more', 'Περισσότερα'], ['nav-attn-badge', 'nav-dashboard', 'Πίνακας Ελέγχου']]
+            .forEach(([badgeId, itemId, name]) => {
+                const badge = document.getElementById(badgeId);
+                const item = document.getElementById(itemId);
+                if (badge) { badge.textContent = n > 0 ? String(n) : ''; badge.hidden = !(n > 0); }
+                if (item) {
+                    if (n > 0) item.setAttribute('aria-label', `${name} — ${what}`);
+                    else item.removeAttribute('aria-label');
+                }
+            });
+    },
+
+    /**
+     * Ξαναμετρά το σήμα στο παρασκήνιο — ποτέ δεν καθυστερεί την πλοήγηση. Στον
+     * Πίνακα Ελέγχου το μετρά η ίδια η σελίδα. force: κάτι άλλαξε (δημοσίευση,
+     * εισαγωγή από CRM, λύση) ή πέρασε η ώρα.
+     */
+    refreshAttention({ force = false } = {}) {
+        const a = this._attention;
+        if (!force && (this._currentView === 'dashboard' || Date.now() - a.at < this.ATTENTION_STALE_MS)) return;
+        if (a.busy) { a.again = a.again || force; return; }
+        a.busy = true;
+        DashboardView.attentionCount()
+            .then(n => this.setAttentionCount(n))
+            .catch(() => { /* χωρίς δίκτυο: μένει το προηγούμενο σήμα */ })
+            .finally(() => {
+                a.busy = false;
+                if (a.again) { a.again = false; this.refreshAttention({ force: true }); }
+            });
     },
 
     /** «#timetable» → 'timetable' (μόνο γνωστές σελίδες). */
@@ -183,6 +225,7 @@ const App = {
                     this.renderError(contentArea, err, () => this.navigateTo(viewName, { history: 'none' }));
                 });
         });
+        this.refreshAttention();
     },
 
     /**

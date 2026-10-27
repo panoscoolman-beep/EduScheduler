@@ -133,6 +133,41 @@ test('409 requires_force → κόκκινη επιβεβαίωση με escaped 
     assert.deepEqual(calls, [[5, false], [5, true]]);
 });
 
+test('409 χωρίς requires_force (π.χ. classroom_in_archived) → μόνο μήνυμα, χωρίς force', async () => {
+    setup();
+    const opened = [];
+    const errors = [];
+    global.Modal = {
+        open(title, body, onSave) { opened.push({ title, body, onSave }); },
+        close() {},
+    };
+    global.Toast = { error(m) { errors.push(m); }, success() {}, info() {} };
+    const calls = [];
+    const api = {
+        list: async () => [{ id: 5, name: 'Αίθ 1' }],
+        delete: async (id, force = false) => {
+            calls.push([id, force]);
+            const msg = 'Η αίθουσα «Αίθ 1» έχει ώρες σε αρχειοθετημένα προγράμματα: «ΠΑΛΙΟ». '
+                + 'Κάνε της 📦 Αρχειοθέτηση αντί για διαγραφή (κρατά τα παλιά προγράμματα ακέραια).';
+            const err = new Error(msg);                         // api.js: message = detail.message
+            err.status = 409;
+            err.detail = { code: 'classroom_in_archived', requires_force: false, message: msg };
+            throw err;
+        },
+    };
+    const t = new DataTable({
+        columns: [{ key: 'name', label: 'Όνομα' }], apiService: api, entityName: 'Αίθουσες',
+        formBuilder: () => '', formParser: () => ({}),
+    });
+    await t.render(document.getElementById('host'));
+    t.confirmDelete(5);
+    await opened[0].onSave();                                  // «Είστε σίγουροι;» → 409
+    assert.equal(opened.length, 1);                            // κανένα «κόκκινο» παράθυρο
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /📦 Αρχειοθέτηση αντί για διαγραφή/);
+    assert.deepEqual(calls, [[5, false]]);                     // ποτέ force
+});
+
 test('αποθήκευση με 409 requires_force → επιβεβαίωση → ίδια δεδομένα με force· αλλιώς απλό σφάλμα', async () => {
     setup();
     const opened = [];

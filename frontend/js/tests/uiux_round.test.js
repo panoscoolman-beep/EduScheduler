@@ -470,6 +470,47 @@ test('Πίνακας Ελέγχου: «Χρειάζεται προσοχή» κ�
     }
 });
 
+test('Κάτω μπάρα: σήμα «Χρειάζεται προσοχή» στα «Περισσότερα» — ίδιο νούμερο με τον Πίνακα, κρυφό στο 0', async () => {
+    let affected = 2;
+    const { routes } = timetableRoutes({
+        'GET /api/publications/preview/*': () => ({ first: true, affected, previous: null, teachers: [] }),
+        'GET /api/integration/crm/students/preview': () => ({ available: true, rows: [{ status: 'new' }] }),
+    });
+    const app = await start(routes, { phone: true });
+    try {
+        const badge = app.doc.getElementById('bn-more-badge');
+        const more = app.doc.getElementById('bn-more');
+        // Ο Πίνακας Ελέγχου (αρχική σελίδα) μέτρησε: δημοσίευση + 1 νέος μαθητής CRM = 2
+        await waitFor(app.w, () => app.doc.querySelector('.dash-attn-row'));
+        assert.equal(app.doc.querySelectorAll('.dash-attn-row').length, 2);
+        assert.equal(badge.hidden, false);
+        assert.equal(badge.textContent, '2');
+        assert.equal(more.getAttribute('aria-label'), 'Περισσότερα — 2 θέματα χρειάζονται προσοχή');
+        assert.equal(app.doc.getElementById('nav-attn-badge').textContent, '2');
+        assert.equal(more.querySelector('.bn-label').textContent, 'Περισσότερα');
+        assert.deepEqual([...app.doc.querySelectorAll('.bottom-nav-item .bn-label')].map(e => e.textContent),
+            ['Σήμερα', 'Ωρολόγιο', 'Μαθητές', 'Περισσότερα']);
+
+        // Πλοήγηση αμέσως μετά: φρέσκο → δεν ξαναμετρά (καμία νέα ανάγνωση του preview δημοσίευσης)
+        const previews = () => app.calls.filter(c => /\/api\/publications\/preview\//.test(c.path)).length;
+        const before = previews();
+        await go(app, 'today', '.today-source');
+        await sleep(app.w, 30);
+        assert.equal(previews(), before);
+
+        // Δημοσιεύτηκε + ο μαθητής πέρασε: ξαναμέτρημα στο παρασκήνιο → 0 → χωρίς σήμα
+        affected = 0;
+        app.G.DashboardView._crmCache = { at: Date.now(), newCount: 0 };
+        app.G.App.refreshAttention({ force: true });
+        await waitFor(app.w, () => badge.hidden);
+        assert.equal(badge.textContent, '');
+        assert.equal(more.getAttribute('aria-label'), null);
+        assert.equal(app.doc.getElementById('nav-attn-badge').hidden, true);
+        assert.equal(app.G.App._currentView, 'today');
+        await sleep(app.w, 30);
+    } finally { app.close(); }
+});
+
 // A Tuesday at 15:30 in Greece: the 16:00–17:00 lesson below is still to come, whatever the real time.
 const BEFORE_LESSON = '2026-10-27T13:30:00Z';
 

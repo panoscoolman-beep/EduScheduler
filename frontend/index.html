@@ -8,11 +8,11 @@
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0c1018">
     <link rel="icon" href="/img/icon-192.png">
-    <script src="js/appearance.js?v=92"></script>
+    <script src="js/appearance.js?v=93"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=92">
+    <link rel="stylesheet" href="css/styles.css?v=93">
 </head>
 <body>
     <div class="app-layout" id="app">
@@ -31,6 +31,7 @@
                         <a href="#dashboard" class="nav-item active" data-view="dashboard" id="nav-dashboard">
                             <span class="nav-icon">📊</span>
                             <span class="nav-label">Πίνακας Ελέγχου</span>
+                            <span class="nav-badge" id="nav-attn-badge" aria-hidden="true" hidden></span>
                         </a>
                     </li>
                     <li>
@@ -160,7 +161,7 @@
         <a href="#today" class="bottom-nav-item" data-nav="today"><span class="bn-icon" aria-hidden="true">📱</span><span class="bn-label">Σήμερα</span></a>
         <a href="#timetable" class="bottom-nav-item" data-nav="timetable"><span class="bn-icon" aria-hidden="true">📋</span><span class="bn-label">Ωρολόγιο</span></a>
         <a href="#students" class="bottom-nav-item" data-nav="students"><span class="bn-icon" aria-hidden="true">🎓</span><span class="bn-label">Μαθητές</span></a>
-        <button type="button" class="bottom-nav-item" id="bn-more" aria-haspopup="dialog" aria-controls="more-sheet"><span class="bn-icon" aria-hidden="true">☰</span><span class="bn-label">Περισσότερα</span></button>
+        <button type="button" class="bottom-nav-item" id="bn-more" aria-haspopup="dialog" aria-controls="more-sheet"><span class="bn-icon" aria-hidden="true">☰</span><span class="bn-label">Περισσότερα</span><span class="bn-badge" id="bn-more-badge" aria-hidden="true" hidden></span></button>
     </nav>
 
     <!-- Μενού «Περισσότερα» (κινητό) — το γεμίζει το App -->
@@ -185,44 +186,44 @@
     <!-- Toast Notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="js/api.js?v=92"></script>
-    <script src="js/components/toast.js?v=92"></script>
-    <script src="js/components/back_guard.js?v=92"></script>
-    <script src="js/components/modal.js?v=92"></script>
-    <script src="js/components/menu.js?v=92"></script>
-    <script src="js/components/availability-modal.js?v=92"></script>
-    <script src="js/components/data-table.js?v=92"></script>
-    <script src="js/components/archive_controls.js?v=92"></script>
-    <script src="js/components/student_picker.js?v=92"></script>
-    <script src="js/components/timetable-grid.js?v=92"></script>
-    <script src="js/views/dashboard.js?v=92"></script>
-    <script src="js/views/terms.js?v=92"></script>
-    <script src="js/views/teachers.js?v=92"></script>
-    <script src="js/views/subjects.js?v=92"></script>
-    <script src="js/views/students_helpers.js?v=92"></script>
-    <script src="js/views/students.js?v=92"></script>
-    <script src="js/views/classes.js?v=92"></script>
-    <script src="js/views/classrooms.js?v=92"></script>
-    <script src="js/views/periods.js?v=92"></script>
-    <script src="js/views/lessons_helpers.js?v=92"></script>
-    <script src="js/views/lessons.js?v=92"></script>
-    <script src="js/views/constraints.js?v=92"></script>
-    <script src="js/views/generate.js?v=92"></script>
-    <script src="js/views/timetable_helpers.js?v=92"></script>
-    <script src="js/components/compare_modal.js?v=92"></script>
-    <script src="js/components/substitute_modal.js?v=92"></script>
-    <script src="js/components/insights_modal.js?v=92"></script>
-    <script src="js/components/lesson_impact_modal.js?v=92"></script>
-    <script src="js/components/palette_cleanup_modal.js?v=92"></script>
-    <script src="js/components/publish_modal.js?v=92"></script>
-    <script src="js/components/lesson_roster_modal.js?v=92"></script>
-    <script src="js/services/timetable_interactions.js?v=92"></script>
-    <script src="js/views/timetable.js?v=92"></script>
-    <script src="js/components/contact.js?v=92"></script>
-    <script src="js/views/today_helpers.js?v=92"></script>
-    <script src="js/views/today.js?v=92"></script>
-    <script src="js/views/settings.js?v=92"></script>
-    <script src="js/services/version_check.js?v=92"></script>
-    <script src="js/app.js?v=92"></script>
+    <script src="js/api.js?v=93"></script>
+    <script src="js/components/toast.js?v=93"></script>
+    <script src="js/components/back_guard.js?v=93"></script>
+    <script src="js/components/modal.js?v=93"></script>
+    <script src="js/components/menu.js?v=93"></script>
+    <script src="js/components/availability-modal.js?v=93"></script>
+    <script src="js/components/data-table.js?v=93"></script>
+    <script src="js/components/archive_controls.js?v=93"></script>
+    <script src="js/components/student_picker.js?v=93"></script>
+    <script src="js/components/timetable-grid.js?v=93"></script>
+    <script src="js/views/dashboard.js?v=93"></script>
+    <script src="js/views/terms.js?v=93"></script>
+    <script src="js/views/teachers.js?v=93"></script>
+    <script src="js/views/subjects.js?v=93"></script>
+    <script src="js/views/students_helpers.js?v=93"></script>
+    <script src="js/views/students.js?v=93"></script>
+    <script src="js/views/classes.js?v=93"></script>
+    <script src="js/views/classrooms.js?v=93"></script>
+    <script src="js/views/periods.js?v=93"></script>
+    <script src="js/views/lessons_helpers.js?v=93"></script>
+    <script src="js/views/lessons.js?v=93"></script>
+    <script src="js/views/constraints.js?v=93"></script>
+    <script src="js/views/generate.js?v=93"></script>
+    <script src="js/views/timetable_helpers.js?v=93"></script>
+    <script src="js/components/compare_modal.js?v=93"></script>
+    <script src="js/components/substitute_modal.js?v=93"></script>
+    <script src="js/components/insights_modal.js?v=93"></script>
+    <script src="js/components/lesson_impact_modal.js?v=93"></script>
+    <script src="js/components/palette_cleanup_modal.js?v=93"></script>
+    <script src="js/components/publish_modal.js?v=93"></script>
+    <script src="js/components/lesson_roster_modal.js?v=93"></script>
+    <script src="js/services/timetable_interactions.js?v=93"></script>
+    <script src="js/views/timetable.js?v=93"></script>
+    <script src="js/components/contact.js?v=93"></script>
+    <script src="js/views/today_helpers.js?v=93"></script>
+    <script src="js/views/today.js?v=93"></script>
+    <script src="js/views/settings.js?v=93"></script>
+    <script src="js/services/version_check.js?v=93"></script>
+    <script src="js/app.js?v=93"></script>
 </body>
 </html>

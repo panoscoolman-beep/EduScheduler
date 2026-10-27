@@ -11,9 +11,12 @@
 
 Η αίθουσα είναι ειδική περίπτωση: δεν σβήνει μαθήματα, αλλά οι ώρες που είναι
 τοποθετημένες σε αυτήν θα έμεναν «τοποθετημένες χωρίς αίθουσα». Με force
-επιστρέφουν στην Παλέτα (`unplace_room_slots`) σε ΟΛΑ τα προγράμματα (και τα
-αρχειοθετημένα) με την παλιά τους θέση γραμμένη στη σημείωση της κάρτας· το
-καρφίτσωμα στις κάρτες και η αίθουσα-βάση των τμημάτων σβήνονται (SET NULL).
+επιστρέφουν στην Παλέτα (`unplace_room_slots`) σε ΟΛΑ τα προγράμματα με την
+παλιά τους θέση γραμμένη στη σημείωση της κάρτας· το καρφίτσωμα στις κάρτες
+και η αίθουσα-βάση των τμημάτων σβήνονται (SET NULL). Αν όμως έχει ώρες σε
+ΑΡΧΕΙΟΘΕΤΗΜΕΝΟ πρόγραμμα, η διαγραφή αρνείται και με force
+(`classroom_in_archived`, χωρίς `requires_force`): το σωστό είναι η
+📦 Αρχειοθέτηση της αίθουσας (`backend/services/archive.py`).
 """
 from __future__ import annotations
 
@@ -207,7 +210,23 @@ def _classroom_message(name: str, usage: dict) -> str:
 
 def guard_classroom(usage: dict, *, force: bool, name: str) -> None:
     """409 όταν η αίθουσα έχει τοποθετημένες ώρες Ή είναι καρφωμένη σε κάρτες /
-    αίθουσα-βάση τμημάτων, και δεν δόθηκε force."""
+    αίθουσα-βάση τμημάτων, και δεν δόθηκε force.
+
+    Ώρες σε ΑΡΧΕΙΟΘΕΤΗΜΕΝΟ πρόγραμμα: άρνηση ακόμη και με force — το
+    αρχειοθετημένο είναι αρχείο παλιού ωρολογίου και κρατά τις αίθουσές του·
+    η σωστή κίνηση είναι η 📦 Αρχειοθέτηση της αίθουσας."""
+    archived = [p for p in usage.get("programmes", []) if p.get("archived")]
+    if archived:
+        listing = ", ".join(f"«{p['solution_name']}»" for p in archived)
+        raise HTTPException(status_code=409, detail={
+            "code": "classroom_in_archived",
+            "requires_force": False,
+            "message": (f"Η αίθουσα «{name}» έχει ώρες σε αρχειοθετημένα προγράμματα: {listing}. "
+                        "Αν τη διαγράψεις, εκείνα τα προγράμματα θα χάσουν τις θέσεις τους. "
+                        "Κάνε της 📦 Αρχειοθέτηση αντί για διαγραφή "
+                        "(κρατά τα παλιά προγράμματα ακέραια)."),
+            "usage": usage,
+        })
     in_use = usage["placed"] or usage.get("preferred_by_lessons") or usage.get("home_room_of_classes")
     if not in_use or force:
         return

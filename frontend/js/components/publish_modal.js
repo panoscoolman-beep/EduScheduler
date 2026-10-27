@@ -206,6 +206,8 @@ const PublishModal = {
             Toast.error(PublishModal.esc(err.message));
             return;
         }
+        // Το σήμα «Χρειάζεται προσοχή» να μη λέει πια «δεν έχει δημοσιευτεί».
+        if (typeof App !== 'undefined' && App.refreshAttention) App.refreshAttention({ force: true });
         if (!res.emails || !res.emails.requested) {
             Modal.close();
             Toast.success(notify ? '✅ Δημοσιεύτηκε — η σύνοψη έρχεται στο Telegram σε λίγα λεπτά.' : '✅ Δημοσιεύτηκε.');
