@@ -20,6 +20,24 @@ const LessonsView = {
     _classrooms: [],
     _periods: [],
     _teachingPeriodsPerDay: 0,
+    // Αναζήτηση/φίλτρα της λίστας (μένουν όσο είσαι στην εφαρμογή).
+    _filter: { search: '', teacher: '', cls: '' },
+
+    /** Pure: ποιες κάρτες φαίνονται με την αναζήτηση και τα φίλτρα. */
+    filterLessons(rows, f) {
+        const q = (f.search || '').trim().toLocaleLowerCase('el');
+        return (rows || []).filter(r => (!f.teacher || r.teacher_name === f.teacher)
+            && (!f.cls || r.class_name === f.cls)
+            && (!q || [r.subject_name, r.teacher_name, r.class_name, r.classroom_name, ...(r.students || [])]
+                .filter(Boolean).join(' ').toLocaleLowerCase('el').includes(q)));
+    },
+
+    /** «Φυσική — Β2 (Νικολάου)»: όνομα κάρτας για τις επιβεβαιώσεις διαγραφής. */
+    lessonLabel(r) {
+        if (!r) return '';
+        const main = [r.subject_name, r.class_name].filter(Boolean).join(' — ');
+        return main ? `${main}${r.teacher_name ? ` (${r.teacher_name})` : ''}` : '';
+    },
 
     /** 👥 Κελί «Μαθητές»: πλήθος + ονόματα (αυτόματα από τη λίστα της κάρτας). */
     _studentsCell(row) {
@@ -48,17 +66,20 @@ const LessonsView = {
             columns: [
                 { key: 'subject_name', label: 'Μάθημα' },
                 { key: 'teacher_name', label: 'Καθηγητής' },
-                { key: 'class_name', label: 'Τάξη' },
+                { key: 'class_name', label: 'Τμήμα' },
                 {
                     key: 'students', label: 'Μαθητές',
                     render: (v, row) => LessonsView._studentsCell(row),
                 },
                 { key: 'classroom_name', label: 'Αίθουσα', render: v => v || '—αυτόματη—' },
                 { key: 'periods_per_week', label: 'Ώρες/Εβδ' },
-                { key: 'distribution', label: 'Blocks', render: v => v ? LessonsHelpers._esc(v) : '<span class="text-muted">όλα 1ωρα</span>' },
+                { key: 'distribution', label: 'Κατανομή', render: v => v ? LessonsHelpers._esc(v) : '<span class="text-muted">όλα 1ωρα</span>' },
             ],
             apiService: API.lessons,
             entityName: 'Μαθήματα-Κάρτες',
+            itemLabel: (item) => LessonsView.lessonLabel(item),
+            rowFilter: (data) => LessonsView.filterLessons(data, LessonsView._filter),
+            onRendered: (all, visible) => LessonsView._renderFilterCount(all, visible),
             customActions: [{
                 id: 'roster', icon: '👥',
                 title: 'Ποιοι μαθητές παρακολουθούν αυτή την κάρτα (εξαιρέσεις/προσθήκες)',
@@ -69,8 +90,27 @@ const LessonsView = {
             onFormReady: () => self._wireValidation(),
         });
 
+        const esc = LessonsHelpers._esc;
+        const collator = new Intl.Collator('el');
+        const names = (list) => [...new Set((list || []).map(x => x.name).filter(Boolean))].sort(collator.compare);
+        const opt = (value, current) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(value)}</option>`;
+        const f = this._filter;
         container.innerHTML = `
-            <div class="flex-between mb-lg">
+            <div class="card sf-card lf-card">
+                <div class="sf-toolbar lf-toolbar">
+                    <input class="form-input sf-search" id="lf-search" type="search" aria-label="Αναζήτηση κάρτας"
+                           placeholder="🔍 Μάθημα, καθηγητής, τμήμα ή μαθητής…" value="${esc(f.search)}">
+                    <select class="form-select lf-select" id="lf-teacher" aria-label="Καθηγητής">
+                        <option value="">Όλοι οι καθηγητές</option>${names(self._teachers).map(n => opt(n, f.teacher)).join('')}
+                    </select>
+                    <select class="form-select lf-select" id="lf-class" aria-label="Τμήμα">
+                        <option value="">Όλα τα τμήματα</option>${names(self._classes).map(n => opt(n, f.cls)).join('')}
+                    </select>
+                    <span class="sf-count" id="lf-count"></span>
+                    <button class="btn btn-sm btn-secondary" id="lf-clear" hidden>✖ Καθαρισμός</button>
+                </div>
+            </div>
+            <div class="flex-between mb-lg lessons-tools">
                 <div></div>
                 <div>
                     <button class="btn btn-secondary" id="term-import-lessons"
@@ -79,18 +119,39 @@ const LessonsView = {
                         📚 Από άλλο σενάριο
                     </button>
                     <button class="btn btn-secondary" id="bulk-import-lessons">
-                        📥 Bulk Import (CSV)
+                        📥 Μαζική εισαγωγή (CSV)
                     </button>
                 </div>
             </div>
             <div id="lessons-table"></div>
         `;
+        const refilter = () => table.renderTable();
+        document.getElementById('lf-search').addEventListener('input', (e) => { this._filter.search = e.target.value; refilter(); });
+        document.getElementById('lf-teacher').addEventListener('change', (e) => { this._filter.teacher = e.target.value; refilter(); });
+        document.getElementById('lf-class').addEventListener('change', (e) => { this._filter.cls = e.target.value; refilter(); });
+        document.getElementById('lf-clear').addEventListener('click', () => {
+            this._filter = { search: '', teacher: '', cls: '' };
+            document.getElementById('lf-search').value = '';
+            document.getElementById('lf-teacher').value = '';
+            document.getElementById('lf-class').value = '';
+            refilter();
+        });
         await table.render(document.getElementById('lessons-table'));
 
         document.getElementById('bulk-import-lessons')
             .addEventListener('click', () => self._openBulkImportModal(table));
         document.getElementById('term-import-lessons')
             .addEventListener('click', () => self._openTermImportModal(table));
+    },
+
+    _renderFilterCount(all, visible) {
+        const count = document.getElementById('lf-count');
+        const clear = document.getElementById('lf-clear');
+        if (!count) return;
+        const f = this._filter;
+        const active = Boolean(f.search || f.teacher || f.cls);
+        count.textContent = active ? `${visible.length} από ${all.length}` : `${all.length} κάρτες`;
+        if (clear) clear.hidden = !active;
     },
 
     // ---------- selective import from another term -------------------------
@@ -207,7 +268,7 @@ const LessonsView = {
         ].join('\n');
 
         Modal.open(
-            '📥 Bulk Import Lessons',
+            '📥 Μαζική εισαγωγή μαθημάτων',
             `
             <p class="text-muted" style="margin-bottom:1rem;">
                 Επικόλλησε CSV ή ανέβασε αρχείο. Μπορείς να χρησιμοποιήσεις
@@ -264,7 +325,7 @@ const LessonsView = {
                 Toast.error(LessonsHelpers._esc(err.message));
             }
             previewBtn.disabled = false;
-            previewBtn.textContent = '👁️ Preview';
+            previewBtn.textContent = '👁️ Προεπισκόπηση';
         });
     },
 
@@ -402,7 +463,7 @@ const LessonsView = {
                     <input class="form-input" id="f-ppw" type="number" min="1" max="20" value="${item?.periods_per_week || 1}">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Κατανομή σε Blocks</label>
+                    <label class="form-label">Κατανομή σε συνεχόμενες ώρες</label>
                     <div id="f-dist-chips" style="
                         display: flex; flex-wrap: wrap; gap: 0.4rem;
                         margin-bottom: 0.5rem; min-height: 2rem;">
@@ -630,7 +691,7 @@ const LessonsView = {
                 if (roomType !== subject.special_room_type) {
                     issues.push({
                         severity: 'warning',
-                        message: `Το μάθημα απαιτεί αίθουσα τύπου "${subject.special_room_type}" αλλά η επιλεγμένη είναι "${roomType || 'γενική'}". Ο solver μπορεί να αρνηθεί.`,
+                        message: `Το μάθημα απαιτεί αίθουσα τύπου "${subject.special_room_type}" αλλά η επιλεγμένη είναι "${roomType || 'γενική'}". Ο αλγόριθμος μπορεί να αρνηθεί.`,
                     });
                 }
             }

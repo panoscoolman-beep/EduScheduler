@@ -23,7 +23,7 @@ const CompareModal = {
             `<label style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0;">
                 <input type="checkbox" class="cmp-pick" value="${s.id}">
                 <span><strong>${TimetableHelpers.esc(s.name)}</strong>
-                <span class="text-muted" style="font-size:0.85em">— ${s.status}, score=${s.score?.toFixed(0) || '—'}</span></span>
+                <span class="text-muted" style="font-size:0.85em">— ${s.status}, βαθμολογία ${s.score?.toFixed(0) || '—'}</span></span>
             </label>`
         ).join('');
 

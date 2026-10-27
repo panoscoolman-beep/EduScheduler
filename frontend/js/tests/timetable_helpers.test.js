@@ -440,7 +440,7 @@ test('buildFeasibilityHtml: feasible with no warnings shows green all-clear', ()
         stats: { total_periods_needed: 20, total_slots_available: 60, load_factor: 0.33 },
     });
     assert.match(html, /✅ Εφικτό/);
-    assert.match(html, /Όλα τα checks πέρασαν/);
+    assert.match(html, /Όλοι οι έλεγχοι πέρασαν/);
     assert.ok(!/Τι να κάνεις/.test(html));
 });
 

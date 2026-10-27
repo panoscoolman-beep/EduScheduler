@@ -35,7 +35,7 @@ test('effectLines: λέει ΠΟΥ μετράνε και πού ΔΕΝ μετρ�
     assert.match(lines, /4 ώρες περιμένουν στην Παλέτα σε 2 πρόγραμμα\(τα\) του «ΧΕΙΜΕΡΙΝΟ»/);
     assert.match(lines, /ΔΕΝ εμφανίζονται στο τυπωμένο πρόγραμμα/);
     assert.match(lines, /ΔΕΝ μετράνε στις ώρες και στη μισθοδοσία του CRM/);
-    assert.match(lines, /solver/);
+    assert.match(lines, /αλγόριθμος/);
     assert.match(lines, /μόνο αυτό το σενάριο/);
 });
 
@@ -131,13 +131,18 @@ test('επιλογέας προγράμματος: τα αρχειοθετημέ
         { id: 1, name: 'Πολύ παλιό', archived: true },
     ];
     const html = H.buildSolutionOptionsHtml(sols, 3);
-    assert.match(html, /<option value="3" selected>ΧΕΙΜΕΡΙΝΟ<\/option>/);
+    assert.match(html, /<option value="3" data-name="ΧΕΙΜΕΡΙΝΟ" selected>ΧΕΙΜΕΡΙΝΟ<\/option>/);
     assert.match(html, /<optgroup label="📦 Αρχειοθετημένα \(2\)">/);
     assert.match(html, /Παλιό &lt;b&gt;8\/5&lt;\/b&gt;/);          // escaped
     assert.ok(html.indexOf('optgroup') > html.indexOf('ΧΕΙΜΕΡΙΝΟ'));
 
     // Χωρίς αρχειοθετημένα: καμία ομάδα
     assert.doesNotMatch(H.buildSolutionOptionsHtml([sols[0]], 3), /optgroup/);
+
+    // 📢 το δημοσιευμένο φαίνεται στη λίστα· το όνομα (data-name) μένει καθαρό για τη μετονομασία
+    const pub = H.buildSolutionOptionsHtml(sols, 3, 3);
+    assert.match(pub, /<option value="3" data-name="ΧΕΙΜΕΡΙΝΟ" selected>ΧΕΙΜΕΡΙΝΟ · 📢 δημοσιευμένο<\/option>/);
+    assert.doesNotMatch(pub, /Πολύ παλιό · 📢/);
 });
 
 test('ποιο πρόγραμμα ανοίγει + κατάσταση κουμπιού αρχειοθέτησης', () => {

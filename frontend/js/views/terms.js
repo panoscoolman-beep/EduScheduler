@@ -93,7 +93,7 @@ const TermsView = {
                 <input class="form-input" id="shift-offset" type="number" value="6" step="1">
                 <small class="text-muted">Θετικό = αργότερα μέσα στη μέρα (π.χ. <strong>+6</strong>: πρωινές 1η–6η → απογευματινές 7η–12η). Αρνητικό = νωρίτερα.</small>
              </div>
-             <label style="display:block"><input type="checkbox" id="shift-sols" checked> Μετατόπιση και των υπαρχόντων προγραμμάτων (ό,τι βγαίνει εκτός εύρους πάει στο parking lot)</label>`,
+             <label style="display:block"><input type="checkbox" id="shift-sols" checked> Μετατόπιση και των υπαρχόντων προγραμμάτων (ό,τι βγαίνει εκτός εύρους πάει στην Παλέτα)</label>`,
             async () => {
                 const offset = parseInt(document.getElementById('shift-offset').value, 10);
                 if (!offset) { Toast.error('Δώσε μη-μηδενική μετατόπιση.'); return; }

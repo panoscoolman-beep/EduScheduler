@@ -13,7 +13,7 @@ const ClassesView = {
         const archive = ArchiveControls.create(API.classes, 'το τμήμα');
         const table = new DataTable({
             columns: [
-                { key: 'name', label: 'Τάξη' , render: ArchiveControls.nameRender },
+                { key: 'name', label: 'Τμήμα', render: ArchiveControls.nameRender },
                 { key: 'short_name', label: 'Συντομ.' },
                 { key: 'grade_level', label: 'Βαθμίδα', render: v => v ? `${v}` : '—' },
                 { key: 'student_ids', label: 'Μαθητές', render: v => (v || []).length },
@@ -21,11 +21,11 @@ const ClassesView = {
             apiService: archive.api,
             toolbarHtml: archive.toolbarHtml(),
             customActions: [archive.action],
-            entityName: 'Τάξεις',
+            entityName: 'Τμήματα',
             formBuilder: (item) => `
                 <div class="form-grid">
                     <div class="form-group">
-                        <label class="form-label">Όνομα Τάξης *</label>
+                        <label class="form-label">Όνομα τμήματος *</label>
                         <input class="form-input" id="f-name" value="${DataTable.esc(item?.name || '')}" placeholder="π.χ. Α1 Γυμνασίου">
                     </div>
                     <div class="form-group">

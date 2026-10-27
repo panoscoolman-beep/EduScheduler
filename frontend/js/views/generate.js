@@ -10,7 +10,7 @@ const GenerateView = {
                     Δημιουργία Ωρολογίου
                 </h2>
                 <p class="text-muted mb-lg">
-                    Ο solver θα αναλύσει τα δεδομένα σας και θα δημιουργήσει
+                    Ο αλγόριθμος θα αναλύσει τα δεδομένα σας και θα δημιουργήσει
                     αυτόματα το βέλτιστο ωρολόγιο πρόγραμμα.
                 </p>
 
@@ -27,23 +27,23 @@ const GenerateView = {
                 <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-md);">
                     <label class="form-label">Λειτουργία</label>
                     <select class="form-select" id="gen-mode">
-                        <option value="strict" selected>Strict — όλα ή τίποτα</option>
-                        <option value="permissive">Permissive — βάλε όσα μπορείς</option>
+                        <option value="strict" selected>Αυστηρή — όλα ή τίποτα</option>
+                        <option value="permissive">Ελαστική — βάλε όσα χωράνε</option>
                     </select>
                     <p class="text-muted" style="font-size: 0.85em; margin-top: 0.5rem; text-align: left;">
-                        <b>Strict</b>: αν δεν χωράνε όλες οι ώρες → INFEASIBLE.<br>
-                        <b>Permissive</b>: τοποθετεί ό,τι χωράει· τα υπόλοιπα πάνε στο
-                        🅿️ Parking Lot (κάτω από το πρόγραμμα) και τα τοποθετείς χειροκίνητα με drag.
+                        <b>Αυστηρή</b>: αν δεν χωράνε όλες οι ώρες, δεν βγαίνει πρόγραμμα («Αδύνατο»).<br>
+                        <b>Ελαστική</b>: τοποθετεί ό,τι χωράει· τα υπόλοιπα πάνε στην
+                        🅿️ Παλέτα (κάτω από το πρόγραμμα) και τα τοποθετείς εσύ — με σύρσιμο ή «↔ Μετακίνηση».
                     </p>
                 </div>
 
                 <div class="form-group" style="max-width: 400px; margin: 0 auto var(--space-lg);">
-                    <label class="form-label">Warm start (προαιρετικό)</label>
+                    <label class="form-label">Ξεκίνα από προηγούμενο πρόγραμμα (προαιρετικό)</label>
                     <select class="form-select" id="gen-warmstart">
                         <option value="">— Καμία (πλήρης αναζήτηση) —</option>
                     </select>
                     <p class="text-muted" style="font-size: 0.85em; margin-top: 0.5rem; text-align: left;">
-                        Δίνει στον solver την προηγούμενη λύση σαν <b>πρόταση</b>
+                        Δίνει στον αλγόριθμο την προηγούμενη λύση σαν <b>πρόταση</b>
                         (όχι περιορισμός). Βοηθάει όταν έχεις κάνει λίγες αλλαγές
                         και θες γρηγορότερο αποτέλεσμα.
                     </p>
@@ -114,7 +114,7 @@ const GenerateView = {
             if (report.feasible) {
                 Toast.success('Το πρόβλημα φαίνεται εφικτό');
             } else {
-                Toast.error(`${report.errors.length} σφάλματα — ο solver θα αποτύχει`);
+                Toast.error(`${report.errors.length} σφάλματα — ο αλγόριθμος θα αποτύχει`);
             }
         } catch (err) {
             Toast.error(TimetableHelpers.esc(err.message));
@@ -174,7 +174,7 @@ const GenerateView = {
             progress.style.width = `${width}%`;
         }, 500);
 
-        message.textContent = `Ο solver εργάζεται (${mode} mode)...`;
+        message.textContent = `Ο αλγόριθμος δουλεύει (${mode === 'permissive' ? 'ελαστική' : 'αυστηρή'} λειτουργία)…`;
 
         try {
             const payload = { name, max_time_seconds: maxTime, mode };
@@ -210,11 +210,11 @@ const GenerateView = {
                     </div>
                     <div class="solver-stat" style="${unplaced > 0 ? 'color: var(--warning, #F59E0B);' : ''}">
                         <div class="value">${unplaced}</div>
-                        <div class="label">${unplaced > 0 ? '🅿️ Στο Parking Lot' : 'Στο Parking Lot'}</div>
+                        <div class="label">${unplaced > 0 ? '🅿️ Στην Παλέτα' : 'Στην Παλέτα'}</div>
                     </div>
                     <div class="solver-stat">
                         <div class="value">${result.score?.toFixed(0) || '0'}</div>
-                        <div class="label">Σκορ</div>
+                        <div class="label">Βαθμολογία</div>
                     </div>
                 `;
             } else {
@@ -248,8 +248,8 @@ const GenerateView = {
                 /failed to fetch|networkerror|load failed/i.test(err.message || '');
             if (isNetworkError) {
                 const explanation = (
-                    'Σύνδεση χάθηκε με τον server. Συνήθως συμβαίνει αν ' +
-                    'γίνει deploy ενώ τρέχει ο solver. Δοκίμασε ξανά σε ' +
+                    'Χάθηκε η σύνδεση με τον διακομιστή. Συνήθως συμβαίνει αν ' +
+                    'έγινε ενημέρωση της εφαρμογής ενώ έτρεχε ο αλγόριθμος. Δοκίμασε ξανά σε ' +
                     'λίγα δευτερόλεπτα — η εργασία ξεκινά από την αρχή.'
                 );
                 message.textContent = explanation;
@@ -278,13 +278,13 @@ const GenerateView = {
             } catch (err) {
                 // Transient network hiccup (e.g. deploy) — keep polling,
                 // the run continues server-side.
-                messageEl.textContent = `Ο solver τρέχει (${elapsed}s)... (επανασύνδεση)`;
+                messageEl.textContent = `Ο αλγόριθμος τρέχει (${elapsed}″)… (επανασύνδεση)`;
                 continue;
             }
             if (status.status !== 'generating') {
                 return status;
             }
-            messageEl.textContent = `Ο solver τρέχει (${elapsed}s / έως ${maxTimeSeconds}s)...`;
+            messageEl.textContent = `Ο αλγόριθμος τρέχει (${elapsed}″ από έως ${maxTimeSeconds}″)…`;
         }
         return {
             status: 'error',
@@ -310,33 +310,18 @@ const GenerateView = {
                         <tr>
                             <th>Όνομα</th>
                             <th>Κατάσταση</th>
-                            <th>Σκορ</th>
+                            <th>Βαθμολογία</th>
                             <th>Ημερομηνία</th>
                             <th style="text-align:right">Ενέργειες</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${solutions.map(s => {
-                            const statusLabels = {
-                                optimal:    'Βέλτιστο',
-                                feasible:   'OK',
-                                infeasible: 'Αδύνατο',
-                                generating: '⏳ Σε εξέλιξη',
-                                error:      '⚠️ Σφάλμα',
-                                draft:      'Πρόχειρο',
-                            };
-                            const statusClass = s.status === 'optimal' || s.status === 'feasible'
-                                ? 'soft'
-                                : 'hard';
-                            const statusTitle = s.status === 'error'
-                                ? 'Ο solver δεν ολοκλήρωσε (λήξη χρόνου, σφάλμα ή restart του container) — δεν υπάρχει πρόγραμμα. Δες το μήνυμα στη δημιουργία, διέγραψέ την και ξανατρέξε.'
-                                : (s.status === 'generating'
-                                    ? 'Ο solver έτρεχε όταν φόρτωσε η σελίδα — αν παραμένει ώρα, διέγραψέ την.'
-                                    : '');
+                            const st = TimetableHelpers.statusInfo(s.status);
                             return `
                             <tr>
                                 <td>${this._escape(s.name)}</td>
-                                <td><span class="constraint-badge ${statusClass}" title="${statusTitle}">${statusLabels[s.status] || s.status}</span></td>
+                                <td><span class="status-chip ${st.cls}" title="${this._escape(st.title)}">${this._escape(st.label)}</span></td>
                                 <td>${s.score?.toFixed(0) || '—'}</td>
                                 <td>${TimetableHelpers.formatServerTime(s.created_at, 'locale', '—')}</td>
                                 <td class="actions">

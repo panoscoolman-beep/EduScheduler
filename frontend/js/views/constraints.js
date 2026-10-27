@@ -119,8 +119,8 @@ const ConstraintsView = {
                     + (this._appliedAsSoft(item) ? '<br><small class="text-muted constraint-note">⚠️ εφαρμόζεται ως μαλακός</small>' : '') },
                 { key: 'name', label: 'Περιορισμός' },
                 { key: 'rule', label: 'Κανόνας', render: (v, item) => this._renderRuleSummary(v)
-                    + (this._notApplied(item) ? '<br><small class="text-muted constraint-note">⚠️ δεν εφαρμόζεται από τον solver</small>' : '') },
-                { key: 'category', label: 'Κατηγορία', render: v => ({ teacher: 'Καθηγητής', class: 'Τάξη', subject: 'Μάθημα', room: 'Αίθουσα', general: 'Γενικό' }[v] || v) },
+                    + (this._notApplied(item) ? '<br><small class="text-muted constraint-note">⚠️ δεν εφαρμόζεται από τον αλγόριθμο</small>' : '') },
+                { key: 'category', label: 'Κατηγορία', render: v => ({ teacher: 'Καθηγητής', class: 'Τμήμα', subject: 'Μάθημα', room: 'Αίθουσα', general: 'Γενικό' }[v] || v) },
                 { key: 'weight', label: 'Βάρος', render: (v, item) => item.constraint_type === 'soft' ? `${v}%` : '—' },
                 { key: 'is_active', label: 'Ενεργός', render: v => v ? '✅' : '❌' },
             ],
@@ -233,7 +233,7 @@ const ConstraintsView = {
                     <select class="form-select" id="f-category">
                         ${['general', 'teacher', 'class', 'subject', 'room'].map(c =>
                             `<option value="${c}" ${item?.category === c ? 'selected' : ''}>${
-                                {general: 'Γενικό', teacher: 'Καθηγητής', class: 'Τάξη', subject: 'Μάθημα', room: 'Αίθουσα'}[c]
+                                {general: 'Γενικό', teacher: 'Καθηγητής', class: 'Τμήμα', subject: 'Μάθημα', room: 'Αίθουσα'}[c]
                             }</option>`
                         ).join('')}
                     </select>
@@ -310,7 +310,7 @@ const ConstraintsView = {
             if (capable) hintEl.textContent = '';
             else if (typeSel.value === 'hard') {
                 hintEl.textContent = rt === 'custom' ? ''
-                    : '⚠️ Αυτό το είδος κανόνα εφαρμόζεται ως μαλακός (προτίμηση) από τον solver.';
+                    : '⚠️ Αυτό το είδος κανόνα εφαρμόζεται ως μαλακός (προτίμηση) από τον αλγόριθμο.';
             } else {
                 hintEl.textContent = 'Ο «Σκληρός» υπάρχει μόνο για «Όχι μάθημα μετά από συγκεκριμένη ώρα» '
                     + 'και «Προτιμώμενες ημέρες καθηγητή» — οι υπόλοιποι κανόνες είναι προτιμήσεις.';

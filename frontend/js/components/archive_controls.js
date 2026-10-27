@@ -40,7 +40,7 @@ const ArchiveControls = {
         return `<p>Θα αρχειοθετηθεί ${noun} «<b>${ArchiveControls.esc(item.name)}</b>».</p>
             <ul class="text-muted" style="font-size:0.85rem; margin:0.5rem 0 0 1.1rem">
                 <li>Δεν σβήνεται τίποτα — τα παλιά προγράμματα μένουν ακέραια.</li>
-                <li>Κρύβεται από λίστες, φόρμες και τον solver.</li>
+                <li>Κρύβεται από λίστες, φόρμες και τη δημιουργία προγράμματος.</li>
                 <li>Επαναφέρεται από το «📦 Αρχειοθετημένα» πάνω δεξιά.</li>
             </ul>`;
     },

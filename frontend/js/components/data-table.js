@@ -10,7 +10,7 @@ class DataTable {
     }
 
     constructor({ containerId, columns, apiService, entityName, customActions, formBuilder, formParser, onFormReady,
-                  rowFilter, onRendered, toolbarHtml, forceUpdateConfirm }) {
+                  rowFilter, onRendered, toolbarHtml, forceUpdateConfirm, itemLabel }) {
         this.container = document.getElementById(containerId) || document.createElement('div');
         this.columns = columns;
         this.api = apiService;
@@ -29,6 +29,9 @@ class DataTable {
         // Προαιρετικά: forceUpdateConfirm(detail) → {title, bodyHtml, saveText, successText}
         // για δικά της κείμενα στην επιβεβαίωση ενός 409 (null = τα γενικά).
         this.forceUpdateConfirm = forceUpdateConfirm || null;
+        // Προαιρετικά: itemLabel(item) → όνομα της εγγραφής στις επιβεβαιώσεις
+        // (π.χ. «Φυσική — Β2 (Νικολάου)» αντί για «#57»).
+        this.itemLabel = itemLabel || null;
         this.data = [];
     }
 
@@ -61,7 +64,33 @@ class DataTable {
             this.renderTable();
         } catch (err) {
             Toast.error(`Σφάλμα φόρτωσης: ${DataTable.esc(err.message)}`);
+            // Πριν έμενε για πάντα το «Φόρτωση...»: τώρα μήνυμα και «Δοκίμασε ξανά».
+            const box = this.container.querySelector(`#dt-table-${this.slug}`);
+            if (box) {
+                box.innerHTML = `
+                    <div class="empty-state" role="alert">
+                        <div class="empty-state-icon">⚠️</div>
+                        <p class="empty-state-text">Δεν φορτώθηκαν τα δεδομένα</p>
+                        <p class="text-muted" style="margin-bottom:1rem">${DataTable.esc(err.message)}</p>
+                        <button class="btn btn-primary" data-dt-retry>↻ Δοκίμασε ξανά</button>
+                    </div>`;
+                box.querySelector('[data-dt-retry]').addEventListener('click', () => {
+                    box.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>';
+                    this.loadData();
+                });
+            }
         }
+    }
+
+    /** Όνομα εγγραφής για επιβεβαιώσεις — ποτέ σκέτο «#57» όταν υπάρχει κάτι καλύτερο. */
+    labelFor(item, id) {
+        if (!item) return `#${id}`;
+        if (this.itemLabel) {
+            const custom = this.itemLabel(item);
+            if (custom) return custom;
+        }
+        const person = [item.last_name, item.first_name].filter(Boolean).join(' ');
+        return item.name || person || item.short_name || item.title || `#${id}`;
     }
 
     renderTable() {
@@ -100,27 +129,29 @@ class DataTable {
                 // (ονόματα, email…) και ΠΡΕΠΕΙ να γίνει escape.
                 const raw = item[col.key];
                 const value = col.render ? col.render(raw, item) : DataTable.esc(raw);
-                return `<td>${value ?? ''}</td>`;
+                return `<td data-label="${DataTable.esc(col.label)}">${value ?? ''}</td>`;
             }).join('');
 
             const customBtns = this.customActions.map(action => {
-                return `<button class="btn btn-sm btn-secondary dt-custom" data-action="${action.id}" data-id="${item.id}" title="${action.title}">${action.icon}</button>`;
+                return `<button class="btn btn-sm btn-secondary dt-custom" data-action="${action.id}" data-id="${item.id}" title="${action.title}" aria-label="${action.title}">${action.icon}</button>`;
             }).join(' ');
 
             return `
                 <tr data-id="${item.id}">
                     ${cells}
                     <td class="actions">
-                        ${customBtns}
-                        <button class="btn btn-sm btn-secondary dt-edit" data-id="${item.id}" title="Επεξεργασία">✏️</button>
-                        <button class="btn btn-sm btn-danger dt-delete" data-id="${item.id}" title="Διαγραφή">🗑️</button>
+                        <div class="dt-actions">
+                            ${customBtns}
+                            <button class="btn btn-sm btn-secondary dt-edit" data-id="${item.id}" title="Επεξεργασία" aria-label="Επεξεργασία">✏️</button>
+                            <button class="btn btn-sm btn-danger dt-delete" data-id="${item.id}" title="Διαγραφή" aria-label="Διαγραφή">🗑️</button>
+                        </div>
                     </td>
                 </tr>
             `;
         }).join('');
 
         tableContainer.innerHTML = `
-            <table class="data-table">
+            <table class="data-table dt-cards">
                 <thead><tr>${headerCells}<th style="text-align:right">Ενέργειες</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
@@ -191,7 +222,7 @@ class DataTable {
 
     confirmDelete(id) {
         const item = this.data.find(d => d.id === id);
-        const name = item?.name || item?.short_name || `#${id}`;
+        const name = this.labelFor(item, id);
 
         Modal.open(
             'Επιβεβαίωση Διαγραφής',

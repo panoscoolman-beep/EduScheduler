@@ -99,7 +99,7 @@ test('Περιορισμοί (λίστα): σημειώσεις «εφαρμόζ
         const row = (id) => app.doc.querySelector(`tr[data-id="${id}"]`).textContent;
         assert.match(row(1), /⚠️ εφαρμόζεται ως μαλακός/);
         for (const id of [2, 3, 4, 5, 6]) assert.doesNotMatch(row(id), /εφαρμόζεται ως μαλακός/, `row ${id}`);
-        for (const id of [5, 6]) assert.match(row(id), /⚠️ δεν εφαρμόζεται από τον solver/, `row ${id}`);
+        for (const id of [5, 6]) assert.match(row(id), /⚠️ δεν εφαρμόζεται από τον αλγόριθμο/, `row ${id}`);
         for (const id of [1, 2, 3, 4]) assert.doesNotMatch(row(id), /δεν εφαρμόζεται/, `row ${id}`);
         // Καμία γραμμή δεν κρύφτηκε ή άλλαξε τύπο
         assert.equal(app.doc.querySelectorAll('#constraints-table tbody tr').length, 6);
