@@ -66,7 +66,7 @@ test('buildHtml: ετικέτες και escaping', () => {
     const html = T.buildHtml(T.buildDay(S, P, 1, '16:30'));
     assert.ok(html.includes('🟢 Τώρα · 16:00–17:00') && html.includes('⏭ Ακολουθεί · 17:00–18:00'));
     assert.ok(html.includes('&lt;b&gt;X') && !html.includes('<b>X'));
-    assert.ok(html.includes('1 ώρες έχουν ήδη ολοκληρωθεί'));
+    assert.ok(html.includes('1 ώρα έχει ήδη ολοκληρωθεί'));
     assert.ok(T.buildHtml(T.buildDay(S, P, 4, null)).includes('Κανένα μάθημα'));
 });
 

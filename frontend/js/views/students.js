@@ -90,7 +90,7 @@ const StudentsView = {
         });
 
         container.innerHTML = `
-            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-bottom:0.5rem">
+            <div class="page-tools">
                 <button class="btn btn-secondary" id="students-print"
                         title="Εκτυπώσιμος κατάλογος (αλφαβητικά ή ανά τάξη) — μόνο όσοι φαίνονται με τα τρέχοντα φίλτρα">
                     🖨️ Εκτύπωση
@@ -132,6 +132,10 @@ const StudentsView = {
             window.open(withFilter('/api/exports/students?format=csv'), '_blank'));
         document.getElementById('crm-import-btn').addEventListener('click', () =>
             this._openCrmImport(container));
+        // Από τον Πίνακα Ελέγχου («🔄 νέοι μαθητές στο CRM → Εισαγωγή»).
+        if (typeof App !== 'undefined' && App.takePending && App.takePending('students') === 'crm-import') {
+            this._openCrmImport(container);
+        }
     },
 
     /**

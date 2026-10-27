@@ -33,18 +33,25 @@ test('Δημιουργία: ημερομηνίες προγραμμάτων σε
     } finally { app.close(); }
 });
 
-test('Πίνακας Ελέγχου: «Τελευταίο Πρόγραμμα» σε ώρα Ελλάδας· άκυρη ημερομηνία = κενό', async () => {
-    let created = '2026-10-02T15:49:03+00:00';
+test('Πίνακας Ελέγχου: «μετά τη δημοσίευση της …» σε ώρα Ελλάδας· άκυρη ημερομηνία = χωρίς ημερομηνία', async () => {
+    let published = '2026-10-02T22:30:00';     // UTC χωρίς ζώνη → 3/10 01:30 ώρα Ελλάδας
     const routes = baseRoutes({
-        'GET /api/solver/solutions': () => [{ id: 7, name: 'Χειμερινό', status: 'optimal', created_at: created }],
+        'GET /api/solver/solutions': () => [{ id: 7, name: 'Χειμερινό', status: 'optimal', created_at: '2026-10-02T15:49:03+00:00' }],
+        'GET /api/solver/solutions/*': () => ({ id: 7, name: 'Χειμερινό', status: 'optimal', slots: [] }),
+        'GET /api/publications/preview/*': () => ({
+            first: false, affected: 2, unplaced: 0, teachers: [],
+            previous: { solution_id: 7, solution_name: 'Χειμερινό', published_at: published },
+        }),
     });
     const app = await start(routes);
     try {
-        await waitFor(app.w, () => app.doc.getElementById('view-latest'));
-        assert.match(app.doc.getElementById('content-area').textContent, SUMMER);
-        created = 'garbage';
-        await go(app, 'dashboard', '#view-latest');
-        assert.doesNotMatch(app.doc.getElementById('content-area').textContent, /Invalid Date/);
+        await waitFor(app.w, () => app.doc.querySelector('.dash-attn-row'));
+        assert.match(app.doc.getElementById('dash-attn').textContent, /2 καθηγητές\s+με αλλαγές μετά τη δημοσίευση της 3\/10/);
+        published = 'garbage';
+        await go(app, 'dashboard', '.dash-attn-row');
+        const text = app.doc.getElementById('content-area').textContent;
+        assert.doesNotMatch(text, /Invalid Date/);
+        assert.match(text, /μετά τη δημοσίευση — δεν τις ξέρουν/);
     } finally { app.close(); }
 });
 
