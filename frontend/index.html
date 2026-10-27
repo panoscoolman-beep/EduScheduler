@@ -2,20 +2,21 @@
 <html lang="el">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="EduScheduler — Αυτόματο Ωρολόγιο Πρόγραμμα για Σχολεία & Φροντιστήρια">
     <title>EduScheduler — Ωρολόγιο Πρόγραμμα</title>
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#0B1120">
+    <meta name="theme-color" content="#0c1018">
     <link rel="icon" href="/img/icon-192.png">
+    <script src="js/appearance.js?v=90"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/styles.css?v=89">
+    <link rel="stylesheet" href="css/styles.css?v=90">
 </head>
 <body>
     <div class="app-layout" id="app">
-        <!-- Sidebar Navigation -->
+        <!-- Sidebar Navigation (υπολογιστής) -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
@@ -24,10 +25,10 @@
                 </div>
             </div>
 
-            <nav class="sidebar-nav">
+            <nav class="sidebar-nav" aria-label="Κύριο μενού">
                 <ul>
                     <li>
-                        <a href="#" class="nav-item active" data-view="dashboard" id="nav-dashboard">
+                        <a href="#dashboard" class="nav-item active" data-view="dashboard" id="nav-dashboard">
                             <span class="nav-icon">📊</span>
                             <span class="nav-label">Πίνακας Ελέγχου</span>
                         </a>
@@ -39,81 +40,88 @@
                         </a>
                     </li>
                     <li>
-                        <a href="#" class="nav-item" data-view="terms" id="nav-terms">
-                            <span class="nav-icon">🗂️</span>
-                            <span class="nav-label">Σενάρια</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="periods" id="nav-periods">
-                            <span class="nav-icon">🕐</span>
-                            <span class="nav-label">Ώρες / Περίοδοι</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="teachers" id="nav-teachers">
-                            <span class="nav-icon">👨‍🏫</span>
-                            <span class="nav-label">Καθηγητές</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="subjects" id="nav-subjects">
-                            <span class="nav-icon">📖</span>
-                            <span class="nav-label">Μαθήματα</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="students" id="nav-students">
-                            <span class="nav-icon">🎓</span>
-                            <span class="nav-label">Μαθητές</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="classes" id="nav-classes">
-                            <span class="nav-icon">🏫</span>
-                            <span class="nav-label">Τάξεις</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="classrooms" id="nav-classrooms">
-                            <span class="nav-icon">🚪</span>
-                            <span class="nav-label">Αίθουσες</span>
-                        </a>
-                    </li>
-
-                    <li class="nav-separator"><span>Προγραμματισμός</span></li>
-
-                    <li>
-                        <a href="#" class="nav-item" data-view="lessons" id="nav-lessons">
-                            <span class="nav-icon">🃏</span>
-                            <span class="nav-label">Μαθήματα-Κάρτες</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="constraints" id="nav-constraints">
-                            <span class="nav-icon">⚙️</span>
-                            <span class="nav-label">Περιορισμοί</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="generate" id="nav-generate">
-                            <span class="nav-icon">🧠</span>
-                            <span class="nav-label">Δημιουργία</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" class="nav-item" data-view="timetable" id="nav-timetable">
+                        <a href="#timetable" class="nav-item" data-view="timetable" id="nav-timetable">
                             <span class="nav-icon">📋</span>
                             <span class="nav-label">Ωρολόγιο</span>
                         </a>
                     </li>
 
+                    <li class="nav-separator"><span>Πρόγραμμα</span></li>
+                    <li>
+                        <a href="#lessons" class="nav-item" data-view="lessons" id="nav-lessons">
+                            <span class="nav-icon">🃏</span>
+                            <span class="nav-label">Μαθήματα-Κάρτες</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#generate" class="nav-item" data-view="generate" id="nav-generate">
+                            <span class="nav-icon">🧠</span>
+                            <span class="nav-label">Δημιουργία</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#terms" class="nav-item" data-view="terms" id="nav-terms">
+                            <span class="nav-icon">🗂️</span>
+                            <span class="nav-label">Σενάρια</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#constraints" class="nav-item" data-view="constraints" id="nav-constraints">
+                            <span class="nav-icon">📏</span>
+                            <span class="nav-label">Περιορισμοί</span>
+                        </a>
+                    </li>
+
+                    <li class="nav-separator"><span>Δεδομένα</span></li>
+                    <li>
+                        <a href="#students" class="nav-item" data-view="students" id="nav-students">
+                            <span class="nav-icon">🎓</span>
+                            <span class="nav-label">Μαθητές</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#teachers" class="nav-item" data-view="teachers" id="nav-teachers">
+                            <span class="nav-icon">👨‍🏫</span>
+                            <span class="nav-label">Καθηγητές</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#classes" class="nav-item" data-view="classes" id="nav-classes">
+                            <span class="nav-icon">🏫</span>
+                            <span class="nav-label">Τμήματα</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#classrooms" class="nav-item" data-view="classrooms" id="nav-classrooms">
+                            <span class="nav-icon">🚪</span>
+                            <span class="nav-label">Αίθουσες</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#subjects" class="nav-item" data-view="subjects" id="nav-subjects">
+                            <span class="nav-icon">📖</span>
+                            <span class="nav-label">Μαθήματα</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#periods" class="nav-item" data-view="periods" id="nav-periods">
+                            <span class="nav-icon">🕐</span>
+                            <span class="nav-label">Ώρες</span>
+                        </a>
+                    </li>
+
                     <li class="nav-separator"><span>Σύστημα</span></li>
                     <li>
-                        <a href="#" class="nav-item" data-view="settings" id="nav-settings">
-                            <span class="nav-icon">⚙️</span>
+                        <a href="#settings" class="nav-item" data-view="settings" id="nav-settings">
+                            <span class="nav-icon">🛠️</span>
                             <span class="nav-label">Ρυθμίσεις</span>
                         </a>
+                    </li>
+                    <li>
+                        <button type="button" class="nav-item" id="nav-appearance" data-action="appearance">
+                            <span class="nav-icon">🎨</span>
+                            <span class="nav-label">Εμφάνιση</span>
+                        </button>
                     </li>
                 </ul>
             </nav>
@@ -129,9 +137,9 @@
                 <button class="menu-toggle" id="menu-toggle" aria-label="Εναλλαγή μενού">☰</button>
                 <h1 class="page-title" id="page-title">Πίνακας Ελέγχου</h1>
                 <div class="top-bar-actions">
-                    <label class="topbar-term" style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color:var(--text-secondary)">
-                        <span>🗂️ Σενάριο:</span>
-                        <select id="term-selector" class="form-select" style="min-width:170px; padding:4px 8px" title="Ενεργό σενάριο — άλλαξε για να δουλέψεις σε άλλο ωράριο"></select>
+                    <label class="topbar-term" title="Ενεργό σενάριο — όλες οι σελίδες δείχνουν αυτό">
+                        <span class="topbar-term-label">🗂️ <span class="topbar-term-text">Σενάριο</span></span>
+                        <select id="term-selector" class="form-select term-select" aria-label="Ενεργό σενάριο"></select>
                     </label>
                     <span class="school-name" id="school-name">EduScheduler</span>
                 </div>
@@ -147,12 +155,24 @@
         </main>
     </div>
 
+    <!-- Κάτω μπάρα (κινητό) -->
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Κύρια πλοήγηση">
+        <a href="#today" class="bottom-nav-item" data-nav="today"><span class="bn-icon" aria-hidden="true">📱</span><span class="bn-label">Σήμερα</span></a>
+        <a href="#timetable" class="bottom-nav-item" data-nav="timetable"><span class="bn-icon" aria-hidden="true">📋</span><span class="bn-label">Ωρολόγιο</span></a>
+        <a href="#students" class="bottom-nav-item" data-nav="students"><span class="bn-icon" aria-hidden="true">🎓</span><span class="bn-label">Μαθητές</span></a>
+        <button type="button" class="bottom-nav-item" id="bn-more" aria-haspopup="dialog" aria-controls="more-sheet"><span class="bn-icon" aria-hidden="true">☰</span><span class="bn-label">Περισσότερα</span></button>
+    </nav>
+
+    <!-- Μενού «Περισσότερα» (κινητό) — το γεμίζει το App -->
+    <div class="sheet-backdrop" id="more-sheet-backdrop" hidden></div>
+    <div class="sheet" id="more-sheet" role="dialog" aria-modal="true" aria-labelledby="more-sheet-title" hidden></div>
+
     <!-- Modal -->
     <div class="modal-overlay" id="modal-overlay">
-        <div class="modal" id="modal">
+        <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <div class="modal-header">
-                <h2 class="modal-title" id="modal-title">Modal</h2>
-                <button class="modal-close" id="modal-close">&times;</button>
+                <h2 class="modal-title" id="modal-title">Παράθυρο</h2>
+                <button class="modal-close" id="modal-close" aria-label="Κλείσιμο">&times;</button>
             </div>
             <div class="modal-body" id="modal-body"></div>
             <div class="modal-footer" id="modal-footer">
@@ -165,41 +185,44 @@
     <!-- Toast Notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="js/api.js?v=89"></script>
-    <script src="js/components/toast.js?v=89"></script>
-    <script src="js/components/modal.js?v=89"></script>
-    <script src="js/components/availability-modal.js?v=89"></script>
-    <script src="js/components/data-table.js?v=89"></script>
-    <script src="js/components/archive_controls.js?v=89"></script>
-    <script src="js/components/student_picker.js?v=89"></script>
-    <script src="js/components/timetable-grid.js?v=89"></script>
-    <script src="js/views/dashboard.js?v=89"></script>
-    <script src="js/views/terms.js?v=89"></script>
-    <script src="js/views/teachers.js?v=89"></script>
-    <script src="js/views/subjects.js?v=89"></script>
-    <script src="js/views/students_helpers.js?v=89"></script>
-    <script src="js/views/students.js?v=89"></script>
-    <script src="js/views/classes.js?v=89"></script>
-    <script src="js/views/classrooms.js?v=89"></script>
-    <script src="js/views/periods.js?v=89"></script>
-    <script src="js/views/lessons_helpers.js?v=89"></script>
-    <script src="js/views/lessons.js?v=89"></script>
-    <script src="js/views/constraints.js?v=89"></script>
-    <script src="js/views/generate.js?v=89"></script>
-    <script src="js/views/timetable_helpers.js?v=89"></script>
-    <script src="js/components/compare_modal.js?v=89"></script>
-    <script src="js/components/substitute_modal.js?v=89"></script>
-    <script src="js/components/insights_modal.js?v=89"></script>
-    <script src="js/components/lesson_impact_modal.js?v=89"></script>
-    <script src="js/components/palette_cleanup_modal.js?v=89"></script>
-    <script src="js/components/publish_modal.js?v=89"></script>
-    <script src="js/components/lesson_roster_modal.js?v=89"></script>
-    <script src="js/services/timetable_interactions.js?v=89"></script>
-    <script src="js/views/timetable.js?v=89"></script>
-    <script src="js/views/today_helpers.js?v=89"></script>
-    <script src="js/views/today.js?v=89"></script>
-    <script src="js/views/settings.js?v=89"></script>
-    <script src="js/services/version_check.js?v=89"></script>
-    <script src="js/app.js?v=89"></script>
+    <script src="js/api.js?v=90"></script>
+    <script src="js/components/toast.js?v=90"></script>
+    <script src="js/components/back_guard.js?v=90"></script>
+    <script src="js/components/modal.js?v=90"></script>
+    <script src="js/components/menu.js?v=90"></script>
+    <script src="js/components/availability-modal.js?v=90"></script>
+    <script src="js/components/data-table.js?v=90"></script>
+    <script src="js/components/archive_controls.js?v=90"></script>
+    <script src="js/components/student_picker.js?v=90"></script>
+    <script src="js/components/timetable-grid.js?v=90"></script>
+    <script src="js/views/dashboard.js?v=90"></script>
+    <script src="js/views/terms.js?v=90"></script>
+    <script src="js/views/teachers.js?v=90"></script>
+    <script src="js/views/subjects.js?v=90"></script>
+    <script src="js/views/students_helpers.js?v=90"></script>
+    <script src="js/views/students.js?v=90"></script>
+    <script src="js/views/classes.js?v=90"></script>
+    <script src="js/views/classrooms.js?v=90"></script>
+    <script src="js/views/periods.js?v=90"></script>
+    <script src="js/views/lessons_helpers.js?v=90"></script>
+    <script src="js/views/lessons.js?v=90"></script>
+    <script src="js/views/constraints.js?v=90"></script>
+    <script src="js/views/generate.js?v=90"></script>
+    <script src="js/views/timetable_helpers.js?v=90"></script>
+    <script src="js/components/compare_modal.js?v=90"></script>
+    <script src="js/components/substitute_modal.js?v=90"></script>
+    <script src="js/components/insights_modal.js?v=90"></script>
+    <script src="js/components/lesson_impact_modal.js?v=90"></script>
+    <script src="js/components/palette_cleanup_modal.js?v=90"></script>
+    <script src="js/components/publish_modal.js?v=90"></script>
+    <script src="js/components/lesson_roster_modal.js?v=90"></script>
+    <script src="js/services/timetable_interactions.js?v=90"></script>
+    <script src="js/views/timetable.js?v=90"></script>
+    <script src="js/components/contact.js?v=90"></script>
+    <script src="js/views/today_helpers.js?v=90"></script>
+    <script src="js/views/today.js?v=90"></script>
+    <script src="js/views/settings.js?v=90"></script>
+    <script src="js/services/version_check.js?v=90"></script>
+    <script src="js/app.js?v=90"></script>
 </body>
 </html>

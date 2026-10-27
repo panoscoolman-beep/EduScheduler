@@ -156,7 +156,13 @@ test('Παλέτα: φίλτρο καθηγητή που δεν υπάρχει �
         assert.equal(app.doc.getElementById('palette-f-teacher').value, 'Νικολάου');
         assert.equal(visible(), 1);
 
+        // Αλλαγή σεναρίου: πρώτα επιβεβαίωση (Π6) — χωρίς «Αλλαγή» δεν αλλάζει τίποτα.
         change(app, app.doc.getElementById('term-selector'), '2');
+        await waitFor(app.w, () => app.doc.getElementById('modal-overlay').classList.contains('active'));
+        assert.equal(term, 1, 'πριν την επιβεβαίωση το σενάριο μένει ίδιο');
+        assert.equal(app.doc.getElementById('term-selector').value, '1', 'ο επιλογέας δείχνει ακόμα το ενεργό');
+        assert.match(app.doc.getElementById('modal-body').textContent, /Θερινό/);
+        app.doc.getElementById('modal-save').click();
         await waitFor(app.w, () => /Θερινό πρόγρ/.test(app.doc.querySelector('.card-title')?.textContent || '')
             && app.doc.getElementById('palette-f-teacher'));
         assert.equal(app.doc.getElementById('palette-f-teacher').value, '');

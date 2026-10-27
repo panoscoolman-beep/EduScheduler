@@ -213,6 +213,10 @@ const API = {
         diff: (baseId, otherId) => API.get(`/solver/diff?base_id=${baseId}&other_id=${otherId}`),
         violations: (solutionId) => API.get(`/solver/solutions/${solutionId}/violations`),
     },
+    publications: {
+        // 📢 Οι τελευταίες δημοσιεύσεις του ενεργού σεναρίου (νεότερη πρώτη).
+        list: () => API.get('/publications'),
+    },
     settings: {
         get: () => API.get('/settings/'),
         update: (data) => API.put('/settings/', data),

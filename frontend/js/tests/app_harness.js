@@ -15,7 +15,8 @@ const { JSDOM } = require('jsdom');
 const FRONT = path.join(__dirname, '..', '..');
 const GLOBALS = ['API', 'Toast', 'Modal', 'App', 'DataTable', 'TimetableView', 'TimetableGrid',
     'TimetableHelpers', 'StudentPicker', 'ClassesView', 'StudentsView', 'GenerateView',
-    'TodayView', 'TermsView', 'TeachersView', 'VersionCheck', 'TimetableInteractions', 'SettingsView'];
+    'TodayView', 'TermsView', 'TeachersView', 'VersionCheck', 'TimetableInteractions', 'SettingsView',
+    'LessonsView', 'DashboardView', 'Appearance', 'BackGuard', 'Menu', 'Contact', 'TodayHelpers'];
 
 /** Βασικό ψεύτικο backend: άδειο σενάριο με 3 ώρες. */
 function baseRoutes(over = {}) {
@@ -79,7 +80,7 @@ function timetableRoutes(over = {}) {
     return { routes, state };
 }
 
-function boot(routes, { hash = '' } = {}) {
+function boot(routes, { hash = '', phone = false } = {}) {
     const raw = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
     const html = raw.replace(/<script src="[^"]+"><\/script>/g, '');
     const dom = new JSDOM(html, { url: 'http://eds.local/' + hash, runScripts: 'dangerously', pretendToBeVisual: true });
@@ -107,6 +108,11 @@ function boot(routes, { hash = '' } = {}) {
         }
         return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => JSON.stringify(data) };
     };
+    // jsdom δεν έχει matchMedia: «κινητό» (≤768px, δάχτυλο) μόνο όταν το ζητά το test.
+    w.matchMedia = (q) => ({
+        matches: phone && /max-width|pointer:\s*coarse/.test(q),
+        media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    });
     w.open = () => null;
     w.print = () => null;
     w.scrollTo = () => null;
