@@ -42,15 +42,20 @@ const TimetableView = {
             const solutionId = TimetableHelpers.defaultSolutionId(
                 solutions, App._currentSolutionId);
             const archiveBtn = TimetableHelpers.archiveButtonState(solutions, solutionId);
-            const [solution, students, lessons, rosterData] = await Promise.all([
+            const [solution, students, lessons, rosterData, publications] = await Promise.all([
                 API.solver.getSolution(solutionId),
                 API.students.list().catch(() => []),
                 // Τροφοδοτεί την Παλέτα Μαθημάτων (ppw + μαθήματα χωρίς slots).
                 API.lessons.list().catch(() => []),
                 // 👥 Ποιοι παρακολουθούν κάθε κάρτα (εξαιρέσεις/προσθήκες).
                 API.lessons.rosters().catch(() => ({ rosters: {} })),
+                // 📢 Ποιο πρόγραμμα είναι δημοσιευμένο (σήμανση στη λίστα).
+                (API.publications ? API.publications.list() : Promise.resolve([])).catch(() => []),
             ]);
             this._lessons = lessons;
+            this._periods = periods;
+            this._daysCount = daysCount;
+            const publishedId = (publications && publications[0]) ? publications[0].solution_id : null;
             const lessonsByStudent = TimetableHelpers.lessonIdsByStudent(rosterData.rosters);
 
             // Extract unique values for filters
@@ -66,39 +71,73 @@ const TimetableView = {
             } = TimetableHelpers.buildStudentLabelMaps(students);
             // teacher_name → teacher_id, for the per-teacher export buttons
             const teacherIdByName = TimetableHelpers.teacherIdByName(solution.slots);
+            const status = TimetableHelpers.statusInfo(solution.status);
+            const menuItem = (id, icon, label, hint, title) => `
+                <button type="button" class="menu-item" role="menuitem" id="${id}" title="${this._esc(title || '')}">
+                    <span class="menu-item-icon" aria-hidden="true">${icon}</span>
+                    <span class="menu-item-text">${label}${hint ? `<small>${hint}</small>` : ''}</span>
+                </button>`;
 
             container.innerHTML = `
-                <div class="card mb-lg">
+                <div class="card mb-lg tt-card">
                     <img src="img/logo.svg" class="print-logo" style="display:none;" />
-                    <div class="card-header print-hide">
-                        <h2 class="card-title">📋 ${this._esc(solution.name)}</h2>
-                        <div>
-                            <button class="btn btn-secondary" id="tt-undo" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" style="margin-right:0.25rem" disabled>↩ Αναίρεση</button>
-                            <button class="btn btn-secondary" id="tt-redo" title="Επανάληψη (Ctrl+Y)" style="margin-right:0.25rem" disabled>↪ Επανάληψη</button>
-                            <button class="btn btn-secondary" id="tt-history" title="Οι τελευταίες αλλαγές — αναίρεση μέχρι κάποιο σημείο" style="margin-right:0.5rem">🕘 Ιστορικό</button>
-                            <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει" style="margin-right:0.25rem">👤 Αντικατάσταση</button>
-                            <button class="btn btn-secondary" id="tt-empty" title="Όλες οι ώρες ενός καθηγητή ή τμήματος στην Παλέτα — επαναφέρονται με ένα κλικ" style="margin-right:0.5rem">🅿️ Άδειασμα</button>
-                            <button class="btn btn-warning" id="tt-regen" title="Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον solver για τα υπόλοιπα" style="margin-right:0.25rem">🔒 Lock & Regenerate</button>
-                            <button class="btn btn-secondary" id="tt-fill" title="Κράτα ΟΛΑ όσα έχεις βάλει και άφησε τον solver να τοποθετήσει τις ώρες της Παλέτας — σε νέο πρόγραμμα" style="margin-right:0.5rem">🧩 Γέμισε τα κενά</button>
-                            <button class="btn btn-secondary" id="tt-compare" title="Σύγκρινε με άλλη λύση" style="margin-right:0.25rem">📊 Σύγκριση</button>
-                            <button class="btn btn-secondary" id="tt-diff" title="Slot-level διαφορές με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε" style="margin-right:0.25rem">🔀 Τι άλλαξε;</button>
-                            <button class="btn btn-secondary" id="tt-violations" title="Γιατί αυτό το score; Κενά καθηγητών, αργές ώρες, φόρτος" style="margin-right:0.25rem">⚖️ Ποιότητα</button>
-                            <button class="btn btn-secondary" id="tt-gaps" title="Ώρες/εβδομάδα και κενά κάθε μαθητή και καθηγητή — με προτάσεις διόρθωσης" style="margin-right:0.5rem">🕳 Κενά</button>
-                            <button class="btn btn-primary" id="tt-publish" title="Δημοσίευση: ποιοι καθηγητές επηρεάζονται και το μήνυμα για τον καθένα" style="margin-right:0.25rem">📢 Δημοσίευση</button>
-                            <button class="btn btn-secondary" id="tt-bulk-export" title="Όλα τα προγράμματα μαζί: εκτύπωση με μία σελίδα ανά καθηγητή/τμήμα, ή Excel" style="margin-right:0.25rem">📦 Μαζική εξαγωγή</button>
-                            <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση: με επιλεγμένο καθηγητή/μαθητή ανοίγει καθαρή σελίδα εκτύπωσης" style="margin-right:0.25rem">🖨️ Εκτύπωση</button>
-                            <button class="btn btn-secondary" id="tt-ics" title="Εξαγωγή .ics για Google/Apple Calendar (διάλεξε πρώτα καθηγητή ή μαθητή στο φίλτρο)" style="margin-right:0.5rem">📆 ICS</button>
-                            <span class="constraint-badge ${solution.status === 'optimal' ? 'soft' : 'hard'}">
-                                ${solution.status === 'optimal' ? 'Βέλτιστο' : solution.status}
-                            </span>
+                    <div class="tt-head print-hide">
+                        <div class="tt-title-row">
+                            <h2 class="card-title tt-title">📋 ${this._esc(solution.name)}</h2>
+                            <div class="tt-history" role="group" aria-label="Ιστορικό αλλαγών">
+                                <button class="btn btn-secondary btn-icon" id="tt-undo" aria-label="Αναίρεση" title="Αναίρεση τελευταίας αλλαγής (Ctrl+Z)" disabled>↩</button>
+                                <button class="btn btn-secondary btn-icon" id="tt-redo" aria-label="Επανάληψη" title="Επανάληψη (Ctrl+Y)" disabled>↪</button>
+                                <button class="btn btn-secondary btn-icon" id="tt-history" aria-label="Ιστορικό αλλαγών" title="Οι τελευταίες αλλαγές — αναίρεση μέχρι κάποιο σημείο">🕘</button>
+                            </div>
+                        </div>
+                        <div class="tt-status">
+                            <span class="status-chip ${status.cls}" id="tt-solution-status" title="${this._esc(status.title)}">${this._esc(status.label)}</span>
+                            <span id="tt-pub-status" class="tt-pub-status"></span>
+                        </div>
+                        <div class="tt-actions">
+                            <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει">👤 Αντικατάσταση</button>
+                            <button class="btn btn-secondary" id="tt-print" title="Εκτύπωση: με επιλεγμένο καθηγητή/μαθητή ανοίγει καθαρή σελίδα εκτύπωσης">🖨️ Εκτύπωση</button>
+                            <div class="menu" data-menu>
+                                <button type="button" class="btn btn-secondary menu-btn" aria-haspopup="menu" aria-expanded="false">🔧 Διόρθωση <span aria-hidden="true">▾</span></button>
+                                <div class="menu-list" role="menu" hidden>
+                                    ${menuItem('tt-fill', '🧩', 'Γέμισε τα κενά', 'Βάζει τις ώρες της Παλέτας, σε νέο πρόγραμμα',
+                                        'Κράτα ΟΛΑ όσα έχεις βάλει και άφησε τον αλγόριθμο να τοποθετήσει τις ώρες της Παλέτας — σε νέο πρόγραμμα')}
+                                    ${menuItem('tt-regen', '🔒', 'Κράτα τα κλειδωμένα, ξαναφτιάξε τα άλλα', 'Νέο πρόγραμμα γύρω από τα 🔒 (πρώην «Lock &amp; Regenerate»)',
+                                        'Κράτα τα κλειδωμένα μαθήματα και ξανατρέξε τον αλγόριθμο για τα υπόλοιπα')}
+                                    ${menuItem('tt-empty', '🅿️', 'Άδειασμα καθηγητή ή τμήματος', 'Όλες οι ώρες του στην Παλέτα — επαναφέρονται',
+                                        'Όλες οι ώρες ενός καθηγητή ή τμήματος στην Παλέτα — επαναφέρονται με ένα κλικ')}
+                                </div>
+                            </div>
+                            <div class="menu" data-menu>
+                                <button type="button" class="btn btn-secondary menu-btn" aria-haspopup="menu" aria-expanded="false">🔍 Έλεγχος <span aria-hidden="true">▾</span></button>
+                                <div class="menu-list" role="menu" hidden>
+                                    ${menuItem('tt-compare', '📊', 'Σύγκριση', 'Δίπλα-δίπλα με άλλο πρόγραμμα', 'Σύγκρινε με άλλη λύση')}
+                                    ${menuItem('tt-diff', '🔀', 'Τι άλλαξε;', 'Ποιες ώρες μετακινήθηκαν, μπήκαν ή βγήκαν',
+                                        'Διαφορές ανά ώρα με άλλη λύση: τι μετακινήθηκε, τι μπήκε/βγήκε')}
+                                    ${menuItem('tt-violations', '⚖️', 'Ποιότητα', 'Κενά καθηγητών, αργές ώρες, φόρτος',
+                                        'Γιατί αυτή η βαθμολογία; Κενά καθηγητών, αργές ώρες, φόρτος')}
+                                    ${menuItem('tt-gaps', '🕳', 'Κενά', 'Ώρες και κενά κάθε μαθητή και καθηγητή',
+                                        'Ώρες/εβδομάδα και κενά κάθε μαθητή και καθηγητή — με προτάσεις διόρθωσης')}
+                                </div>
+                            </div>
+                            <div class="menu" data-menu>
+                                <button type="button" class="btn btn-secondary menu-btn" aria-haspopup="menu" aria-expanded="false">📤 Εξαγωγή <span aria-hidden="true">▾</span></button>
+                                <div class="menu-list" role="menu" hidden>
+                                    ${menuItem('tt-bulk-export', '📦', 'Μαζική εξαγωγή', 'Μία σελίδα ανά καθηγητή/τμήμα, ή Excel',
+                                        'Όλα τα προγράμματα μαζί: εκτύπωση με μία σελίδα ανά καθηγητή/τμήμα, ή Excel')}
+                                    ${menuItem('tt-ics', '📆', 'Ημερολόγιο (ICS)', 'Για Google/Apple Calendar — διάλεξε καθηγητή ή μαθητή',
+                                        'Εξαγωγή .ics για Google/Apple Calendar (διάλεξε πρώτα καθηγητή ή μαθητή στο φίλτρο)')}
+                                </div>
+                            </div>
+                            <button class="btn btn-primary tt-publish" id="tt-publish" title="Δημοσίευση: ποιοι καθηγητές επηρεάζονται και το μήνυμα για τον καθένα">📢 Δημοσίευση<span class="tt-publish-count" id="tt-publish-count" hidden></span></button>
                         </div>
                     </div>
 
                     <div class="timetable-controls">
-                        <div class="form-group" style="margin:0; min-width: 150px;">
-                            <label class="form-label">Προβολή ανά</label>
+                        <div class="form-group tt-ctl tt-ctl-view">
+                            <label class="form-label" for="tt-view-type">Προβολή ανά</label>
                             <select class="form-select" id="tt-view-type">
-                                <option value="class">Τάξη</option>
+                                <option value="class">Τμήμα</option>
                                 <option value="teacher">Καθηγητή</option>
                                 <option value="room">Αίθουσα</option>
                                 <option value="student">Μαθητή</option>
@@ -107,24 +146,28 @@ const TimetableView = {
                                 <option value="free_rooms">Ελεύθερες Αίθουσες</option>
                             </select>
                         </div>
-                        <div class="form-group" style="margin:0; min-width: 200px;">
-                            <label class="form-label">Φίλτρο</label>
+                        <div class="form-group tt-ctl tt-ctl-filter">
+                            <label class="form-label" for="tt-filter">Φίλτρο</label>
                             <select class="form-select" id="tt-filter">
-                                <option value="all">-- Προβολή Όλων --</option>
+                                <option value="all">Όλα</option>
                                 ${classNames.map(n => `<option value="${this._esc(n)}">${this._esc(n)}</option>`).join('')}
                             </select>
                         </div>
-                        <div class="form-group" style="margin:0; min-width: 150px;">
-                            <label class="form-label">Πρόγραμμα</label>
-                            <div style="display:flex; gap:4px; align-items:center;">
+                        <div class="form-group tt-ctl tt-ctl-solution">
+                            <label class="form-label" for="tt-solution">Πρόγραμμα</label>
+                            <div class="tt-solution-row">
                                 <select class="form-select" id="tt-solution">
-                                    ${TimetableHelpers.buildSolutionOptionsHtml(solutions, solutionId)}
+                                    ${TimetableHelpers.buildSolutionOptionsHtml(solutions, solutionId, publishedId)}
                                 </select>
-                                <button class="btn btn-secondary btn-sm" id="tt-rename"
+                                <button class="btn btn-secondary btn-icon" id="tt-rename" aria-label="Μετονομασία προγράμματος"
                                         title="Μετονομασία προγράμματος">✏️</button>
-                                <button class="btn btn-secondary btn-sm" id="tt-archive"
+                                <button class="btn btn-secondary btn-icon" id="tt-archive" aria-label="${archiveBtn.title}"
                                         title="${archiveBtn.title}">${archiveBtn.icon}</button>
                             </div>
+                        </div>
+                        <div class="seg tt-mode" id="tt-mode" role="group" aria-label="Εμφάνιση στο κινητό">
+                            <button type="button" class="seg-btn" data-mode="day">Μία μέρα</button>
+                            <button type="button" class="seg-btn" data-mode="week">Εβδομάδα</button>
                         </div>
                     </div>
 
@@ -133,10 +176,10 @@ const TimetableView = {
 
                 <div id="parking-lot-container"></div>
             `;
+            if (typeof Menu !== 'undefined') Menu.wire(container);
+            this._loadPublicationState(solutionId);
 
             // Initial render
-            const firstFilter = 'all';
-            TimetableGrid.render('timetable-grid-view', solution.slots, periods, daysCount,'class', firstFilter, solutionId);
             this._renderLessonPalette('parking-lot-container', solution.slots, solutionId, periods);
 
             // Resolve the current view/filter to export query params, or
@@ -206,22 +249,22 @@ const TimetableView = {
                 // confirm's "OK = strict / Cancel = permissive" mapping was
                 // easy to get backwards.
                 const body = `
-                    <p>Νέα έκδοση βασισμένη σε <b>${lockedCount}</b> κλειδωμένα μαθήματα.</p>
+                    <p>Νέο πρόγραμμα που κρατά ακριβώς τις <b>${lockedCount}</b> κλειδωμένες 🔒 ώρες και ξαναφτιάχνει τις άλλες. Το τρέχον δεν αλλάζει.</p>
                     <div class="form-group">
-                        <label class="form-label">Όνομα νέας λύσης</label>
+                        <label class="form-label">Όνομα νέου προγράμματος</label>
                         <input class="form-input" id="regen-name" value="${this._esc(solution.name)} v2">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Τρόπος</label>
                         <label style="display:block"><input type="radio" name="regen-mode" value="strict" checked> Αυστηρός — όλα τα μαθήματα πρέπει να μπουν</label>
-                        <label style="display:block"><input type="radio" name="regen-mode" value="permissive"> Επιτρεπτικός — βάζει ό,τι μπορεί + parking lot</label>
+                        <label style="display:block"><input type="radio" name="regen-mode" value="permissive"> Επιτρεπτικός — βάζει ό,τι χωράει, τα υπόλοιπα στην Παλέτα</label>
                     </div>`;
-                Modal.open('🔒 Lock & Regenerate', body, async () => {
+                Modal.open('🔒 Κράτα τα κλειδωμένα, ξαναφτιάξε τα άλλα', body, async () => {
                     const newName = document.getElementById('regen-name').value.trim();
                     if (!newName) { Toast.error('Δώσε όνομα.'); return; }
                     const mode = document.querySelector('input[name="regen-mode"]:checked').value;
                     Modal.close();
-                    Toast.success('🧠 Solver εργάζεται στο παρασκήνιο…');
+                    Toast.success('🧠 Ο υπολογισμός τρέχει στο παρασκήνιο…');
                     try {
                         const started = await API.solver.regenerateWithLocks(solutionId, {
                             name: newName, max_time_seconds: 120, mode,
@@ -236,7 +279,7 @@ const TimetableView = {
                             Toast.error(this._esc(result.message));
                         }
                     } catch (err) {
-                        Toast.error(`Regenerate απέτυχε: ${this._esc(err.message)}`);
+                        Toast.error(`Δεν έγινε το νέο πρόγραμμα: ${this._esc(err.message)}`);
                     }
                 }, { saveText: '🚀 Εκτέλεση', saveClass: 'btn-warning' });
             });
@@ -301,6 +344,12 @@ const TimetableView = {
                         'timetable-grid-view', solution.slots, periods,
                         daysCount, axis, solutionId,
                     );
+                } else if (this.isDayMode()) {
+                    // 📱 Κινητό: μία μέρα τη φορά, λίστα ανά ώρα (Π7).
+                    TimetableGrid.renderDayList(
+                        'timetable-grid-view', slotsForView(viewType, filterValue),
+                        periods, daysCount, viewType, filterValue, solutionId,
+                    );
                 } else {
                     TimetableGrid.render(
                         'timetable-grid-view', slotsForView(viewType, filterValue),
@@ -317,6 +366,10 @@ const TimetableView = {
                 const fv = document.getElementById('tt-filter')?.value || 'all';
                 renderGrid(vt, vt.startsWith('overview') ? null : fv);
             };
+
+            // Initial render (πλέγμα ή, στο κινητό, μία μέρα)
+            renderGrid('class', 'all');
+            this._wireModeToggle();
 
             // Event: View type change
             document.getElementById('tt-view-type').addEventListener('change', (e) => {
@@ -356,7 +409,7 @@ const TimetableView = {
                 else if (vt === 'student') options = studentNames;
                 else options = roomNames;
 
-                filterSelect.innerHTML = `<option value="all">-- Προβολή Όλων --</option>` +
+                filterSelect.innerHTML = `<option value="all">Όλα</option>` +
                                          options.map(n => `<option value="${this._esc(n)}">${this._esc(n)}</option>`).join('');
                 renderGrid(vt, 'all');
             });
@@ -435,7 +488,15 @@ const TimetableView = {
             // τα κουμπιά Undo/Redo έμεναν στην αρχική τους κατάσταση — αν η
             // προβολή ξεκινούσε χωρίς ιστορικό, το Ctrl+Z έμενε νεκρό μέχρι
             // το επόμενο πλήρες re-render. Το TimetableGrid ειδοποιεί εδώ.
-            this._refreshHistoryButtons = refreshHistoryButtons;
+            // Κάθε χειροκίνητη αλλαγή (σύρσιμο, κλείδωμα, Παλέτα…) φρεσκάρει και
+            // την ένδειξη «✏️ Αλλαγές για N καθηγητές» (μόνο ανάγνωση, ~20 ms).
+            this._refreshHistoryButtons = () => {
+                clearTimeout(this._pubTimer);
+                this._pubTimer = setTimeout(() => this._loadPublicationState(solutionId), 400);
+                return refreshHistoryButtons();
+            };
+            // «↩ Αναίρεση» από toast (π.χ. μετά από «↔ Μετακίνηση» στο κινητό).
+            this._undoLast = () => performUndoRedo('undo');
 
             undoBtn.addEventListener('click', () => performUndoRedo('undo'));
             document.getElementById('tt-history').addEventListener('click', () =>
@@ -471,6 +532,14 @@ const TimetableView = {
             document.addEventListener('keydown', this._activeKeyHandler);
 
             await refreshHistoryButtons();
+
+            // Από τον Πίνακα Ελέγχου: «📢 Δημοσίευση», «Κενά», «Τοποθέτηση».
+            const pending = (typeof App.takePending === 'function') ? App.takePending('timetable') : null;
+            if (pending === 'publish') this._openPublish(solutionId);
+            else if (pending === 'gaps') this._openGaps(solutionId, container);
+            else if (pending === 'palette') {
+                document.getElementById('parking-lot-container')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+            }
 
         } catch (err) {
             container.innerHTML = `
@@ -713,7 +782,7 @@ const TimetableView = {
             return;
         }
         Modal.open('🧩 Γέμισε τα κενά', `
-            <p>Οι <b>${placed}</b> ώρες που έχεις ήδη βάλει μένουν <b>ακριβώς ίδιες</b>. Ο solver
+            <p>Οι <b>${placed}</b> ώρες που έχεις ήδη βάλει μένουν <b>ακριβώς ίδιες</b>. Ο αλγόριθμος
                προσπαθεί να τοποθετήσει τις <b>${palette}</b> ώρες της Παλέτας στα κενά· ό,τι δεν
                χωράει μένει στην Παλέτα.</p>
             <p class="text-muted" style="font-size:0.85rem">Το αποτέλεσμα βγαίνει ως <b>νέο πρόγραμμα</b> —
@@ -726,7 +795,7 @@ const TimetableView = {
             const name = document.getElementById('fill-name').value.trim();
             if (!name) { Toast.error('Δώσε όνομα.'); return; }
             Modal.close();
-            Toast.success('🧠 Ο solver γεμίζει τα κενά στο παρασκήνιο…');
+            Toast.success('🧠 Ο αλγόριθμος γεμίζει τα κενά στο παρασκήνιο…');
             try {
                 const started = await API.solver.regenerateWithLocks(solutionId, {
                     name, max_time_seconds: 120, mode: 'permissive', lock_all_placed: true,
@@ -913,7 +982,7 @@ const TimetableView = {
     _openRenameSolution(solutionId) {
         const select = document.getElementById('tt-solution');
         const option = select ? [...select.options].find(o => Number(o.value) === solutionId) : null;
-        const current = option ? option.textContent.trim() : '';
+        const current = option ? (option.dataset.name ?? option.textContent).trim() : '';
         Modal.open('✏️ Μετονομασία προγράμματος', `
             <div class="form-group">
                 <label class="form-label">Νέο όνομα</label>
@@ -928,7 +997,13 @@ const TimetableView = {
             if (name === current) { Modal.close(); return; }
             try {
                 const res = await API.solver.renameSolution(solutionId, name);
-                if (option) option.textContent = res.name;
+                if (option) {
+                    const published = / · 📢 δημοσιευμένο$/.test(option.textContent);
+                    option.dataset.name = res.name;
+                    option.textContent = res.name + (published ? ' · 📢 δημοσιευμένο' : '');
+                    const title = document.querySelector('.tt-title');
+                    if (title) title.textContent = `📋 ${res.name}`;
+                }
                 Toast.success(`Το πρόγραμμα μετονομάστηκε σε «${this._esc(res.name)}»`);
                 Modal.close();
             } catch (err) {
@@ -1117,6 +1192,146 @@ const TimetableView = {
             this.refreshPalette();
         } catch (err) {
             Toast.error('Αποτυχία συμπλήρωσης ωρών: ' + this._esc(err.message));
+        }
+    },
+
+    /**
+     * 📢 Κατάσταση δημοσίευσης (Π3): «Δημοσιευμένο» ή «✏️ Αλλαγές για N
+     * καθηγητές μετά τη δημοσίευση». Από το preview της Δημοσίευσης — μόνο
+     * ανάγνωση, φορτώνει μετά το πλέγμα ώστε να μην το καθυστερεί.
+     */
+    async _loadPublicationState(solutionId) {
+        const box = document.getElementById('tt-pub-status');
+        const count = document.getElementById('tt-publish-count');
+        if (!box) return;
+        let preview = null;
+        try {
+            preview = await API.solver.publishPreview(solutionId);
+        } catch (err) {
+            return;   // αρχειοθετημένο/υπολογίζεται ή δίκτυο: απλώς χωρίς ένδειξη
+        }
+        // Ο χρήστης έφυγε ή άνοιξε άλλο πρόγραμμα όσο φόρτωνε: όχι λάθος ένδειξη.
+        if (!box.isConnected || Number(document.getElementById('tt-solution')?.value) !== Number(solutionId)) return;
+        const st = TimetableHelpers.publicationState(preview, solutionId);
+        if (!st) return;
+        box.innerHTML = `<button type="button" class="status-chip ${st.cls}" id="tt-pub-chip"
+                                 title="${this._esc(st.title)}">${this._esc(st.text)}</button>`;
+        box.querySelector('#tt-pub-chip').addEventListener('click', () => this._openPublish(solutionId));
+        if (count) {
+            count.hidden = !(st.changes > 0);
+            count.textContent = st.changes > 0 ? ` · ${st.changes}` : '';
+        }
+    },
+
+    // ─── 📱 Κινητό: μία μέρα τη φορά (Π7) ──────────────────────────────
+    PHONE_QUERY: '(max-width: 768px)',
+
+    isPhone() {
+        try { return Boolean(window.matchMedia && window.matchMedia(this.PHONE_QUERY).matches); } catch (_) { return false; }
+    },
+
+    /** Μία μέρα (λίστα ανά ώρα) στο κινητό, εκτός αν διάλεξε «Εβδομάδα». */
+    isDayMode() {
+        return this.isPhone() && this._readPref('eds-tt-mobile-mode') !== 'week';
+    },
+
+    _wireModeToggle() {
+        const seg = document.getElementById('tt-mode');
+        if (!seg) return;
+        const paint = () => {
+            const mode = this.isDayMode() ? 'day' : 'week';
+            seg.querySelectorAll('[data-mode]').forEach(b => {
+                const on = b.dataset.mode === mode;
+                b.classList.toggle('is-on', on);
+                b.setAttribute('aria-pressed', String(on));
+            });
+        };
+        paint();
+        seg.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-mode]');
+            if (!b) return;
+            this._writePref('eds-tt-mobile-mode', b.dataset.mode);
+            paint();
+            if (this._rerenderGrid) this._rerenderGrid();
+        });
+        // Περιστροφή/αλλαγή μεγέθους: ξανά σχέδιο μόνο αν άλλαξε ο τρόπος.
+        if (window.matchMedia && !this._phoneMqlWired) {
+            this._phoneMqlWired = true;
+            const mql = window.matchMedia(this.PHONE_QUERY);
+            const onChange = () => {
+                if (App._currentView !== 'timetable' || !document.getElementById('tt-mode')) return;
+                document.getElementById('tt-mode')?.dispatchEvent(new Event('eds-repaint'));
+                if (this._rerenderGrid) this._rerenderGrid();
+            };
+            if (mql.addEventListener) mql.addEventListener('change', onChange);
+            else if (mql.addListener) mql.addListener(onChange);
+        }
+        seg.addEventListener('eds-repaint', paint);
+    },
+
+    /**
+     * «↔ Μετακίνηση» χωρίς σύρσιμο: φέρνει τον χάρτη θέσεων (ίδιος με το
+     * σύρσιμο) και δείχνει τις ελεύθερες θέσεις μέσα στο παράθυρο του μαθήματος.
+     */
+    async showMoveChoices(slot, mount) {
+        if (!mount || !TimetableGrid._solutionId) return;
+        mount.innerHTML = '<div class="loading-spinner" style="padding:1rem"><div class="spinner"></div></div>';
+        let map;
+        try {
+            map = await API.solver.placementMap(TimetableGrid._solutionId, slot.id);
+        } catch (err) {
+            mount.innerHTML = `<p class="text-muted">Δεν φορτώθηκαν οι θέσεις: ${this._esc(err.message)}</p>
+                <button type="button" class="btn btn-secondary btn-sm" data-move-retry>↻ Δοκίμασε ξανά</button>`;
+            mount.querySelector('[data-move-retry]')?.addEventListener('click', () => this.showMoveChoices(slot, mount));
+            return;
+        }
+        if (!mount.isConnected) return;
+        const periods = this._periods || (this._paletteCtx && this._paletteCtx.periods) || [];
+        mount.innerHTML = TimetableHelpers.buildMoveChoicesHtml(map, periods, slot);
+        mount.querySelectorAll('[data-move-day]').forEach(btn => btn.addEventListener('click', () => {
+            const day = Number(btn.dataset.moveDay);
+            const periodId = Number(btn.dataset.movePeriod);
+            const label = btn.querySelector('.move-when')?.textContent || '';
+            mount.innerHTML = `
+                <div class="move-confirm" role="alertdialog" aria-label="Επιβεβαίωση μετακίνησης">
+                    <p>Μετακίνηση στην <b>${this._esc(label)}</b>;</p>
+                    <div class="move-confirm-actions">
+                        <button type="button" class="btn btn-secondary" data-move-cancel>Άκυρο</button>
+                        <button type="button" class="btn btn-primary" data-move-ok>↔ Μετακίνηση</button>
+                    </div>
+                </div>`;
+            mount.querySelector('[data-move-cancel]').addEventListener('click', () => this.showMoveChoices(slot, mount));
+            mount.querySelector('[data-move-ok]').addEventListener('click', async (e) => {
+                e.currentTarget.disabled = true;
+                await this.moveSlot(slot, day, periodId, label);
+            });
+        }));
+    },
+
+    /** Μετακίνηση ώρας (ίδιο PUT με το σύρσιμο) + «↩ Αναίρεση» στο μήνυμα. */
+    async moveSlot(slot, day, periodId, label = '') {
+        const sid = TimetableGrid._solutionId;
+        if (!sid) return;
+        try {
+            const res = await API.solver.updateSlot(sid, slot.id, { day_of_week: day, period_id: periodId });
+            const room = res && res.slot ? res.slot : null;
+            TimetableGrid._syncSlot(slot.id, {
+                day_of_week: day, period_id: periodId, is_unplaced: false, unplaced_reason: null,
+                classroom_id: room ? room.classroom_id : undefined,
+                classroom_name: room && room.classroom_name ? room.classroom_name : undefined,
+            });
+            Modal.close();
+            TimetableGrid._mobileDay = day;
+            this.refreshPalette();
+            if (this._rerenderGrid) this._rerenderGrid();
+            if (this._refreshHistoryButtons) this._refreshHistoryButtons();
+            const roomText = room && room.classroom_name ? ` · ${this._esc(room.classroom_name)}` : '';
+            Toast.show(`Μετακινήθηκε: ${this._esc(label)}${roomText}`, 'success', 8000, {
+                label: '↩ Αναίρεση',
+                onClick: () => { if (this._undoLast) this._undoLast(); },
+            });
+        } catch (err) {
+            TimetableGrid.reportConflict('Δεν μετακινήθηκε: ', err);
         }
     },
 

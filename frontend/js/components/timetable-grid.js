@@ -27,6 +27,95 @@ const TimetableGrid = {
         return res.periods;
     },
 
+    /** Τοποθετημένες ώρες που ταιριάζουν στο φίλτρο της προβολής. */
+    _filterSlots(slots, viewType, filterValue) {
+        const placedSlots = (slots || []).filter(s => !s.is_unplaced);
+        if (!filterValue || filterValue === 'all') return placedSlots;
+        return placedSlots.filter(s => {
+            if (viewType === 'class') return s.class_short === filterValue || s.class_name === filterValue;
+            if (viewType === 'teacher') return s.teacher_short === filterValue || s.teacher_name === filterValue;
+            if (viewType === 'room') return s.classroom_name === filterValue;
+            return true;
+        });
+    },
+
+    // Μέρα που δείχνει η λίστα του κινητού (null = σήμερα ή η πρώτη με μαθήματα).
+    _mobileDay: null,
+    DAY_SHORT: ['Δε', 'Τρ', 'Τε', 'Πε', 'Πα', 'Σα', 'Κυ'],
+
+    /**
+     * 📱 Κινητό (Π7): καρτέλες ημερών + λίστα ανά ώρα με ολόκληρα ονόματα,
+     * αντί για πλέγμα 800px με γράμματα 8px. Πάτημα σε μάθημα → ίδιο
+     * παράθυρο με τον υπολογιστή (ώρα, μαθητές, «↔ Μετακίνηση» χωρίς σύρσιμο).
+     */
+    renderDayList(containerId, slots, periods, daysCount = 5, viewType = 'class', filterValue = null, solutionId = null) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        this._slots = slots;
+        this._solutionId = solutionId;
+        const esc = TimetableGrid.esc;
+        const teachingPeriods = this._teachingPeriods(periods, slots, daysCount);
+        const filtered = this._filterSlots(slots, viewType, filterValue);
+        const counts = Array.from({ length: daysCount }, (_, d) => filtered.filter(s => s.day_of_week === d).length);
+        if (this._mobileDay == null || this._mobileDay >= daysCount) {
+            const today = (new Date().getDay() + 6) % 7;
+            this._mobileDay = today < daysCount && counts[today] ? today
+                : Math.max(0, counts.findIndex(c => c > 0));
+        }
+        const day = this._mobileDay;
+        const tabs = counts.map((c, d) => `
+            <button type="button" role="tab" class="tt-day-tab${d === day ? ' is-on' : ''}" data-day="${d}"
+                    aria-selected="${d === day}" aria-label="${this.DAY_NAMES[d]}: ${c} μαθήματα">
+                <span>${this.DAY_SHORT[d]}</span><b>${c}</b>
+            </button>`).join('');
+        const byPeriod = new Map();
+        filtered.filter(s => s.day_of_week === day).forEach(s => {
+            if (!byPeriod.has(s.period_id)) byPeriod.set(s.period_id, []);
+            byPeriod.get(s.period_id).push(s);
+        });
+        const collator = new Intl.Collator('el');
+        const hours = teachingPeriods.map(p => {
+            const here = (byPeriod.get(p.id) || []).sort((a, b) =>
+                collator.compare(a.classroom_name || '', b.classroom_name || ''));
+            const open = TimetableHelpers.isCellOpen(p, day, this.operatingWindow);
+            if (!here.length && !open) return '';
+            const items = here.map(slot => {
+                const color = slot.subject_color || '#4a9eff';
+                const who = viewType === 'teacher'
+                    ? (TimetableGrid.studentsLabel(slot) || slot.class_name || '')
+                    : (slot.teacher_name || slot.teacher_short || '');
+                const json = JSON.stringify(slot).replace(/'/g, '&#39;');
+                return `
+                    <button type="button" class="tt-lesson${slot.is_locked ? ' locked' : ''}" data-slot-id="${slot.id}"
+                            data-json='${json}' onclick="TimetableGrid.showDetails(this)" style="--c:${esc(color)}">
+                        <span class="tt-lesson-main"><b>${esc(slot.subject_name || slot.subject_short || 'Μάθημα')}</b>
+                            <span class="tt-lesson-class">· ${esc(slot.class_name || slot.class_short || '')}</span></span>
+                        <span class="tt-lesson-sub">${esc(who)}${slot.classroom_name ? ` · ${esc(slot.classroom_name)}` : ''}</span>
+                        <span class="tt-lesson-end" aria-hidden="true">${slot.is_locked ? '🔒' : '›'}</span>
+                    </button>`;
+            }).join('');
+            return `
+                <section class="tt-hour${here.length ? '' : ' is-empty'}">
+                    <h3 class="tt-hour-head"><span>${esc(p.start_time)}–${esc(p.end_time)}</span>
+                        <small>${esc(p.short_name || p.name || '')}</small></h3>
+                    ${items || '<p class="tt-hour-free">ελεύθερη ώρα</p>'}
+                </section>`;
+        }).join('');
+        const anyToday = counts[day] > 0;
+        container.innerHTML = `
+            <div class="tt-days" role="tablist" aria-label="Μέρα">${tabs}</div>
+            <div class="tt-daylist">
+                ${anyToday ? hours : `<p class="text-muted tt-day-empty">Κανένα μάθημα την ${this.DAY_NAMES[day]}.</p>`}
+            </div>`;
+        container.querySelector('.tt-days').addEventListener('click', (e) => {
+            const tab = e.target.closest('[data-day]');
+            if (!tab) return;
+            this._mobileDay = Number(tab.dataset.day);
+            this.renderDayList(containerId, slots, periods, daysCount, viewType, filterValue, solutionId);
+            container.querySelector('.tt-day-tab.is-on')?.focus();
+        });
+    },
+
     render(containerId, slots, periods, daysCount = 5, viewType = 'class', filterValue = null, solutionId = null) {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -40,15 +129,7 @@ const TimetableGrid = {
         // Parking-lot rows (is_unplaced=true, day_of_week=null) are
         // rendered separately by the timetable view, never on the grid.
         const grid = {};
-        const placedSlots = slots.filter(s => !s.is_unplaced);
-        const filteredSlots = (filterValue && filterValue !== 'all')
-            ? placedSlots.filter(s => {
-                if (viewType === 'class') return s.class_short === filterValue || s.class_name === filterValue;
-                if (viewType === 'teacher') return s.teacher_short === filterValue || s.teacher_name === filterValue;
-                if (viewType === 'room') return s.classroom_name === filterValue;
-                return true;
-            })
-            : placedSlots;
+        const filteredSlots = this._filterSlots(slots, viewType, filterValue);
 
         for (const slot of filteredSlots) {
             const key = `${slot.day_of_week}_${slot.period_id}`;
@@ -406,6 +487,11 @@ const TimetableGrid = {
                                () => TimetableView.render(document.getElementById('content-area')));
     },
 
+    /**
+     * Παράθυρο μαθήματος (υπολογιστής και κινητό): ΠΟΤΕ είναι (μέρα + ώρα,
+     * που πριν έλειπε), πού, ποιος, οι μαθητές, και οι ενέργειες —
+     * «↔ Μετακίνηση» χωρίς σύρσιμο, 👥 Μαθητές, 🔒 Κλείδωμα, 🅿️ Παλέτα.
+     */
     showDetails(el) {
         let slot;
         try {
@@ -414,28 +500,82 @@ const TimetableGrid = {
             Toast.error('Δεν διαβάστηκαν τα στοιχεία του μαθήματος');
             return;
         }
-        const days = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
-        // Αφαίρεση: μόνο για τοποθετημένες, ξεκλείδωτες κάρτες — μια
-        // κάρτα της Παλέτας δεν έχει από πού να αφαιρεθεί.
-        const unplaceBtn = (!slot.is_unplaced && !slot.is_locked)
-            ? `<button class="btn btn-secondary" style="margin-top:0.5rem"
-                       onclick="TimetableGrid.unplaceFromDetails(${slot.id})">
-                   🅿️ Αφαίρεση από το πρόγραμμα
-               </button>`
-            : '';
+        // Η πιο φρέσκια εκδοχή (μετά από κλείδωμα/μετακίνηση χωρίς πλήρες re-render).
+        const fresh = (this._slots || []).find(s => s.id === slot.id);
+        if (fresh) slot = { ...slot, ...fresh };
+        const esc = TimetableGrid.esc;
+        const periods = (typeof TimetableView !== 'undefined' && (TimetableView._periods
+            || (TimetableView._paletteCtx && TimetableView._paletteCtx.periods))) || [];
+        const period = periods.find(p => p.id === slot.period_id);
+        const when = slot.is_unplaced
+            ? '🅿️ Στην Παλέτα (δεν έχει μπει στο πρόγραμμα)'
+            : `📅 ${this.DAY_NAMES[slot.day_of_week] ?? '-'}${period ? ` ${esc(period.start_time)}–${esc(period.end_time)}` : ''}`;
+        const canMove = !slot.is_locked && this._solutionId;
+        const actions = `
+            <div class="ls-actions" role="group" aria-label="Ενέργειες μαθήματος">
+                <button type="button" class="ls-action" data-ls="move" ${canMove ? '' : 'disabled'}
+                        title="${slot.is_locked ? 'Ξεκλείδωσέ το πρώτα' : 'Δες τις ελεύθερες θέσεις και μετακίνησέ το'}">
+                    <span aria-hidden="true">↔</span>${slot.is_unplaced ? 'Τοποθέτηση' : 'Μετακίνηση'}</button>
+                <button type="button" class="ls-action" data-ls="roster"><span aria-hidden="true">👥</span>Μαθητές</button>
+                ${slot.is_unplaced ? '' : `<button type="button" class="ls-action" data-ls="lock" aria-pressed="${Boolean(slot.is_locked)}">
+                    <span aria-hidden="true">${slot.is_locked ? '🔓' : '🔒'}</span>${slot.is_locked ? 'Ξεκλείδωμα' : 'Κλείδωμα'}</button>`}
+                ${(!slot.is_unplaced && !slot.is_locked) ? `<button type="button" class="ls-action" data-ls="unplace">
+                    <span aria-hidden="true">🅿️</span>Στην Παλέτα</button>` : ''}
+            </div>`;
         const content = `
-            <div style="font-size:1.1rem; padding-bottom: 1rem;">
-                <p style="margin-bottom:0.5rem">📚 <strong>Μάθημα:</strong> ${TimetableGrid.esc(slot.subject_name || slot.subject_short || '-')}</p>
-                <p style="margin-bottom:0.5rem">👨‍🏫 <strong>Καθηγητής:</strong> ${TimetableGrid.esc(slot.teacher_name || slot.teacher_short || '-')}</p>
-                <p style="margin-bottom:0.5rem">🎓 <strong>Τάξη:</strong> ${TimetableGrid.esc(slot.class_name || slot.class_short || '-')}</p>
-                <p style="margin-bottom:0.5rem">🏫 <strong>Αίθουσα:</strong> ${TimetableGrid.esc(slot.classroom_name || '-')}</p>
-                <p style="margin-bottom:0.5rem">📅 <strong>Ημέρα:</strong> ${slot.is_unplaced ? '🅿️ Στην Παλέτα (μη τοποθετημένο)' : (days[slot.day_of_week] ?? '-')}</p>
+            <div class="lesson-sheet">
+                <p class="ls-when">${when}</p>
+                <p class="ls-meta">🚪 ${esc(slot.classroom_name || '—')} · 👨‍🏫 ${esc(slot.teacher_name || slot.teacher_short || '—')}</p>
+                <p class="ls-meta text-muted">🏫 ${esc(slot.class_name || slot.class_short || '—')}${slot.is_locked ? ' · 🔒 κλειδωμένο' : ''}</p>
+                ${this._solutionId ? actions : ''}
+                <div id="ls-move" class="ls-move"></div>
                 <div id="slot-students" style="margin:0.75rem 0">${TimetableGrid.studentsBlockHtml(slot.students)}</div>
-                ${unplaceBtn}
             </div>
         `;
-        Modal.open("Πληροφορίες Μαθήματος", content, () => Modal.close(), { saveText: "Κλείσιμο", saveClass: "btn-secondary" });
+        const title = `${slot.subject_name || slot.subject_short || 'Μάθημα'} · ${slot.class_name || slot.class_short || ''}`;
+        Modal.open(title, content, () => Modal.close(), { saveText: 'Κλείσιμο', saveClass: 'btn-secondary' });
+        const body = document.getElementById('modal-body');
+        body.querySelector('.ls-actions')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-ls]');
+            if (!btn || btn.disabled) return;
+            const act = btn.dataset.ls;
+            if (act === 'move' && typeof TimetableView !== 'undefined') {
+                TimetableView.showMoveChoices(slot, document.getElementById('ls-move'));
+                document.getElementById('ls-move')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+            } else if (act === 'roster') {
+                TimetableGrid.editRoster(slot.lesson_id);
+            } else if (act === 'lock') {
+                Modal.close();
+                TimetableGrid.setLock(slot.id, !slot.is_locked);
+            } else if (act === 'unplace') {
+                TimetableGrid.unplaceFromDetails(slot.id);
+            }
+        });
         TimetableGrid.loadRoster(slot.lesson_id);
+    },
+
+    /**
+     * Κλείδωμα από το παράθυρο του μαθήματος (κινητό: δεν υπάρχει 🔒 πάνω στην
+     * κάρτα). Ίδιο PUT με το toggleLock· μετά ξανά σχέδιο από τη μνήμη.
+     */
+    async setLock(slotId, locked) {
+        const sid = this._solutionId;
+        const rec = (this._slots || []).find(s => s.id === slotId);
+        if (!sid || !rec) return;
+        try {
+            await API.solver.updateSlot(sid, slotId, {
+                day_of_week: rec.day_of_week,
+                period_id: rec.period_id,
+                classroom_id: rec.classroom_id,
+                is_locked: locked,
+            });
+            this._syncSlot(slotId, { is_locked: locked });
+            Toast.success(locked ? '🔒 Κλειδώθηκε' : '🔓 Ξεκλειδώθηκε');
+            if (typeof TimetableView !== 'undefined' && TimetableView._rerenderGrid) TimetableView._rerenderGrid();
+            this._notifyHistoryChanged();
+        } catch (err) {
+            Toast.error(`Δεν ${locked ? 'κλειδώθηκε' : 'ξεκλειδώθηκε'}: ${TimetableGrid.esc(err.message)}`);
+        }
     },
 
     /** «🅿️ Αφαίρεση» από το info modal — κλείσε και εκτέλεσε. */
@@ -983,7 +1123,7 @@ const TimetableGrid = {
             card.draggable = newLockedValue;
             slot.is_locked = !newLockedValue;
             card.dataset.json = JSON.stringify(slot);
-            Toast.error(`Lock toggle απέτυχε: ${TimetableGrid.esc(err.message)}`);
+            Toast.error(`Δεν άλλαξε το κλείδωμα: ${TimetableGrid.esc(err.message)}`);
         } finally {
             btn.disabled = false;
             btn.classList.remove('busy');

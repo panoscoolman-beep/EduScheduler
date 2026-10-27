@@ -773,7 +773,7 @@ const TimetableHelpers = {
                 ${list('Πιθανά προβλήματα', report.warnings, 'var(--warning,#F59E0B)')}
                 ${suggestions}
                 ${report.feasible && !(report.warnings || []).length
-                    ? '<p style="color:var(--success,#10B981); margin-top:0.5rem">Όλα τα checks πέρασαν — μπορείς να τρέξεις τον solver.</p>' : ''}
+                    ? '<p style="color:var(--success,#10B981); margin-top:0.5rem">Όλοι οι έλεγχοι πέρασαν — μπορείς να ξεκινήσεις τη δημιουργία.</p>' : ''}
             </div>`;
     },
 
@@ -1016,14 +1016,120 @@ const TimetableHelpers = {
     },
 
     /**
+     * Κατάσταση προγράμματος στα ελληνικά, με χρώμα που λέει την αλήθεια: το
+     * «feasible» (= εντάξει) έβγαινε ως αγγλική λέξη σε κόκκινο.
+     * → { label, cls } με cls ∈ best|ok|warn|bad|info|muted (.status-chip).
+     */
+    statusInfo(status) {
+        const map = {
+            optimal: { label: '★ Βέλτιστο', cls: 'best', title: 'Ο αλγόριθμος βρήκε την καλύτερη δυνατή λύση' },
+            feasible: { label: '✓ Εφικτό', cls: 'ok', title: 'Έγκυρο πρόγραμμα — όλοι οι υποχρεωτικοί κανόνες τηρούνται' },
+            infeasible: { label: '⚠ Αδύνατο', cls: 'bad', title: 'Οι κανόνες δεν επιτρέπουν πρόγραμμα — δες «Δημιουργία»' },
+            generating: { label: '⏳ Υπολογίζεται', cls: 'info', title: 'Ο αλγόριθμος τρέχει ακόμα' },
+            error: { label: '✕ Σφάλμα', cls: 'bad', title: 'Ο αλγόριθμος δεν ολοκλήρωσε — δεν υπάρχει πρόγραμμα' },
+            timeout: { label: '⏱ Έληξε ο χρόνος', cls: 'warn', title: 'Ο αλγόριθμος σταμάτησε στο όριο χρόνου' },
+            draft: { label: '✎ Πρόχειρο', cls: 'muted', title: 'Χειροκίνητο πρόγραμμα' },
+        };
+        return map[status] || { label: status ? String(status) : '—', cls: 'muted', title: '' };
+    },
+
+    /** «24/10» στην ώρα Ελλάδας (για «δημοσίευση της …»). */
+    shortDate(value) {
+        const d = TimetableHelpers.parseServerTime(value);
+        if (!d) return '';
+        try {
+            return new Intl.DateTimeFormat('el-GR', {
+                timeZone: TimetableHelpers.SCHOOL_TZ, day: 'numeric', month: 'numeric',
+            }).format(d);
+        } catch (e) {
+            return `${d.getDate()}/${d.getMonth() + 1}`;
+        }
+    },
+
+    /**
+     * 📢 Τι ισχύει με τη δημοσίευση, από το (μόνο ανάγνωση) preview: ίδιο ή
+     * διαφορετικό από ό,τι έχουν οι καθηγητές; preview = απάντηση του
+     * GET /publications/preview/{id} (ή null αν δεν φορτώθηκε).
+     * → null | { cls, text, title, changes } — changes = πόσοι καθηγητές έχουν
+     *   αλλαγές που δεν τους έχουν σταλεί (0 = τίποτα να δημοσιευτεί).
+     */
+    publicationState(preview, solutionId) {
+        if (!preview || typeof preview !== 'object') return null;
+        const n = Number(preview.affected) || 0;
+        const teachers = (k) => (k === 1 ? '1 καθηγητή' : `${k} καθηγητές`);
+        if (preview.first || !preview.previous) {
+            return { cls: 'muted', text: 'Δεν έχει δημοσιευτεί ακόμα', changes: n,
+                     title: 'Οι καθηγητές δεν έχουν λάβει κανένα πρόγραμμα από εδώ' };
+        }
+        const prev = preview.previous;
+        const when = TimetableHelpers.shortDate(prev.published_at);
+        const same = Number(prev.solution_id) === Number(solutionId);
+        if (same && n === 0) {
+            return { cls: 'ok', text: `📢 Δημοσιευμένο${when ? ` · ${when}` : ''}`, changes: 0,
+                     title: 'Οι καθηγητές έχουν ακριβώς αυτό το πρόγραμμα' };
+        }
+        if (same) {
+            return { cls: 'warn', text: `✏️ Αλλαγές για ${teachers(n)} μετά τη δημοσίευση${when ? ` της ${when}` : ''}`,
+                     changes: n, title: 'Οι καθηγητές δεν ξέρουν ακόμα αυτές τις αλλαγές — πάτα «📢 Δημοσίευση»' };
+        }
+        if (n === 0) {
+            return { cls: 'ok', text: `Ίδιο με το δημοσιευμένο «${prev.solution_name || ''}»`, changes: 0,
+                     title: 'Καμία διαφορά για τους καθηγητές' };
+        }
+        return { cls: 'muted', text: `Δημοσιευμένο είναι το «${prev.solution_name || ''}» · διαφέρει για ${teachers(n)}`,
+                 changes: n, title: 'Αυτό το πρόγραμμα δεν είναι αυτό που έχουν οι καθηγητές' };
+    },
+
+    /** Ετικέτα επιλογής προγράμματος (+ «📢 δημοσιευμένο» στο τελευταίο δημοσιευμένο). */
+    solutionOptionLabel(s, publishedId) {
+        const pub = publishedId != null && Number(s.id) === Number(publishedId);
+        return `${s.name || ''}${pub ? ' · 📢 δημοσιευμένο' : ''}`;
+    },
+
+    /**
+     * «↔ Μετακίνηση» χωρίς σύρσιμο (κινητό και υπολογιστής): οι ελεύθερες θέσεις
+     * της εβδομάδας από τον ίδιο χάρτη θέσεων του συρσίματος, και από κάτω οι
+     * άλλες με την αιτία. Η τρέχουσα θέση παραλείπεται. Pure.
+     */
+    buildMoveChoicesHtml(map, periods, current = {}) {
+        const DAY_NAMES = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
+        const esc = TimetableHelpers.esc;
+        const byId = new Map((periods || []).map(p => [p.id, p]));
+        const cells = ((map && map.cells) || []).filter(c => byId.has(c.period_id)
+            && !(c.day === current.day_of_week && c.period_id === current.period_id));
+        if (!cells.length) return '<p class="text-muted">Δεν βρέθηκαν διδακτικές ώρες στο πρόγραμμα.</p>';
+        const order = (c) => c.day * 1000 + (byId.get(c.period_id).sort_order || 0);
+        const when = (c) => {
+            const p = byId.get(c.period_id);
+            return `${DAY_NAMES[c.day] || ''} ${esc(p.start_time)}–${esc(p.end_time)}`;
+        };
+        const ok = cells.filter(c => c.ok).sort((a, b) => order(a) - order(b));
+        const blocked = cells.filter(c => !c.ok).sort((a, b) => order(a) - order(b));
+        const okHtml = ok.length
+            ? `<div class="move-list">${ok.map(c => `
+                <button type="button" class="move-option" data-move-day="${c.day}" data-move-period="${c.period_id}">
+                    <span class="move-when">${when(c)}</span>
+                    <span class="move-why ok">ελεύθερο για όλους</span>
+                </button>`).join('')}</div>`
+            : '<p class="text-muted"><b>Καμία ελεύθερη θέση</b> αυτή την εβδομάδα — δες παρακάτω τι μπλοκάρει.</p>';
+        const blockedHtml = blocked.length ? `
+            <details class="move-blocked"${ok.length ? '' : ' open'}>
+                <summary>⛔ Δεν κάνουν (${blocked.length})</summary>
+                <ul>${blocked.map(c => `<li><span class="move-when">${when(c)}</span>
+                    <span class="move-why">${esc(c.reason || c.short || 'μη διαθέσιμο')}</span></li>`).join('')}</ul>
+            </details>` : '';
+        return `<p class="move-head">Πού μπορεί να πάει <small class="text-muted">(${ok.length} ελεύθερες θέσεις)</small></p>${okHtml}${blockedHtml}`;
+    },
+
+    /**
      * Options του επιλογέα προγράμματος. Τα αρχειοθετημένα μπαίνουν σε δική
      * τους ομάδα στο τέλος, ώστε να φαίνονται μόνο όταν τα ψάχνεις (και να
-     * μπορείς να τα επαναφέρεις).
+     * μπορείς να τα επαναφέρεις). publishedId → «📢 δημοσιευμένο» στην ετικέτα.
      */
-    buildSolutionOptionsHtml(solutions, currentId) {
+    buildSolutionOptionsHtml(solutions, currentId, publishedId = null) {
         const esc = TimetableHelpers.esc;
         const opt = (s) =>
-            `<option value="${s.id}"${s.id === currentId ? ' selected' : ''}>${esc(s.name)}</option>`;
+            `<option value="${s.id}" data-name="${esc(s.name)}"${s.id === currentId ? ' selected' : ''}>${esc(TimetableHelpers.solutionOptionLabel(s, publishedId))}</option>`;
         const list = solutions || [];
         const active = list.filter(s => !s.archived);
         const archived = list.filter(s => s.archived);
