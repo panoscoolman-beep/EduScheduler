@@ -54,6 +54,19 @@ jobs:
           # Sync repository files to app directory
           echo "Syncing files to ${APP_DIR}..."
           mkdir -p "${APP_DIR}"
+          # Το image παίρνει το alembic/ από τον ${APP_DIR}, όπου το rsync (χωρίς --delete) κρατά
+          # αρχεία που έφυγαν από το repo. Ένα revision που σβήστηκε, μετονομάστηκε ή αναιρέθηκε
+          # θα έδινε εκεί δεύτερο head (το backend δεν ξεκινά: restart loop) ή θα ξαναεφαρμοζόταν
+          # χωρίς backup. Ελέγχεται ΠΡΙΝ το rsync (το frontend σερβίρεται κατευθείαν από
+          # τον φάκελο): σταμάτα αν ο φάκελος έχει revision που δεν έχει το checkout.
+          # (a new server has no alembic/versions yet: nothing to compare)
+          extra=$(cd "${APP_DIR}/alembic/versions" 2>/dev/null || exit 0; shopt -s nullglob
+            for f in *.py; do [ -e "${GITHUB_WORKSPACE}/alembic/versions/$f" ] || echo "$f"; done)
+          if [ -n "$extra" ]; then
+            echo "::error::${APP_DIR}/alembic/versions has revisions that are not in the repo: ${extra} — move them out (they are not deleted automatically), then re-run. Nothing was copied or deployed."
+            exit 1
+          fi
+
           rsync -avz --exclude='.git' --exclude='.github' --exclude='.env' ./ "${APP_DIR}/"
 
           # Create .env if it doesn't exist
