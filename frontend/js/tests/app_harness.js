@@ -134,7 +134,7 @@ function boot(routes, { hash = '', phone = false } = {}) {
     G.VersionCheck.start = () => {};     // καμία περιοδική κλήση στα tests
     const toasts = [];
     const origShow = G.Toast.show.bind(G.Toast);
-    G.Toast.show = (m, t, d) => { toasts.push({ type: t, message: m }); origShow(m, t, d); };
+    G.Toast.show = (m, t, d, a) => { toasts.push({ type: t, message: m, action: a || null }); origShow(m, t, d, a); };
     return { dom, w, doc: w.document, calls, G, toasts, close: () => w.close() };
 }
 

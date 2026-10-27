@@ -2142,9 +2142,11 @@ tr.hist-undone { opacity: 0.5; }
     background: var(--surface-1); border: 1px solid var(--border-subtle);
     color: var(--text-secondary); font: inherit; font-size: var(--font-size-xs); font-weight: 600; cursor: pointer;
 }
-.tt-day-tab b { font-size: 1rem; color: var(--text-primary); }
+/* Η μέρα μεγάλη, το πλήθος μικρό («14 μαθ.») — να μη διαβάζεται σαν ημερομηνία. */
+.tt-day-name { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+.tt-day-count { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 .tt-day-tab.is-on { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
-.tt-day-tab.is-on b { color: var(--primary-foreground); }
+.tt-day-tab.is-on .tt-day-name, .tt-day-tab.is-on .tt-day-count { color: var(--primary-foreground); }
 .tt-daylist { display: flex; flex-direction: column; gap: 12px; }
 .tt-hour-head {
     display: flex; align-items: baseline; justify-content: space-between;

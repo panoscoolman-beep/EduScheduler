@@ -20,7 +20,7 @@ const TodayView = {
             ]);
             const solutions = (all || []).filter(s => !s.archived);
             const fallback = TimetableHelpers.defaultSolutionId(solutions, App._currentSolutionId);
-            const pick = TodayHelpers.pickSolution(solutions, publications, App._currentSolutionId, fallback);
+            const pick = TodayHelpers.pickSolution(solutions, publications, fallback);
             if (!pick.id) {
                 container.innerHTML = `
                     <div class="empty-state">
@@ -77,19 +77,18 @@ const TodayView = {
         this._startTimer();
     },
 
+    /** Η μέρα που δείχνει η σελίδα, στην ώρα Ελλάδας: { day, d, m, y, iso, dm }. */
     _date() {
-        const date = new Date();
-        date.setDate(date.getDate() + this._offset);
-        return date;
+        return TodayHelpers.schoolDate(this._offset);
     },
 
     _draw() {
         if (!document.getElementById('today-root') || !this._data) return;
         const date = this._date();
-        const day = TodayHelpers.edsDay(date);
+        const day = date.day;
         const now = this._offset === 0 ? TodayHelpers.nowHHMM(new Date()) : null;
         const near = { 0: 'Σήμερα', 1: 'Αύριο', '-1': 'Χθες' }[this._offset];
-        const dm = `${date.getDate()}/${date.getMonth() + 1}`;
+        const dm = date.dm;
         document.getElementById('today-title').innerHTML = near
             ? `<b>${near}</b><br><small>${TodayHelpers.DAYS[day]} ${dm}${now ? ` · ${now}` : ''}</small>`
             : `<b>${TodayHelpers.DAYS[day]}</b><br><small>${dm}</small>`;
@@ -130,11 +129,11 @@ const TodayView = {
         return (this._data.teachers || []).find(t => t.id === id) || null;
     },
 
-    /** «Σήμερα» / «Αύριο» / «την Πέμπτη» για κουμπιά και μηνύματα. */
-    _dayWord(cap = false) {
-        const w = this._offset === 0 ? 'σήμερα' : this._offset === 1 ? 'αύριο'
-            : `την ${TodayHelpers.DAYS[TodayHelpers.edsDay(this._date())]}`;
-        return cap ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+    /** «σήμερα» / «αύριο» / «την Πέμπτη» / «το Σάββατο» για κουμπιά και μηνύματα. */
+    _dayWord() {
+        if (this._offset === 0) return 'σήμερα';
+        if (this._offset === 1) return 'αύριο';
+        return TodayHelpers.dayAcc(this._date().day);
     },
 
     /** Ενέργειες κάτω από ένα μάθημα (ανοίγουν με πάτημα). */
@@ -173,11 +172,7 @@ const TodayView = {
         const loc = window.location;
         if (loc.protocol !== 'https:' || loc.port !== '8444' || !slot.class_id) return null;
         const params = new URLSearchParams({ class: String(slot.class_id) });
-        if (this._offset !== 0) {
-            const d = this._date();
-            const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            params.set('date', iso);
-        }
+        if (this._offset !== 0) params.set('date', this._date().iso);
         return `https://${loc.hostname}:8443/students/attendance?${params.toString()}`;
     },
 
@@ -188,27 +183,33 @@ const TodayView = {
      */
     async openAbsent(slot) {
         const esc = TodayHelpers._esc;
-        const day = TodayHelpers.edsDay(this._date());
         const d = this._date();
-        const title = `🙋 Λείπει ${this._dayWord()}`;
+        const day = d.day;
+        const dayWord = this._dayWord();
+        const title = `🙋 Λείπει ${dayWord}`;
         Modal.open(title, '<div class="loading-spinner"><div class="spinner"></div><p>Ψάχνω αντικαταστάτες…</p></div>',
             null, { hideFooter: true });
+        // Αν στο μεταξύ έκλεισε ή άνοιξε άλλο παράθυρο, η απάντηση δεν γράφεται πουθενά.
+        const token = Modal._token;
+        const stillMine = () => Modal._token === token && Modal.isOpen();
         let data;
         try {
             data = await API.solver.substituteSuggestions(this._data.solution.id, slot.teacher_id, day);
         } catch (err) {
+            if (!stillMine()) return;
             const body = document.getElementById('modal-body');
             if (body) body.innerHTML = `<p class="text-muted">Δεν βρέθηκαν προτάσεις: ${esc(err.message)}</p>`;
             return;
         }
+        if (!stillMine()) return;
         const body = document.getElementById('modal-body');
-        if (!body || !Modal.isOpen()) return;
+        if (!body) return;
         const periods = new Map((this._data.periods || []).map(p => [p.id, p]));
         const affected = (data.affected_slots || []).slice().sort((a, b) =>
             TodayHelpers.minutes((periods.get(a.period_id) || {}).start_time)
             - TodayHelpers.minutes((periods.get(b.period_id) || {}).start_time));
         const dayName = TodayHelpers.DAYS[day];
-        const head = `<p class="absent-who"><b>${esc(slot.teacher_name || '')}</b> · ${dayName} ${d.getDate()}/${d.getMonth() + 1}</p>`;
+        const head = `<p class="absent-who"><b>${esc(slot.teacher_name || '')}</b> · ${dayName} ${d.dm}</p>`;
         if (!affected.length) {
             body.innerHTML = `${head}<p class="text-muted">Δεν έχει μαθήματα αυτή τη μέρα — δεν χρειάζεται αντικατάσταση.</p>`;
             return;
@@ -254,7 +255,7 @@ const TodayView = {
                     b.classList.toggle('is-on', on);
                     b.setAttribute('aria-pressed', String(on));
                 });
-                this._renderAbsentMessage(root, affected, chosen, periods, slot, same ? null : cand);
+                this._renderAbsentMessage(root, affected, chosen, periods, slot, same ? null : cand, dayWord);
                 return;
             }
             const copy = e.target.closest('[data-copy]');
@@ -262,7 +263,7 @@ const TodayView = {
         });
     },
 
-    _renderAbsentMessage(body, affected, chosen, periods, slot, focusCand) {
+    _renderAbsentMessage(body, affected, chosen, periods, slot, focusCand, dayWord) {
         const box = body.querySelector('#absent-msg');
         const esc = TodayHelpers._esc;
         const cand = focusCand || [...chosen.values()].pop();
@@ -275,7 +276,7 @@ const TodayView = {
                 return { start: p.start_time || '', end: p.end_time || '', subject: a.subject_name || '',
                          class: a.class_name || '', room: a.classroom_name || '' };
             });
-        const text = TodayHelpers.substituteMessage(cand.name, slot.teacher_name, items, this._dayWord());
+        const text = TodayHelpers.substituteMessage(cand.name, slot.teacher_name, items, dayWord);
         const teacher = this._teacher(cand.teacher_id);
         const phone = teacher ? Contact.phoneNumbers(teacher.phone)[0] : null;
         const links = phone ? Contact.links(phone, text) : null;
@@ -313,16 +314,21 @@ const TodayView = {
         }
     },
 
-    /** Ανανέωση ώρας κάθε λεπτό· σταματά μόνο του όταν φύγεις από τη σελίδα. */
+    /**
+     * Ανανέωση στην αλλαγή κάθε λεπτού (όχι 60″ από το άνοιγμα: αλλιώς το
+     * «Τώρα» άλλαζε έως ένα λεπτό αργότερα)· σταματά μόνο του όταν φύγεις.
+     */
     _startTimer() {
-        clearInterval(this._timer);
-        this._timer = setInterval(() => {
+        clearTimeout(this._timer);
+        const tick = () => {
             if (!document.getElementById('today-root')) {
-                clearInterval(this._timer);
+                this._timer = null;
                 return;
             }
             this._draw();
-        }, 60000);
+            this._timer = setTimeout(tick, 60000 - (Date.now() % 60000) + 50);
+        };
+        this._timer = setTimeout(tick, 60000 - (Date.now() % 60000) + 50);
     },
 
     _loadFilter() {

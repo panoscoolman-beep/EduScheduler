@@ -21,10 +21,12 @@ const S = [
     { day_of_week: 2, period_id: 2, subject_name: 'ΑΛΛΗ ΜΕΡΑ', teacher_name: 'Τ1', classroom_name: 'Αίθ 1' },
 ];
 
-test('edsDay: Κυριακή=6, Δευτέρα=0', () => {
-    assert.equal(T.edsDay(new Date(2026, 8, 20)), 6);   // Κυριακή 20/9/2026
-    assert.equal(T.edsDay(new Date(2026, 8, 21)), 0);   // Δευτέρα
-    assert.equal(T.nowHHMM(new Date(2026, 8, 21, 7, 5)), '07:05');
+test('edsDay / nowHHMM: Κυριακή=6, Δευτέρα=0 — στην ώρα Ελλάδας, όχι της συσκευής', () => {
+    assert.equal(T.edsDay(new Date('2026-09-20T09:00:00Z')), 6);   // Κυριακή 20/9/2026
+    assert.equal(T.edsDay(new Date('2026-09-21T09:00:00Z')), 0);   // Δευτέρα
+    assert.equal(T.edsDay(new Date('2026-09-20T21:30:00Z')), 0);   // 00:30 Δευτέρα στην Ελλάδα (UTC: ακόμα Κυριακή)
+    assert.equal(T.nowHHMM(new Date('2026-09-21T04:05:00Z')), '07:05');   // θερινή ώρα +3
+    assert.equal(T.nowHHMM(new Date('2026-01-15T22:59:00Z')), '00:59');   // χειμερινή +2, νέα μέρα
 });
 
 test('buildDay: τώρα / ακολουθεί / αργότερα / ολοκληρωμένες', () => {
@@ -98,7 +100,7 @@ test('TodayView.render: φορτώνει, φιλτράρει, αλλάζει μ�
         const sel = c.querySelector('#today-filter');
         assert.equal(sel.querySelectorAll('option').length, 1 + 3 + 3);
         // Πήγαινε σε Τρίτη ώστε να υπάρχουν σίγουρα μαθήματα, με φίλτρο αίθουσας.
-        const toTuesday = (1 - T.edsDay(new Date()) + 7) % 7 || 7;
+        const toTuesday = (1 - T.schoolDate(0).day + 7) % 7 || 7;
         for (let i = 0; i < toTuesday; i++) c.querySelector('#today-next').click();
         sel.value = 'r:Αίθ 3';
         sel.dispatchEvent(new dom.window.Event('change'));

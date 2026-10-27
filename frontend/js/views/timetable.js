@@ -38,7 +38,10 @@ const TimetableView = {
                 return;
             }
 
-            // Pick solution (latest or specified)
+            // Pick solution (latest or specified). Από τον Πίνακα Ελέγχου έρχεται ΡΗΤΑ
+            // το πρόγραμμα που έλεγξε εκείνος — γίνεται και η επιλογή του χρήστη.
+            const asked = typeof App.pendingSolution === 'function' ? App.pendingSolution('timetable') : null;
+            if (asked != null && solutions.some(s => s.id === asked)) App._currentSolutionId = asked;
             const solutionId = TimetableHelpers.defaultSolutionId(
                 solutions, App._currentSolutionId);
             const archiveBtn = TimetableHelpers.archiveButtonState(solutions, solutionId);
@@ -1287,7 +1290,7 @@ const TimetableView = {
         }
         if (!mount.isConnected) return;
         const periods = this._periods || (this._paletteCtx && this._paletteCtx.periods) || [];
-        mount.innerHTML = TimetableHelpers.buildMoveChoicesHtml(map, periods, slot);
+        mount.innerHTML = TimetableHelpers.buildMoveChoicesHtml(map, periods, slot, TimetableGrid.operatingWindow);
         mount.querySelectorAll('[data-move-day]').forEach(btn => btn.addEventListener('click', () => {
             const day = Number(btn.dataset.moveDay);
             const periodId = Number(btn.dataset.movePeriod);
@@ -1300,27 +1303,42 @@ const TimetableView = {
                         <button type="button" class="btn btn-primary" data-move-ok>↔ Μετακίνηση</button>
                     </div>
                 </div>`;
-            mount.querySelector('[data-move-cancel]').addEventListener('click', () => this.showMoveChoices(slot, mount));
-            mount.querySelector('[data-move-ok]').addEventListener('click', async (e) => {
-                e.currentTarget.disabled = true;
-                await this.moveSlot(slot, day, periodId, label);
+            const cancelBtn = mount.querySelector('[data-move-cancel]');
+            const okBtn = mount.querySelector('[data-move-ok]');
+            cancelBtn.addEventListener('click', () => this.showMoveChoices(slot, mount));
+            okBtn.addEventListener('click', async () => {
+                // Και τα δύο κουμπιά κλειστά όσο τρέχει το αίτημα (όχι «Άκυρο» στη μέση).
+                okBtn.disabled = true;
+                cancelBtn.disabled = true;
+                const ok = await this.moveSlot(slot, day, periodId, label);
+                if (!ok && okBtn.isConnected) { okBtn.disabled = false; cancelBtn.disabled = false; }
             });
         }));
     },
 
-    /** Μετακίνηση ώρας (ίδιο PUT με το σύρσιμο) + «↩ Αναίρεση» στο μήνυμα. */
+    /**
+     * Μετακίνηση ώρας (ίδιο PUT με το σύρσιμο) + «↩ Αναίρεση» στο μήνυμα.
+     * → true αν έγινε.
+     */
     async moveSlot(slot, day, periodId, label = '') {
         const sid = TimetableGrid._solutionId;
-        if (!sid) return;
+        if (!sid) return false;
+        const token = Modal._token;   // το παράθυρο του μαθήματος
         try {
             const res = await API.solver.updateSlot(sid, slot.id, { day_of_week: day, period_id: periodId });
             const room = res && res.slot ? res.slot : null;
+            // Ποια εγγραφή ιστορικού είναι ΑΥΤΗ η μετακίνηση: η «↩ Αναίρεση» του
+            // μηνύματος αναιρεί μόνο αυτήν, και μόνο αν είναι ακόμα η τελευταία.
+            const entryId = await API.solver.history(sid, 1)
+                .then(h => (h && h.items && h.items[0] && !h.items[0].undone) ? h.items[0].id : null)
+                .catch(() => null);
             TimetableGrid._syncSlot(slot.id, {
                 day_of_week: day, period_id: periodId, is_unplaced: false, unplaced_reason: null,
                 classroom_id: room ? room.classroom_id : undefined,
                 classroom_name: room && room.classroom_name ? room.classroom_name : undefined,
             });
-            Modal.close();
+            // Μόνο αν είναι ακόμα ανοιχτό ΤΟ ΙΔΙΟ παράθυρο (όχι κάποιο που άνοιξε στο μεταξύ).
+            if (Modal._token === token) Modal.close();
             TimetableGrid._mobileDay = day;
             this.refreshPalette();
             if (this._rerenderGrid) this._rerenderGrid();
@@ -1328,12 +1346,37 @@ const TimetableView = {
             const roomText = room && room.classroom_name ? ` · ${this._esc(room.classroom_name)}` : '';
             Toast.show(`Μετακινήθηκε: ${this._esc(label)}${roomText}`, 'success', 8000, {
                 label: '↩ Αναίρεση',
-                // Μόνο αν είσαι ακόμα στο Ωρολόγιο (η αναίρεση ξανασχεδιάζει τη σελίδα).
-                onClick: () => { if (this._undoLast && App._currentView === 'timetable') this._undoLast(); },
+                onClick: () => this.undoMove(sid, entryId),
             });
+            return true;
         } catch (err) {
             TimetableGrid.reportConflict('Δεν μετακινήθηκε: ', err);
+            return false;
         }
+    },
+
+    /**
+     * «↩ Αναίρεση» από το μήνυμα μιας μετακίνησης: μόνο στο ίδιο πρόγραμμα, στο
+     * Ωρολόγιο, και αν η μετακίνηση είναι ακόμα η τελευταία αλλαγή — αλλιώς θα
+     * αναιρούσε κάτι άλλο. Τότε λέει πού γίνεται η αναίρεση.
+     */
+    async undoMove(sid, entryId) {
+        const elsewhere = 'Η μετακίνηση δεν αναιρείται από εδώ — άνοιξε το πρόγραμμά της και πάτα 🕘 Ιστορικό.';
+        if (App._currentView !== 'timetable' || TimetableGrid._solutionId !== sid || !this._undoLast || entryId == null) {
+            Toast.info(elsewhere);
+            return;
+        }
+        let top = null;
+        try {
+            const h = await API.solver.history(sid, 1);
+            top = h && h.items ? h.items[0] : null;
+        } catch (_) { /* χωρίς ιστορικό: δεν ρισκάρουμε */ }
+        if (!top || top.id !== entryId || top.undone
+            || App._currentView !== 'timetable' || TimetableGrid._solutionId !== sid) {
+            Toast.info('Έγινε άλλη αλλαγή μετά τη μετακίνηση — για αναίρεση πάτα 🕘 Ιστορικό.');
+            return;
+        }
+        this._undoLast();
     },
 
     _esc(s) {

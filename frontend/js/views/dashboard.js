@@ -36,10 +36,10 @@ const DashboardView = {
         // Το πρόγραμμα που δουλεύεις (όπως ανοίγει το Ωρολόγιο) και αυτό που έχουν οι καθηγητές.
         const workingId = TimetableHelpers.defaultSolutionId(active, App._currentSolutionId);
         const working = active.find(s => s.id === workingId) || null;
-        const pick = TodayHelpers.pickSolution(active, publications, App._currentSolutionId, workingId);
+        const pick = TodayHelpers.pickSolution(active, publications, workingId);
         const teaching = (periods || []).filter(p => !p.is_break);
-        const now = new Date();
-        const day = TodayHelpers.edsDay(now);
+        const today = TodayHelpers.schoolDate(0);     // στην ώρα Ελλάδας
+        const day = today.day;
         const status = working ? TimetableHelpers.statusInfo(working.status) : null;
 
         const missing = [];
@@ -56,7 +56,7 @@ const DashboardView = {
             <div class="dash">
                 <header class="dash-head">
                     <div>
-                        <h2 class="dash-date">${TodayHelpers.DAYS[day]} ${now.getDate()}/${now.getMonth() + 1}</h2>
+                        <h2 class="dash-date">${TodayHelpers.DAYS[day]} ${today.dm}</h2>
                         <p class="dash-sub">${term ? `🗂️ ${esc(term.name)}` : ''}${working ? `${term ? ' · ' : ''}📋 ${esc(working.name)}` : ''}
                             ${status ? `<span class="status-chip ${status.cls}" title="${esc(status.title)}">${esc(status.label)}</span>` : ''}</p>
                     </div>
@@ -122,6 +122,7 @@ const DashboardView = {
 
     /** Τα «ζωντανά» κομμάτια: φορτώνουν μετά τον σκελετό, το καθένα μόνο του. */
     async _fillLive(working, pick, periods, classrooms, day) {
+        this._workingId = working.id;
         const [workSol, todaySol, preview, gaps, crmNew] = await Promise.all([
             API.solver.getSolution(working.id).catch(() => null),
             pick.id && pick.id !== working.id ? API.solver.getSolution(pick.id).catch(() => null) : Promise.resolve(null),
@@ -174,7 +175,8 @@ const DashboardView = {
             rows.push({
                 key: 'gaps', icon: '🕳', cls: 'muted',
                 big: long.length === 1 ? '1 μαθητής' : `${long.length} μαθητές`,
-                text: `με κενό 2 ή περισσότερων ωρών${days.length === 1 ? ` την ${days[0]}` : ''}.`,
+                text: `με κενό 2 ή περισσότερων ωρών${days.length === 1
+                    ? ` ${days[0] === 'Σάββατο' ? 'το' : 'την'} ${days[0]}` : ''}.`,
                 action: 'Κενά',
             });
         }
@@ -203,11 +205,13 @@ const DashboardView = {
                 <p class="dash-attn-text"><b>${esc(r.big)}</b> ${esc(r.text)}</p>
                 <button type="button" class="btn ${r.key === 'publish' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-attn="${r.key}">${esc(r.action)}</button>
             </div>`).join('');
+        // Το Ωρολόγιο ανοίγει ΤΟ ΙΔΙΟ πρόγραμμα που έλεγξε ο Πίνακας (όχι ό,τι προτιμά αλλιώς).
         box.querySelectorAll('[data-attn]').forEach(btn => btn.addEventListener('click', () => {
             const key = btn.dataset.attn;
-            if (key === 'publish') App.openPending('timetable', 'publish');
-            else if (key === 'gaps') App.openPending('timetable', 'gaps');
-            else if (key === 'palette') App.openPending('timetable', 'palette');
+            const sid = this._workingId;
+            if (key === 'publish') App.openPending('timetable', 'publish', sid);
+            else if (key === 'gaps') App.openPending('timetable', 'gaps', sid);
+            else if (key === 'palette') App.openPending('timetable', 'palette', sid);
             else if (key === 'crm') App.openPending('students', 'crm-import');
         }));
     },

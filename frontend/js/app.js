@@ -141,6 +141,8 @@ const App = {
         this.closeMoreSheet({ silent: true });
         if (typeof Modal !== 'undefined' && Modal.isOpen && Modal.isOpen()) Modal.close();
 
+        // Εκκρεμής ενέργεια άλλης σελίδας (π.χ. ο χρήστης έφυγε πριν φορτώσει) — πετιέται.
+        if (this._pending && this._pending.view !== viewName) this._pending = null;
         this._currentView = viewName;
         if (mode !== 'none') this._writeHistory(viewName, mode);
 
@@ -187,9 +189,15 @@ const App = {
      * Πήγαινε σε σελίδα και κάνε εκεί μια ενέργεια όταν φορτώσει (π.χ. από τον
      * Πίνακα Ελέγχου: «📢 Δημοσίευση» → Ωρολόγιο + παράθυρο δημοσίευσης).
      */
-    openPending(viewName, action) {
-        this._pending = { view: viewName, action };
+    openPending(viewName, action, solutionId = null) {
+        this._pending = { view: viewName, action, solutionId };
         this.navigateTo(viewName);
+    },
+
+    /** Το πρόγραμμα που ζήτησε η εκκρεμής ενέργεια (χωρίς να την καταναλώσει). */
+    pendingSolution(viewName) {
+        const p = this._pending;
+        return (p && p.view === viewName && p.solutionId != null) ? p.solutionId : null;
     },
 
     /** Η σελίδα ρωτά αν έχει ενέργεια να κάνει (μία φορά). */
@@ -205,7 +213,11 @@ const App = {
         const url = window.location.pathname + window.location.search + hash;
         const replaceMarker = typeof BackGuard !== 'undefined' && BackGuard.takeMarker();
         try {
-            if (mode === 'replace' || replaceMarker) {
+            if (replaceMarker && window.location.hash === hash) {
+                // Ίδια σελίδα από το μενού: η εγγραφή του μενού απλώς φεύγει — αλλιώς
+                // το επόμενο «Πίσω» θα «έμενε» στην ίδια σελίδα.
+                BackGuard.dropMarker();
+            } else if (mode === 'replace' || replaceMarker) {
                 window.history.replaceState({ view: viewName }, '', url);
             } else if (window.location.hash !== hash) {
                 window.history.pushState({ view: viewName }, '', url);

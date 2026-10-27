@@ -6,9 +6,53 @@
 const TodayHelpers = {
     DAYS: ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'],
 
-    /** JS Date → μέρα EDS (0=Δευτέρα … 6=Κυριακή). */
+    SCHOOL_TZ: 'Europe/Athens',
+
+    /**
+     * Ημερομηνία και ώρα ΣΤΗΝ ΕΛΛΑΔΑ για μια στιγμή (όχι στη ζώνη της
+     * συσκευής: ένα κινητό/PC με λάθος ζώνη θα έδειχνε λάθος «τώρα»).
+     * → { y, m, d, hh, mm } — σε browser χωρίς ζώνες ώρας, η ώρα της συσκευής.
+     */
+    athensParts(date = new Date()) {
+        try {
+            const p = {};
+            new Intl.DateTimeFormat('en-GB', {
+                timeZone: TodayHelpers.SCHOOL_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+            }).formatToParts(date).forEach(x => { p[x.type] = x.value; });
+            return { y: +p.year, m: +p.month, d: +p.day, hh: +p.hour % 24, mm: +p.minute };
+        } catch (e) {
+            return { y: date.getFullYear(), m: date.getMonth() + 1, d: date.getDate(),
+                     hh: date.getHours(), mm: date.getMinutes() };
+        }
+    },
+
+    /**
+     * Η μέρα «σήμερα + offset» στην Ελλάδα: { day (0=Δευτέρα), d, m, y, iso, dm }.
+     * Το offset μετριέται σε ημερολογιακές μέρες (UTC αριθμητική — χωρίς θέματα θερινής ώρας).
+     */
+    schoolDate(offset = 0, now = new Date()) {
+        const a = TodayHelpers.athensParts(now);
+        const t = new Date(Date.UTC(a.y, a.m - 1, a.d + offset));
+        const y = t.getUTCFullYear();
+        const m = t.getUTCMonth() + 1;
+        const d = t.getUTCDate();
+        return {
+            day: (t.getUTCDay() + 6) % 7, y, m, d,
+            iso: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+            dm: `${d}/${m}`,
+        };
+    },
+
+    /** JS Date → μέρα EDS (0=Δευτέρα … 6=Κυριακή), στην Ελλάδα. */
     edsDay(date) {
-        return (date.getDay() + 6) % 7;
+        return TodayHelpers.schoolDate(0, date).day;
+    },
+
+    /** «την Τρίτη» / «το Σάββατο» — με το σωστό άρθρο. */
+    dayAcc(day) {
+        const name = TodayHelpers.DAYS[day] || '';
+        return day === 5 ? `το ${name}` : `την ${name}`;
     },
 
     /** «H:MM»/«HH:MM» → λεπτά από τα μεσάνυχτα (για σωστή σύγκριση). */
@@ -17,8 +61,10 @@ const TodayHelpers = {
         return (h || 0) * 60 + (m || 0);
     },
 
+    /** «HH:MM» τώρα στην Ελλάδα. */
     nowHHMM(date) {
-        return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        const a = TodayHelpers.athensParts(date);
+        return `${String(a.hh).padStart(2, '0')}:${String(a.mm).padStart(2, '0')}`;
     },
 
     /** Επιλογές φίλτρου: καθηγητές και αίθουσες που εμφανίζονται στο πρόγραμμα. */
@@ -129,14 +175,17 @@ const TodayHelpers = {
     },
 
     /**
-     * Ποιο πρόγραμμα δείχνει το «Σήμερα»: το 📢 δημοσιευμένο (αυτό έχουν οι
-     * καθηγητές), αν υπάρχει στη λίστα· αλλιώς όπως πριν (επιλογή χρήστη ή το
-     * νεότερο κανονικό). → { id, published }
+     * Ποιο πρόγραμμα δείχνει το «Σήμερα»: το ΤΕΛΕΥΤΑΙΟ 📢 δημοσιευμένο (αυτό
+     * έχουν οι καθηγητές). Αν αυτό αρχειοθετήθηκε/σβήστηκε, ΔΕΝ πάμε σε μια
+     * παλιότερη δημοσίευση (οι καθηγητές δεν την έχουν πια): το προεπιλεγμένο,
+     * σημειωμένο ως «αδημοσίευτο». → { id, published, publishedAt }
      */
-    pickSolution(solutions, publications, preferredId, defaultId) {
+    pickSolution(solutions, publications, defaultId) {
         const list = (solutions || []).filter(s => !s.archived);
-        const pub = (publications || []).find(p => list.some(s => s.id === p.solution_id));
-        if (pub) return { id: pub.solution_id, published: true, publishedAt: pub.published_at || null };
+        const pub = (publications || [])[0];
+        if (pub && list.some(s => s.id === pub.solution_id)) {
+            return { id: pub.solution_id, published: true, publishedAt: pub.published_at || null };
+        }
         return { id: defaultId, published: false, publishedAt: null };
     },
 

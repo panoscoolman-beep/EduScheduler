@@ -51,6 +51,13 @@ const BackGuard = {
         return true;
     },
 
+    /** Βγάλε την εγγραφή μας από το ιστορικό τώρα (μετά από takeMarker). */
+    dropMarker() {
+        this._ignore += 1;
+        try { window.history.back(); } catch (_) { this._ignore = 0; }
+        setTimeout(() => { this._ignore = 0; }, 800);
+    },
+
     /** popstate: true = το χειρίστηκε (δεν είναι αλλαγή σελίδας). */
     handlePop() {
         if (this._ignore > 0) {

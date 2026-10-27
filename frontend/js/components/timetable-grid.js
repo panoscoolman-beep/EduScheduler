@@ -58,7 +58,9 @@ const TimetableGrid = {
         const filtered = this._filterSlots(slots, viewType, filterValue);
         const counts = Array.from({ length: daysCount }, (_, d) => filtered.filter(s => s.day_of_week === d).length);
         if (this._mobileDay == null || this._mobileDay >= daysCount) {
-            const today = (new Date().getDay() + 6) % 7;
+            // «Σήμερα» στην Ελλάδα (όχι στη ζώνη της συσκευής).
+            const today = typeof TodayHelpers !== 'undefined'
+                ? TodayHelpers.schoolDate(0).day : (new Date().getDay() + 6) % 7;
             this._mobileDay = today < daysCount && counts[today] ? today
                 : Math.max(0, counts.findIndex(c => c > 0));
         }
@@ -66,7 +68,7 @@ const TimetableGrid = {
         const tabs = counts.map((c, d) => `
             <button type="button" role="tab" class="tt-day-tab${d === day ? ' is-on' : ''}" data-day="${d}"
                     aria-selected="${d === day}" aria-label="${this.DAY_NAMES[d]}: ${c} μαθήματα">
-                <span>${this.DAY_SHORT[d]}</span><b>${c}</b>
+                <span class="tt-day-name">${this.DAY_SHORT[d]}</span><span class="tt-day-count">${c} μαθ.</span>
             </button>`).join('');
         const byPeriod = new Map();
         filtered.filter(s => s.day_of_week === day).forEach(s => {
@@ -107,7 +109,7 @@ const TimetableGrid = {
         container.innerHTML = `
             <div class="tt-days" role="tablist" aria-label="Μέρα">${tabs}</div>
             <div class="tt-daylist">
-                ${anyToday ? hours : `<p class="text-muted tt-day-empty">Κανένα μάθημα την ${this.DAY_NAMES[day]}.</p>`}
+                ${anyToday ? hours : `<p class="text-muted tt-day-empty">Κανένα μάθημα ${day === 5 ? 'το' : 'την'} ${this.DAY_NAMES[day]}.</p>`}
             </div>`;
         container.querySelector('.tt-days').addEventListener('click', (e) => {
             const tab = e.target.closest('[data-day]');

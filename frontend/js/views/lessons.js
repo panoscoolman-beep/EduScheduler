@@ -43,7 +43,7 @@ const LessonsView = {
     _studentsCell(row) {
         const names = row.students || [];
         if (!names.length) return '<span class="text-muted">—</span>';
-        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const shown = names.slice(0, 4).map(esc).join(', ');
         const more = names.length > 4 ? ` <b>+${names.length - 4}</b>` : '';
         return `<span title="${esc(names.join(', '))}"><b>${names.length}</b> · ${shown}${more}</span>`;
@@ -95,6 +95,9 @@ const LessonsView = {
         const names = (list) => [...new Set((list || []).map(x => x.name).filter(Boolean))].sort(collator.compare);
         const opt = (value, current) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(value)}</option>`;
         const f = this._filter;
+        // Φίλτρο σε καθηγητή/τμήμα που δεν υπάρχει πια (π.χ. αρχειοθετήθηκε) → «Όλοι».
+        if (f.teacher && !names(self._teachers).includes(f.teacher)) f.teacher = '';
+        if (f.cls && !names(self._classes).includes(f.cls)) f.cls = '';
         container.innerHTML = `
             <div class="card sf-card lf-card">
                 <div class="sf-toolbar lf-toolbar">

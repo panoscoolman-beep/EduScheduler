@@ -1091,12 +1091,16 @@ const TimetableHelpers = {
      * της εβδομάδας από τον ίδιο χάρτη θέσεων του συρσίματος, και από κάτω οι
      * άλλες με την αιτία. Η τρέχουσα θέση παραλείπεται. Pure.
      */
-    buildMoveChoicesHtml(map, periods, current = {}) {
+    buildMoveChoicesHtml(map, periods, current = {}, operatingWindow = null) {
         const DAY_NAMES = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
         const esc = TimetableHelpers.esc;
         const byId = new Map((periods || []).map(p => [p.id, p]));
+        // Κελιά εκτός ωραρίου λειτουργίας (κλειστά στο πλέγμα): ποτέ «ελεύθερα» —
+        // μπαίνουν στα «Δεν κάνουν» με αιτία «εκτός ωραρίου».
         const cells = ((map && map.cells) || []).filter(c => byId.has(c.period_id)
-            && !(c.day === current.day_of_week && c.period_id === current.period_id));
+            && !(c.day === current.day_of_week && c.period_id === current.period_id))
+            .map(c => (c.ok && !TimetableHelpers.isCellOpen(byId.get(c.period_id), c.day, operatingWindow))
+                ? { ...c, ok: false, reason: 'εκτός ωραρίου λειτουργίας' } : c);
         if (!cells.length) return '<p class="text-muted">Δεν βρέθηκαν διδακτικές ώρες στο πρόγραμμα.</p>';
         const order = (c) => c.day * 1000 + (byId.get(c.period_id).sort_order || 0);
         const when = (c) => {

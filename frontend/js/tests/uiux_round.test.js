@@ -112,12 +112,45 @@ test('Σήμερα: «λήγει σε», «σε», μαζεμένες επόμε
     assert.match(T.buildHtml(T.buildDay(S, P, 0, '20:00'), { now: '20:00' }), /3 ώρες έχουν ήδη ολοκληρωθεί/);
 });
 
-test('pickSolution: το δημοσιευμένο αν υπάρχει στη λίστα, αλλιώς το προεπιλεγμένο', () => {
+test('pickSolution: ΜΟΝΟ η τελευταία δημοσίευση· αρχειοθετημένη → προεπιλεγμένο ως αδημοσίευτο', () => {
     const sols = [{ id: 9 }, { id: 7 }, { id: 3, archived: true }];
-    assert.deepEqual(T.pickSolution(sols, [{ solution_id: 7, published_at: 'x' }], null, 9),
+    assert.deepEqual(T.pickSolution(sols, [{ solution_id: 7, published_at: 'x' }], 9),
         { id: 7, published: true, publishedAt: 'x' });
-    assert.equal(T.pickSolution(sols, [{ solution_id: 3 }], null, 9).id, 9);     // αρχειοθετημένο
-    assert.deepEqual(T.pickSolution(sols, [], null, 9), { id: 9, published: false, publishedAt: null });
+    // Η νεότερη δημοσίευση αρχειοθετήθηκε: ΟΧΙ η παλιότερη (7) — οι καθηγητές δεν την έχουν πια.
+    assert.deepEqual(T.pickSolution(sols, [{ solution_id: 3 }, { solution_id: 7 }], 9),
+        { id: 9, published: false, publishedAt: null });
+    assert.deepEqual(T.pickSolution(sols, [], 9), { id: 9, published: false, publishedAt: null });
+});
+
+test('ώρα Ελλάδας: schoolDate με offset, άρθρο «το Σάββατο»', () => {
+    const now = new Date('2026-10-31T22:30:00Z');     // Κυριακή 1/11 00:30 στην Ελλάδα
+    assert.deepEqual(T.schoolDate(0, now), { day: 6, y: 2026, m: 11, d: 1, iso: '2026-11-01', dm: '1/11' });
+    assert.equal(T.schoolDate(-1, now).day, 5);
+    assert.equal(T.schoolDate(1, now).iso, '2026-11-02');
+    assert.equal(T.schoolDate(-31, now).iso, '2026-10-01');
+    assert.equal(T.dayAcc(5), 'το Σάββατο');
+    assert.equal(T.dayAcc(3), 'την Πέμπτη');
+    assert.equal(T.dayAcc(6), 'την Κυριακή');
+});
+
+test('buildMoveChoicesHtml: θέσεις εκτός ωραρίου δεν προσφέρονται ως ελεύθερες', () => {
+    const periods = [
+        { id: 1, start_time: '15:00', end_time: '16:00', sort_order: 1 },
+        { id: 2, start_time: '17:00', end_time: '18:00', sort_order: 2 },
+        { id: 3, start_time: '21:00', end_time: '22:00', sort_order: 3 },
+    ];
+    const map = { cells: [
+        { day: 0, period_id: 1, ok: true }, { day: 0, period_id: 2, ok: true }, { day: 0, period_id: 3, ok: true },
+        { day: 5, period_id: 1, ok: true },
+    ] };
+    const win = { from: '16:00', to: '21:00', saturday: { from: '09:00', to: '20:00' } };
+    const html = H.buildMoveChoicesHtml(map, periods, {}, win);
+    const offered = [...html.matchAll(/data-move-day="(\d)" data-move-period="(\d)"/g)].map(m => `${m[1]}:${m[2]}`);
+    assert.deepEqual(offered, ['0:2', '5:1']);                      // Σάββατο 15:00 ανοιχτό με το δικό του ωράριο
+    assert.match(html, /Δευτέρα 15:00–16:00<\/span>\s*<span class="move-why">εκτός ωραρίου λειτουργίας/);
+    assert.match(html, /Δεν κάνουν \(2\)/);
+    // Χωρίς ωράριο: όλα όπως πριν
+    assert.equal([...H.buildMoveChoicesHtml(map, periods, {}).matchAll(/data-move-day=/g)].length, 4);
 });
 
 test('Μήνυμα αντικαταστάτη: μικρό όνομα, συνεχόμενες ώρες ενωμένες', () => {
@@ -488,5 +521,169 @@ test('αλλαγή σεναρίου από το μενού «Περισσότε�
         await waitFor(app.w, () => activations.length === 1 && !overlayOpen(app));
         assert.equal(term, 2);
         await sleep(app.w, 30);
+    } finally { app.close(); }
+});
+
+// ─── Διορθώσεις μετά τον ανεξάρτητο έλεγχο ───────────────────────────────
+
+/** Κινητό, Δευτέρα: μετακίνηση της ώρας 1 μέσα από το φύλλο → επιστρέφει το toast. */
+async function moveFirstLesson(app) {
+    app.doc.querySelector('.tt-day-tab[data-day="0"]').click();
+    await waitFor(app.w, () => app.doc.querySelector('.tt-lesson[data-slot-id="1"]'));
+    app.doc.querySelector('.tt-lesson[data-slot-id="1"]').click();
+    await waitFor(app.w, () => overlayOpen(app));
+    app.doc.querySelector('[data-ls="move"]').click();
+    await waitFor(app.w, () => app.doc.querySelector('.move-option'));
+    app.doc.querySelector('.move-option').click();
+    const before = app.toasts.length;
+    app.doc.querySelector('[data-move-ok]').click();
+    await waitFor(app.w, () => app.toasts.slice(before).some(t => t.action));
+    return app.toasts.slice(before).find(t => t.action);
+}
+
+test('«↩ Αναίρεση» του μηνύματος: μόνο στο ίδιο πρόγραμμα και μόνο αν η μετακίνηση είναι η τελευταία', async () => {
+    const undoIds = [];
+    let top = { id: 77, undone: false };
+    const { routes, state } = timetableRoutes({
+        'GET /api/solver/solutions/*/slots/*/placement-map': () => ({ slot_id: 1, cells: [
+            { day: 0, period_id: 1, ok: true }, { day: 0, period_id: 3, ok: true }] }),
+        'PUT /api/solver/solutions/*/slots/*': () => ({ status: 'ok', slot: { classroom_id: 1, classroom_name: 'Αίθ 1' } }),
+        'GET /api/solver/solutions/*/history': () => ({ items: [top], summary: {} }),
+        'POST /api/solver/solutions/*/undo': ({ path: p }) => { undoIds.push(+p.split('/')[4]); return { message: 'Αναιρέθηκε' }; },
+    });
+    state.solutions.push({ id: 8, name: 'Θερινό', status: 'optimal', archived: false, slots: [slot(50, { solution_id: 8 })] });
+    state.slots = [slot(1)];
+    const app = await start(routes, { phone: true });
+    try {
+        await go(app, 'timetable', '.tt-days');
+        // 1) Αμέσως: αναιρεί ΑΥΤΗ τη μετακίνηση, στο πρόγραμμα 7
+        let toast = await moveFirstLesson(app);
+        assert.equal(toast.action.label, '↩ Αναίρεση');
+        await toast.action.onClick();
+        await waitFor(app.w, () => undoIds.length === 1);
+        assert.deepEqual(undoIds, [7]);
+
+        // 2) Έγινε άλλη αλλαγή μετά: δεν αναιρεί, λέει γιατί
+        await waitFor(app.w, () => app.doc.querySelector('.tt-days'));
+        top = { id: 78, undone: false };
+        toast = await moveFirstLesson(app);
+        top = { id: 79, undone: false };
+        await toast.action.onClick();
+        await sleep(app.w, 40);
+        assert.deepEqual(undoIds, [7]);
+        assert.ok(app.toasts.some(t => /Έγινε άλλη αλλαγή μετά/.test(t.message)));
+
+        // 3) Άλλαξε πρόγραμμα: ποτέ undo στο άλλο πρόγραμμα
+        top = { id: 80, undone: false };
+        toast = await moveFirstLesson(app);
+        change(app, app.doc.getElementById('tt-solution'), '8');
+        await waitFor(app.w, () => app.G.TimetableGrid._solutionId === 8);
+        await toast.action.onClick();
+        await sleep(app.w, 40);
+        assert.deepEqual(undoIds, [7], 'καμία αναίρεση στο πρόγραμμα 8');
+        assert.ok(app.toasts.some(t => /δεν αναιρείται από εδώ/.test(t.message)));
+    } finally { app.close(); }
+});
+
+test('μετακίνηση: τα κουμπιά κλειδώνουν όσο τρέχει το αίτημα, ξανανοίγουν σε αποτυχία', async () => {
+    let release;
+    const { routes, state } = timetableRoutes({
+        'GET /api/solver/solutions/*/slots/*/placement-map': () => ({ slot_id: 1, cells: [{ day: 0, period_id: 3, ok: true }] }),
+        'PUT /api/solver/solutions/*/slots/*': () => new Promise(r => { release = r; }),
+    });
+    state.slots = [slot(1)];
+    const app = await start(routes, { phone: true });
+    try {
+        await go(app, 'timetable', '.tt-days');
+        app.doc.querySelector('.tt-day-tab[data-day="0"]').click();
+        await waitFor(app.w, () => app.doc.querySelector('.tt-lesson[data-slot-id="1"]'));
+        app.doc.querySelector('.tt-lesson[data-slot-id="1"]').click();
+        await waitFor(app.w, () => overlayOpen(app));
+        app.doc.querySelector('[data-ls="move"]').click();
+        await waitFor(app.w, () => app.doc.querySelector('.move-option'));
+        app.doc.querySelector('.move-option').click();
+        app.doc.querySelector('[data-move-ok]').click();
+        await waitFor(app.w, () => typeof release === 'function');
+        assert.equal(app.doc.querySelector('[data-move-ok]').disabled, true);
+        assert.equal(app.doc.querySelector('[data-move-cancel]').disabled, true);
+        release({ __status: 400, data: { detail: 'Η αίθουσα είναι πιασμένη' } });
+        await waitFor(app.w, () => app.toasts.some(t => /Δεν μετακινήθηκε: Η αίθουσα είναι πιασμένη/.test(t.message)));
+        assert.ok(overlayOpen(app), 'το παράθυρο μένει για νέα προσπάθεια');
+        assert.equal(app.doc.querySelector('[data-move-ok]').disabled, false);
+        assert.equal(app.doc.querySelector('[data-move-cancel]').disabled, false);
+        await sleep(app.w, 20);
+    } finally { app.close(); }
+});
+
+test('«Περισσότερα» → η ίδια σελίδα: το επόμενο «Πίσω» πάει στην προηγούμενη', async () => {
+    const app = await start(baseRoutes(), { phone: true });
+    try {
+        await go(app, 'teachers', '[id^="dt-add-"]');
+        app.doc.getElementById('bn-more').click();
+        await sleep(app.w, 20);
+        app.doc.querySelector('[data-sheet-view="teachers"]').click();
+        await sleep(app.w, 60);
+        assert.equal(app.w.location.hash, '#teachers');
+        app.w.history.back();
+        await waitFor(app.w, () => app.G.App._currentView === 'dashboard');
+        await sleep(app.w, 20);
+    } finally { app.close(); }
+});
+
+test('«Λείπει σήμερα»: αργή απάντηση δεν γράφει σε άλλο/κλειστό παράθυρο', async () => {
+    const day = T.schoolDate(0).day;
+    let release;
+    const { routes, state } = timetableRoutes({
+        'GET /api/solver/solutions/*/substitute-suggestions': () => new Promise(r => { release = r; }),
+    });
+    state.slots = [slot(1, { day_of_week: day, period_id: 1 })];
+    const app = await start(routes, { hash: '#today' });
+    try {
+        await waitFor(app.w, () => app.doc.querySelector('.today-item-main'));
+        app.doc.querySelector('.today-item-main').click();
+        await waitFor(app.w, () => app.doc.querySelector('[data-today-absent]'));
+        app.doc.querySelector('[data-today-absent]').click();
+        await waitFor(app.w, () => typeof release === 'function');
+        // Ο χρήστης κλείνει και ανοίγει άλλο παράθυρο (🎨 Εμφάνιση) πριν έρθει η απάντηση.
+        app.doc.getElementById('modal-close').click();
+        app.G.App.openAppearance();
+        release({ affected_slots: [], stats: {} });
+        await sleep(app.w, 40);
+        assert.match(app.doc.getElementById('modal-title').textContent, /Εμφάνιση/);
+        assert.ok(app.doc.getElementById('ap-accents'), 'το άλλο παράθυρο έμεινε ανέπαφο');
+        assert.doesNotMatch(app.doc.getElementById('modal-body').textContent, /αντικατάσταση/);
+    } finally { app.close(); }
+});
+
+test('Πίνακας Ελέγχου → Ωρολόγιο: ανοίγει το ΙΔΙΟ πρόγραμμα· εκκρεμότητα άλλης σελίδας πετιέται', async () => {
+    const previews = [];
+    const { routes, state } = timetableRoutes({
+        'GET /api/publications/preview/*': ({ path: p }) => {
+            previews.push(+p.split('/').pop());
+            return { first: true, affected: 2, previous: null, teachers: [] };
+        },
+        'GET /api/teachers/': () => [{ id: 21, name: 'Νικολάου' }],
+        'GET /api/lessons/': () => [{ id: 101, subject_name: 'Φυσική' }],
+    });
+    state.solutions.push({ id: 3, name: 'Περσινό', status: 'optimal', archived: true, slots: [] });
+    const app = await start(routes);
+    try {
+        // Ρητή επιλογή αρχειοθετημένου στο Ωρολόγιο· ο Πίνακας ελέγχει το ενεργό (7).
+        app.G.App._currentSolutionId = 3;
+        await go(app, 'dashboard', '[data-attn="publish"]');
+        app.doc.querySelector('[data-attn="publish"]').click();
+        await waitFor(app.w, () => app.G.App._currentView === 'timetable'
+            && app.doc.getElementById('tt-solution') && overlayOpen(app));
+        assert.equal(app.doc.getElementById('tt-solution').value, '7');
+        assert.equal(app.G.App._currentSolutionId, 7);
+        app.doc.getElementById('modal-close').click();
+
+        // Εκκρεμότητα για το Ωρολόγιο, αλλά ο χρήστης πάει αλλού πριν φορτώσει.
+        app.G.App.openPending('timetable', 'gaps', 7);
+        app.G.App.navigateTo('students');
+        assert.equal(app.G.App._pending, null);
+        await go(app, 'timetable', '#tt-solution');
+        await sleep(app.w, 60);
+        assert.ok(!overlayOpen(app), 'κανένα παράθυρο «Κενά» από παλιά εκκρεμότητα');
     } finally { app.close(); }
 });
