@@ -250,6 +250,21 @@ grep -o '?v=[0-9]*' frontend/index.html | sort | uniq -c   # τρέχουσα τ
 sed -i 's/?v=55"/?v=56"/g' frontend/index.html
 ```
 
+## Frontend: κέλυφος & κινητό (2026-10-27)
+
+- **Διευθύνσεις σελίδων:** `#<view>` (π.χ. `#timetable`, `#today`)· `App.navigateTo(view)`
+  κάνει `pushState`, το `popstate` αλλάζει σελίδα. Παράθυρα και το μενού «Περισσότερα»
+  περνούν από το `BackGuard` (`components/back_guard.js`), ώστε το «Πίσω» να τα κλείνει
+  πρώτα. Νέο overlay → `BackGuard.open(id, close)` / `BackGuard.closed(id)`.
+- **Παράθυρα:** ένα `Modal` για όλα· με `onSave` και κουμπί όχι `btn-secondary` ρωτά πριν
+  χάσει αλλαγές (πάτημα έξω / Esc / «Πίσω»)· `confirmDiscard: false` το κλείνει. Listeners
+  ΜΗΝ μπαίνουν στο `#modal-body` (μένει για τα επόμενα παράθυρα) — σε δικό σου στοιχείο μέσα.
+- **Από σελίδα σε σελίδα με ενέργεια:** `App.openPending(view, action)` + `App.takePending(view)`.
+- **Χρώματα:** tokens στο `:root` (ίδια με το CRM)· το χρώμα έμφασης είναι `--primary` και
+  αλλάζει με `data-accent` (🎨 Εμφάνιση, `js/appearance.js`, φορτώνει στο `<head>`).
+- **Κινητό:** `max-width: 768px`· το Ωρολόγιο δείχνει μία μέρα (`TimetableGrid.renderDayList`).
+  Στα jsdom tests: `start(routes, { phone: true })`.
+
 ## Known issues
 
 1. ~~No versioned migrations~~ ✅ **Resolved (2026-05-06)** — Alembic
