@@ -2283,3 +2283,31 @@ tr.hist-undone { opacity: 0.5; }
     .card-header .btn { flex-shrink: 0; }
     .card-header > .archive-toggle { margin-left: 0; }
 }
+
+/* Ωράριο λειτουργίας (Ρυθμίσεις): «από … έως …» χωρά και στα 360px */
+.time-range { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.time-range-label { min-width: 70px; }
+@media (max-width: 480px) {
+    .time-range-label { flex: 1 1 100%; }
+    .time-range .form-input { max-width: none; }
+}
+.time-range .form-input { max-width: 140px; flex: 1 1 110px; min-width: 0; }
+
+/* Κείμενο δημοσίευσης στο Ωρολόγιο: αναδιπλώνεται αντί να βγαίνει από την οθόνη */
+.tt-pub-status { min-width: 0; max-width: 100%; }
+.tt-pub-status .status-chip { white-space: normal; text-align: left; max-width: 100%; }
+
+@media (max-width: 768px) {
+    /* Πίνακες που δεν γίνονται κάρτες (Δημιουργία, Σενάρια…): κύλιση μόνο μέσα τους. */
+    table.data-table:not(.dt-cards) { display: block; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+    .sf-chip { min-height: 36px; }
+    .palette-inspect-btn, .palette-find-btn { min-width: 36px; min-height: 36px; }
+}
+
+/* Πλατύς πίνακας σε στενή οθόνη: κύλιση μέσα στο κουτί, όχι σε όλη τη σελίδα. */
+.table-scroll { overflow-x: auto; max-width: 100%; }
+@media (pointer: coarse) {
+    .seg-btn { min-height: 40px; }
+    .sf-chip { min-height: 40px; }
+    button.status-chip { min-height: 32px; }
+}

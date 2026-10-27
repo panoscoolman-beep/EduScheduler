@@ -1328,7 +1328,8 @@ const TimetableView = {
             const roomText = room && room.classroom_name ? ` · ${this._esc(room.classroom_name)}` : '';
             Toast.show(`Μετακινήθηκε: ${this._esc(label)}${roomText}`, 'success', 8000, {
                 label: '↩ Αναίρεση',
-                onClick: () => { if (this._undoLast) this._undoLast(); },
+                // Μόνο αν είσαι ακόμα στο Ωρολόγιο (η αναίρεση ξανασχεδιάζει τη σελίδα).
+                onClick: () => { if (this._undoLast && App._currentView === 'timetable') this._undoLast(); },
             });
         } catch (err) {
             TimetableGrid.reportConflict('Δεν μετακινήθηκε: ', err);

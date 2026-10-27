@@ -84,7 +84,9 @@ const TimetableGrid = {
                 const who = viewType === 'teacher'
                     ? (TimetableGrid.studentsLabel(slot) || slot.class_name || '')
                     : (slot.teacher_name || slot.teacher_short || '');
-                const json = JSON.stringify(slot).replace(/'/g, '&#39;');
+                // Σε attribute με μονά εισαγωγικά: & και < ως entities (αλλιώς ο
+                // HTML parser θα «αποκωδικοποιούσε» κείμενο του ονόματος).
+                const json = JSON.stringify(slot).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
                 return `
                     <button type="button" class="tt-lesson${slot.is_locked ? ' locked' : ''}" data-slot-id="${slot.id}"
                             data-json='${json}' onclick="TimetableGrid.showDetails(this)" style="--c:${esc(color)}">

@@ -32,15 +32,16 @@ const SettingsView = {
                     </div>
                     <div class="form-group">
                         <label class="form-label">🕒 Ωράριο λειτουργίας</label>
-                        <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <div class="time-range">
+                            <span class="time-range-label">Δευ–Παρ:</span>
                             <input class="form-input" id="s-visible-from" type="time"
                                    value="${settings.visible_from || ''}" style="max-width:140px">
                             <span>έως</span>
                             <input class="form-input" id="s-visible-to" type="time"
                                    value="${settings.visible_to || ''}" style="max-width:140px">
                         </div>
-                        <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem;">
-                            <span style="min-width:70px">Σάββατο:</span>
+                        <div class="time-range" style="margin-top:0.5rem;">
+                            <span class="time-range-label">Σάββατο:</span>
                             <input class="form-input" id="s-sat-from" type="time"
                                    value="${settings.saturday_from || ''}" style="max-width:140px">
                             <span>έως</span>
@@ -53,7 +54,7 @@ const SettingsView = {
                             μέρας. Το Σάββατο μπορεί να έχει δικό του ωράριο (π.χ. 08:00–22:00· κενό =
                             ίδιο με τις καθημερινές). Ώρα που έχει ήδη μάθημα <b>δεν κρύβεται ποτέ</b>.
                             Κενό = όλες οι ώρες. <b>Ο αλγόριθμος δεν τοποθετεί μαθήματα εκτός ωραρίου</b>
-                            (δημιουργία, Lock &amp; Regenerate, Γέμισε τα κενά) — εκτός από ώρες που έχεις
+                            (δημιουργία, «Κράτα τα κλειδωμένα», «Γέμισε τα κενά») — εκτός από ώρες που έχεις
                             κλειδώσει 🔒. Για καλοκαιρινό πρόγραμμα με πρωινά, άλλαξε πρώτα το ωράριο.
                         </p>
                     </div>

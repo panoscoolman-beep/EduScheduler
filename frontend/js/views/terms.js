@@ -42,7 +42,7 @@ const TermsView = {
     _renderList(terms, container) {
         const host = document.getElementById('terms-list');
         host.innerHTML = `
-            <table class="data-table">
+            <div class="table-scroll"><table class="data-table">
                 <thead><tr><th>Σενάριο</th><th>Σύντομο</th><th>Διάρκεια</th><th>Κατάσταση</th><th style="text-align:right">Ενέργειες</th></tr></thead>
                 <tbody>
                     ${terms.map(t => `
@@ -60,7 +60,7 @@ const TermsView = {
                             </td>
                         </tr>`).join('')}
                 </tbody>
-            </table>`;
+            </table></div>`;
         host.querySelectorAll('button[data-act]').forEach(btn =>
             btn.addEventListener('click', () => this._action(btn.dataset, container))
         );
