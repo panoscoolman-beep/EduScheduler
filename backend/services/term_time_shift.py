@@ -20,6 +20,19 @@ from backend.models import (
     TimetableSolution, TimetableSlot,
 )
 from backend.services import slot_history
+from backend.services.placement_conflicts import day_name
+
+# Η αιτία στην κάρτα της Παλέτας κρατά ΚΑΙ την παλιά θέση (μέρα, ώρα, αίθουσα,
+# 🔒): δεν γράφεται ιστορικό για αυτές, άρα είναι το μόνο ίχνος της.
+OUT_OF_RANGE_REASON = "Εκτός εύρους ωρών μετά τη μετατόπιση — ήταν {day} {period}, {room}{lock}"
+_REASON_MAX = TimetableSlot.__table__.c.unplaced_reason.type.length or 500
+
+
+def _out_of_range_reason(s: TimetableSlot) -> str:
+    reason = OUT_OF_RANGE_REASON.format(
+        day=day_name(s.day_of_week), period=s.period.name if s.period else "—",
+        room=s.classroom.name if s.classroom else "—", lock=", 🔒" if s.is_locked else "")
+    return reason if len(reason) <= _REASON_MAX else reason[:_REASON_MAX - 1] + "…"
 
 
 def _build_period_map(db: Session, offset: int):
@@ -89,11 +102,12 @@ def shift_term_times(db: Session, term_id: int, offset: int, shift_solutions: bo
             for s in slots:
                 np = target.get(s.period_id)
                 if np is None:
+                    reason = _out_of_range_reason(s)
                     s.is_unplaced = True
                     s.day_of_week = None
                     s.period_id = None
                     s.classroom_id = None
-                    s.unplaced_reason = "Εκτός εύρους ωρών μετά τη μετατόπιση"
+                    s.unplaced_reason = reason
                     res["slots_unplaced"] += 1
                 else:
                     s.period_id = np

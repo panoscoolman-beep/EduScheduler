@@ -1718,8 +1718,12 @@ button.status-chip { cursor: pointer; font-family: inherit; }
 .gap-md { gap: var(--space-md); }
 
 /* Print Styles */
+/* Λεζάντα εκτύπωσης του Ωρολογίου (πρόγραμμα · προβολή · φίλτρο): μόνο στο χαρτί. */
+.print-caption { display: none; }
+
 @media print {
-    .sidebar, .topbar, #tt-print, .dt-custom, .dt-edit, .dt-delete, .modal-overlay, #go-generate, .toast-container, .timetable-controls, .print-hide { display: none !important; }
+    .sidebar, .top-bar, .bottom-nav, .sheet, .sheet-backdrop, .version-banner, #parking-lot-container, #tt-print, .dt-custom, .dt-edit, .dt-delete, .modal-overlay, #go-generate, .toast-container, .timetable-controls, .print-hide { display: none !important; }
+    .print-caption { display: block; text-align: center; font-size: 1.1rem; font-weight: 600; margin: 0 0 12px 0; }
     body, .app-layout, .main-content, .content-area, .card { overflow: visible !important; height: auto !important; margin: 0 !important; width: 100% !important; padding: 0 !important; }
     .card { box-shadow: none !important; border: none !important; }
     .timetable-grid-container { overflow: visible !important; border: none !important; }

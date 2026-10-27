@@ -14,6 +14,24 @@
  *     classroom.room_type must match (warning, not blocker)
  */
 const LessonsView = {
+    /**
+     * Δικά της κείμενα για το 409 «η αλλαγή τμήματος σβήνει τις 👥 εξαιρέσεις»
+     * (αλλιώς το DataTable δείχνει τα γενικά κείμενα των συγκρούσεων). null = γενικά.
+     */
+    classChangeConfirm(detail) {
+        if (!detail || detail.code !== 'class_change_clears_overrides') return null;
+        const esc = DataTable.esc;
+        const names = Array.isArray(detail.overrides) ? detail.overrides : [];
+        return {
+            title: '⚠️ Αλλαγή τμήματος — σβήνονται οι εξαιρέσεις μαθητών',
+            bodyHtml: `<p style="font-weight:600">Η αλλαγή τμήματος θα σβήσει ${names.length} εξαιρέσεις μαθητών (👥) της κάρτας:</p>
+                       <ul>${names.map(n => `<li>${esc(n)}</li>`).join('')}</ul>
+                       <p class="text-muted mt-sm">Ήταν γραμμένες για το παλιό τμήμα. Οι ώρες της κάρτας μένουν όπως είναι. Συνέχεια;</p>`,
+            saveText: 'Ναι, αλλαγή τμήματος',
+            successText: 'Αποθηκεύτηκε — οι εξαιρέσεις μαθητών της κάρτας σβήστηκαν.',
+        };
+    },
+
     _teachers: [],
     _subjects: [],
     _classes: [],
@@ -78,6 +96,7 @@ const LessonsView = {
             apiService: API.lessons,
             entityName: 'Μαθήματα-Κάρτες',
             itemLabel: (item) => LessonsView.lessonLabel(item),
+            forceUpdateConfirm: (detail) => LessonsView.classChangeConfirm(detail),
             rowFilter: (data) => LessonsView.filterLessons(data, LessonsView._filter),
             onRendered: (all, visible) => LessonsView._renderFilterCount(all, visible),
             customActions: [{
@@ -292,7 +311,7 @@ const LessonsView = {
             </div>
             <div style="margin: 0.5rem 0;">
                 <button class="btn btn-primary" id="bulk-preview-btn">
-                    👁️ Preview
+                    👁️ Προεπισκόπηση
                 </button>
             </div>
             <div id="bulk-preview-result" style="margin-top:1rem;"></div>
@@ -320,7 +339,7 @@ const LessonsView = {
                 return;
             }
             previewBtn.disabled = true;
-            previewBtn.textContent = '⏳ Validating...';
+            previewBtn.textContent = '⏳ Έλεγχος...';
             try {
                 const result = await API.lessonsBulkImport.preview(csv);
                 this._renderPreviewResult(result, csv, table, resultArea);
@@ -379,7 +398,7 @@ const LessonsView = {
             </div>
             <table class="data-table" style="font-size:0.9em;">
                 <thead>
-                    <tr><th></th><th>#</th><th>Subject</th><th>Teacher</th><th>Class</th><th>Room</th><th>ppw</th><th>Distribution</th></tr>
+                    <tr><th></th><th>#</th><th>Μάθημα</th><th>Καθηγητής</th><th>Τμήμα</th><th>Αίθουσα</th><th>Ώρες/εβδ.</th><th>Κατανομή</th></tr>
                 </thead>
                 <tbody>${rowsHtml}</tbody>
             </table>
@@ -388,7 +407,7 @@ const LessonsView = {
                 <button class="btn btn-success" id="bulk-commit"
                         ${hasErrors ? 'disabled' : ''}
                         title="${hasErrors ? 'Διόρθωσε πρώτα τα σφάλματα' : ''}">
-                    ✅ Εισαγωγή ${result.valid_count} lessons
+                    ✅ Εισαγωγή ${result.valid_count === 1 ? '1 μαθήματος' : `${result.valid_count} μαθημάτων`}
                 </button>
             </div>
         `;
@@ -397,7 +416,7 @@ const LessonsView = {
         document.getElementById('bulk-commit').addEventListener('click', async () => {
             const btn = document.getElementById('bulk-commit');
             btn.disabled = true;
-            btn.textContent = '⏳ Commit...';
+            btn.textContent = '⏳ Εισαγωγή...';
             try {
                 const summary = await API.lessonsBulkImport.commit(csvText);
                 if (summary.status === 'ok') {
@@ -586,7 +605,7 @@ const LessonsView = {
             chipsEl.querySelectorAll('.dist-chip').forEach(btn => {
                 btn.addEventListener('click', () => {
                     distInput.value = btn.dataset.distValue || '';
-                    distInput.dispatchEvent(new Event('input'));
+                    distInput.dispatchEvent(new Event('input', { bubbles: true }));
                     // Re-render to update active highlight
                     this._refreshDistributionChips(ppw, distInput);
                 });

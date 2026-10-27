@@ -136,9 +136,11 @@ def update_availability(teacher_id: int, data: TeacherAvailabilityBulkUpdate, db
         TeacherAvailability.term_id == term_id,
     ).delete()
 
-    # Insert new entries (scoped to the active scenario)
+    # Insert new entries (scoped to the active scenario). Διπλό (μέρα, ώρα) στο
+    # σώμα → κρατιέται το τελευταίο (αλλιώς IntegrityError → 500).
+    unique = {(a.day_of_week, a.period_id): a for a in data.availabilities}
     new_entries = []
-    for avail in data.availabilities:
+    for avail in unique.values():
         entry = TeacherAvailability(teacher_id=teacher_id, term_id=term_id, **avail.model_dump())
         db.add(entry)
         new_entries.append(entry)

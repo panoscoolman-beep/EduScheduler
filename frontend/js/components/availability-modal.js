@@ -9,7 +9,11 @@ const AvailabilityModal = {
         const title = `Πρόγραμμα / Κωλύματα: ${item.name || item.first_name + ' ' + item.last_name}`;
         
         // Show loading in Modal
-        Modal.open(title, '<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>');
+        Modal.open(title, '<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>',
+            null, { hideFooter: true });
+        // Αν στο μεταξύ έκλεισε ή άνοιξε άλλο παράθυρο, το πλέγμα δεν ξανανοίγει μόνο του.
+        const token = Modal._token;
+        const stillMine = () => Modal._token === token && Modal.isOpen();
 
         try {
             // Load required data
@@ -23,6 +27,14 @@ const AvailabilityModal = {
 
             const teachingPeriods = periods.filter(p => !p.is_break);
             const daysCount = settings.days_per_week || 5;
+            // Κωλύματα σε μέρες/ώρες που το πλέγμα δεν δείχνει (π.χ. Σάββατο όταν
+            // η εβδομάδα έγινε 5 ημερών, ώρα που έγινε διάλειμμα): ξαναστέλνονται
+            // ως έχουν στην αποθήκευση, αλλιώς ο server (που αντικαθιστά όλα) τα έσβηνε.
+            const shownPeriodIds = new Set(teachingPeriods.map(p => p.id));
+            const knownPeriodIds = new Set(periods.map(p => p.id));
+            const hiddenRows = (availabilities || []).filter(a =>
+                knownPeriodIds.has(a.period_id)
+                && (a.day_of_week >= daysCount || !shownPeriodIds.has(a.period_id)));
 
             // Build matrix of unavailabilities [day_of_week][period_id] -> boolean
             const unavailMatrix = {};
@@ -79,19 +91,32 @@ const AvailabilityModal = {
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
+                ${hiddenRows.length ? `
+                <p class="text-muted" id="avail-hidden-note" style="margin-top: 0.5rem; font-size: 0.85rem;">
+                    Διατηρούνται ${hiddenRows.length} κωλύματα σε ημέρες/ώρες που δεν εμφανίζονται.
+                </p>` : ''}
             `;
 
+            if (!stillMine()) return;
             Modal.open(title, html, async () => {
                 // Save action
                 try {
                     const cells = document.querySelectorAll('.avail-cell.unavail');
                     const payload = { availabilities: [] };
-                    
+
                     cells.forEach(cell => {
                         payload.availabilities.push({
                             day_of_week: parseInt(cell.dataset.day),
                             period_id: parseInt(cell.dataset.period),
                             status: 'unavailable'
+                        });
+                    });
+                    // Όσα δεν φαίνονται στο πλέγμα: πίσω όπως ήταν (δεν συμπίπτουν με κελιά).
+                    hiddenRows.forEach(a => {
+                        payload.availabilities.push({
+                            day_of_week: a.day_of_week,
+                            period_id: a.period_id,
+                            status: a.status
                         });
                     });
 
@@ -119,12 +144,17 @@ const AvailabilityModal = {
                         td.classList.replace('unavail', 'avail');
                         td.innerHTML = '✅';
                     }
+                    // Τα κελιά δεν είναι πεδία φόρμας: ενημέρωσε το Modal ότι υπάρχουν
+                    // αλλαγές, ώστε πάτημα έξω / Esc / «Πίσω» να ρωτούν πριν κλείσουν.
+                    td.dispatchEvent(new Event('change', { bubbles: true }));
                 });
             });
 
         } catch(err) {
-            Modal.open(title, `<div class="alert alert-error">Σφάλμα: ${DataTable.esc(err.message)}</div>`);
             console.error(err);
+            if (!stillMine()) return;
+            Modal.open(title, `<div class="alert alert-error">Σφάλμα: ${DataTable.esc(err.message)}</div>`,
+                null, { hideFooter: true });
         }
     }
 };

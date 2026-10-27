@@ -10,6 +10,7 @@ from backend.schemas import (
     StudentAvailabilityBulkUpdate
 )
 from backend.services import crm_student_notify as crm_notify
+from backend.services import delete_guards as guards
 from backend.services.term_context import get_active_term_id
 
 router = APIRouter()
@@ -70,10 +71,15 @@ def update_student(student_id: int, student_in: StudentCreate, request: Request,
 
 
 @router.delete("/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_student(student_id: int, db: Session = Depends(get_db)):
+def delete_student(student_id: int, force: bool = False, db: Session = Depends(get_db)):
+    """Μαζί του φεύγουν εγγραφές τμημάτων, 👥 εξαιρέσεις καρτών και κωλύματα
+    (όλων των σεναρίων). Χωρίς `?force=true` → 409 + πλήθη (ίδιο μοτίβο με
+    καθηγητή/τμήμα/αίθουσα)· με force → διαγραφή όπως πριν."""
     db_student = db.query(Student).filter(Student.id == student_id).first()
     if not db_student:
         raise HTTPException(status_code=404, detail="Student not found")
+    guards.guard_student(guards.student_usage(db, student_id), force=force,
+                         name=db_student.full_name)
 
     db.delete(db_student)
     db.commit()
@@ -116,9 +122,11 @@ def update_availability(student_id: int, data: StudentAvailabilityBulkUpdate, db
         StudentAvailability.term_id == term_id,
     ).delete()
 
-    # Insert new entries (scoped to the active scenario)
+    # Insert new entries (scoped to the active scenario). Διπλό (μέρα, ώρα) στο
+    # σώμα → κρατιέται το τελευταίο (αλλιώς IntegrityError → 500).
+    unique = {(a.day_of_week, a.period_id): a for a in data.availabilities}
     new_entries = []
-    for avail in data.availabilities:
+    for avail in unique.values():
         entry = StudentAvailability(student_id=student_id, term_id=term_id, **avail.model_dump())
         db.add(entry)
         new_entries.append(entry)

@@ -8,10 +8,14 @@
  */
 const DashboardView = {
     CRM_CACHE_MS: 5 * 60 * 1000,
+    CRM_WAIT_MS: 2500,   // πόσο περιμένει ο Πίνακας το CRM πριν γεμίσει χωρίς αυτό
     _crmCache: null,     // { at, newCount } — το CRM δεν ρωτιέται σε κάθε επίσκεψη
 
     async render(container) {
         container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>`;
+        // Ο χρήστης έφυγε σε άλλη σελίδα όσο φορτώναμε: τίποτα δεν γράφεται πάνω της.
+        const token = App._renderToken;
+        const gone = () => App._currentView !== 'dashboard' || App._renderToken !== token;
 
         let teachers, subjects, classes, classrooms, lessons, solutions, students, periods, publications, term;
         try {
@@ -28,9 +32,11 @@ const DashboardView = {
                 API.terms.active().catch(() => null),
             ]);
         } catch (err) {
+            if (gone()) return;
             App.renderError(container, err, () => this.render(container));
             return;
         }
+        if (gone()) return;
         const esc = DataTable.esc;
         const active = (solutions || []).filter(s => !s.archived);
         // Το πρόγραμμα που δουλεύεις (όπως ανοίγει το Ωρολόγιο) και αυτό που έχουν οι καθηγητές.
@@ -128,7 +134,12 @@ const DashboardView = {
             pick.id && pick.id !== working.id ? API.solver.getSolution(pick.id).catch(() => null) : Promise.resolve(null),
             API.solver.publishPreview(working.id).catch(() => null),
             API.solver.gaps(working.id).catch(() => null),
-            this._crmNewCount(),
+            // Το CRM μπορεί να αργεί πολύ (timeout 20″+): μέχρι 2,5″ και μετά 0 — η
+            // κλήση συνεχίζει στο παρασκήνιο και γεμίζει το cache για την επόμενη φορά.
+            Promise.race([
+                this._crmNewCount(),
+                new Promise(resolve => setTimeout(() => resolve(0), this.CRM_WAIT_MS)),
+            ]),
         ]);
         if (!document.getElementById('dash-attn')) return;   // ο χρήστης έφυγε
         const daySol = todaySol || workSol;

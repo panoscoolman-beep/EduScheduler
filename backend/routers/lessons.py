@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
 from backend.models import (
-    Lesson, LessonStudentOverride, Subject, Teacher, SchoolClass, Classroom, TimetableSlot,
+    Lesson, LessonStudentOverride, Student, Subject, Teacher, SchoolClass, Classroom, TimetableSlot,
 )
 from backend.services import lesson_change_guard as change_guard
 from backend.services import lesson_roster
@@ -192,6 +192,18 @@ def get_lesson(lesson_id: int, db: Session = Depends(get_db)):
     return _enrich_lesson(lesson, lesson_roster.display_names(db, [lesson]).get(lesson.id))
 
 
+def _override_names(db: Session, lesson_id: int) -> list[str]:
+    """Ονόματα των 👥 εξαιρέσεων/προσθηκών της κάρτας, π.χ. «ΜΟΥΤΑΦΗΣ ΙΓΝΑΤΗΣ (εξαίρεση)»."""
+    rows = (
+        db.query(Student, LessonStudentOverride.mode)
+        .join(LessonStudentOverride, LessonStudentOverride.student_id == Student.id)
+        .filter(LessonStudentOverride.lesson_id == lesson_id)
+        .order_by(Student.last_name, Student.first_name)
+        .all()
+    )
+    return [f"{st.full_name} ({'προσθήκη' if mode == 'add' else 'εξαίρεση'})" for st, mode in rows]
+
+
 def _require_refs(db: Session, data: LessonCreate) -> None:
     """Μάθημα/καθηγητής/τμήμα/αίθουσα πρέπει να υπάρχουν (αλλιώς 404, όχι 500)."""
     if not db.query(Subject).filter(Subject.id == data.subject_id).first():
@@ -243,14 +255,29 @@ def update_lesson(lesson_id: int, data: LessonCreate, force: bool = False, db: S
         raise HTTPException(status_code=404, detail="Το μάθημα-κάρτα δεν βρέθηκε")
     _require_refs(db, data)
     conflicts = change_guard.change_conflicts(db, lesson, data.teacher_id, data.class_id)
+    class_changed = data.class_id != lesson.class_id
+    # Οι 👥 εξαιρέσεις/προσθήκες μαθητών ήταν γραμμένες για το ΠΑΛΙΟ τμήμα και
+    # σβήνονται — ποτέ σιωπηλά: χωρίς force → 409 με πλήθος και ονόματα.
+    overrides = _override_names(db, lesson.id) if class_changed else []
+    overrides_text = (f"Η αλλαγή τμήματος θα σβήσει {len(overrides)} εξαιρέσεις μαθητών (👥) "
+                      f"της κάρτας: {', '.join(overrides)}." if overrides else "")
+    # «και» only when it follows the conflicts message.
+    overrides_note = (" " + overrides_text.replace("θα σβήσει ", "θα σβήσει και ", 1)) if overrides else ""
     if conflicts and not force:
         raise HTTPException(status_code=409, detail={
             "code": "lesson_change_conflicts",
             "requires_force": True,
-            "message": change_guard.conflicts_message(conflicts),
+            "message": change_guard.conflicts_message(conflicts) + overrides_note,
             "conflicts": conflicts,
         })
-    class_changed = data.class_id != lesson.class_id
+    if overrides and not force:
+        raise HTTPException(status_code=409, detail={
+            "code": "class_change_clears_overrides",
+            "requires_force": True,
+            "message": overrides_text,
+            "conflicts": conflicts,
+            "overrides": overrides,
+        })
     for key, value in data.model_dump().items():
         setattr(lesson, key, value)
     if class_changed:

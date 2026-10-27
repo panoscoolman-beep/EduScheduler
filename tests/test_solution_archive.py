@@ -169,6 +169,18 @@ def test_cannot_archive_a_programme_while_it_is_being_generated(client):
     assert running.archived_at is None
 
 
+def test_generating_programme_cannot_be_deleted_until_it_finishes(client):
+    """Η διαγραφή θα άφηνε τον υπολογισμό ορφανό και θα επέτρεπε δεύτερο
+    παράλληλο solve (μνήμη του container)."""
+    busy = _solution(client, "Υπολογίζεται", status="generating")
+    res = client.delete(f"/api/solver/solutions/{busy.id}")
+    assert res.status_code == 409
+    assert "τρέχει ακόμα" in res.json()["detail"]
+    assert client.session.get(TimetableSolution, busy.id) is not None
+    done = _solution(client, "Έτοιμο")
+    assert client.delete(f"/api/solver/solutions/{done.id}").status_code == 204
+
+
 def test_archive_404_for_unknown_programme(client):
     assert client.post("/api/solver/solutions/999/archive").status_code == 404
     assert client.post("/api/solver/solutions/999/unarchive").status_code == 404

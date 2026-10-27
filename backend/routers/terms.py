@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Term, Lesson, TimetableSolution
+from backend.models import Term, Lesson, SolutionPublication, TimetableSolution
 from backend.schemas import TermCreate, TermUpdate, TermResponse, TermCloneRequest, TermShiftRequest
 from backend.services.term_context import get_active_term_id
 from backend.services import term_cloner, term_time_shift
@@ -125,12 +125,13 @@ def delete_term(
     if db.query(Term).count() <= 1:
         raise HTTPException(status_code=400, detail="Δεν μπορείς να διαγράψεις το μοναδικό σενάριο.")
 
-    # Safety guard: deleting a term CASCADE-deletes its lessons, availability
-    # and generated programs. Require explicit confirmation.
+    # Safety guard: deleting a term CASCADE-deletes its lessons, availability,
+    # generated programs and 📢 publications. Require explicit confirmation.
     if not force:
         lessons = db.query(Lesson).filter(Lesson.term_id == term_id).count()
         sols = db.query(TimetableSolution).filter(TimetableSolution.term_id == term_id).count()
-        if lessons or sols:
+        pubs = db.query(SolutionPublication).filter(SolutionPublication.term_id == term_id).count()
+        if lessons or sols or pubs:
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -138,10 +139,12 @@ def delete_term(
                     "requires_force": True,
                     "message": (
                         f"Το σενάριο «{term.name}» θα διαγραφεί ΟΡΙΣΤΙΚΑ μαζί με "
-                        f"{lessons} μαθήματα και {sols} προγράμματα. Θέλεις σίγουρα;"
+                        f"{lessons} μαθήματα, {sols} προγράμματα και {pubs} δημοσιεύσεις "
+                        "(το ιστορικό «τι άλλαξε» των καθηγητών). Θέλεις σίγουρα;"
                     ),
                     "lessons": lessons,
                     "solutions": sols,
+                    "publications": pubs,
                 },
             )
 

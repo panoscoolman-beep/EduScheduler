@@ -1398,7 +1398,7 @@ class TimetableSolver:
             if unplaced_hours:
                 message = (
                     f"Βρέθηκε λύση — τοποθετήθηκαν {len(slots)} ώρες, "
-                    f"{unplaced_hours} ώρες έμειναν στο parking lot."
+                    f"{unplaced_hours} ώρες έμειναν στην Παλέτα."
                 )
             else:
                 message = (

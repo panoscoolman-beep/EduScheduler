@@ -185,7 +185,11 @@ def test_list_class_students_sorted_and_student_class_ids_reflect_membership(env
 def test_deleting_a_student_cascades_enrollment_and_count_resyncs_on_next_write(env):
     a, b, _ = _ids(env)
     cls = _create(env, [a, b])
-    assert env.delete(f"/api/students/{a}").status_code == 204
+    # Με εγγραφή σε τμήμα: πρώτα 409 + πλήθη, η διαγραφή μόνο με force.
+    res = env.delete(f"/api/students/{a}")
+    assert res.status_code == 409 and res.json()["detail"]["requires_force"] is True
+    assert "1 τμήματα" in res.json()["detail"]["message"]
+    assert env.delete(f"/api/students/{a}?force=true").status_code == 204
     # Το cascade έφυγε την εγγραφή· το count ξανασυγχρονίζεται στο επόμενο PUT.
     res = env.put(f"/api/classes/{cls['id']}", json={
         "name": cls["name"], "short_name": cls["short_name"],

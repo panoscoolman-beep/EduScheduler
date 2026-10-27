@@ -81,7 +81,8 @@ test('TodayView.render: φορτώνει, φιλτράρει, αλλάζει μ�
     global.document = dom.window.document;
     global.TodayHelpers = T;
     global.TimetableHelpers = require('../views/timetable_helpers.js');
-    global.App = { _currentSolutionId: null };
+    // Το render() γράφει μόνο όσο ο χρήστης είναι ακόμα στο «Σήμερα» (όπως στο App).
+    global.App = { _currentSolutionId: null, _currentView: 'today', _renderToken: 0 };
     const calls = [];
     global.API = {
         solver: {

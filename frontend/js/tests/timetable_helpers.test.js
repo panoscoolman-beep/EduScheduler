@@ -271,6 +271,30 @@ test('buildPlacementChoicesHtml: chips grouped by day, sorted by period order', 
     assert.ok(html.indexOf('1η (16:00)') < html.indexOf('2η (17:00)'));
 });
 
+test('buildPlacementChoicesHtml: θέσεις εκτός ωραρίου λειτουργίας δεν προσφέρονται', () => {
+    const periods = [
+        { id: 1, short_name: '1η', start_time: '15:00', end_time: '16:00', sort_order: 1 },
+        { id: 2, short_name: '2η', start_time: '17:00', end_time: '18:00', sort_order: 2 },
+        { id: 3, short_name: '3η', start_time: '21:00', end_time: '22:00', sort_order: 3 },
+    ];
+    const map = { slot_id: 9, cells: [
+        { day: 0, period_id: 1, ok: true }, { day: 0, period_id: 2, ok: true }, { day: 0, period_id: 3, ok: true },
+        { day: 5, period_id: 1, ok: true },
+        { day: 1, period_id: 2, ok: false, reason: 'Κώλυμα' },
+    ] };
+    const win = { from: '16:00', to: '21:00', saturday: { from: '09:00', to: '20:00' } };
+    const html = H.buildPlacementChoicesHtml(map, periods, win);
+    const offered = [...html.matchAll(/placeAt\(9, (\d), (\d)\)/g)].map(m => `${m[1]}:${m[2]}`);
+    assert.deepEqual(offered, ['0:2', '5:1']);                      // Σάββατο 15:00 ανοιχτό με το δικό του ωράριο
+    assert.match(html, /2 νόμιμες θέσεις/);
+    assert.match(html, /3 μπλοκαρισμένες θέσεις/);
+    assert.match(html, /<strong>Δευτέρα:<\/strong> 1η \(15:00\) – 3η \(21:00\) — εκτός ωραρίου λειτουργίας/);
+    assert.match(html, /<strong>Τρίτη:<\/strong> 2η \(17:00\) — Κώλυμα/);
+    // Χωρίς ωράριο: όλα όπως πριν
+    assert.equal([...H.buildPlacementChoicesHtml(map, periods).matchAll(/placeAt\(/g)].length, 4);
+    assert.equal([...H.buildPlacementChoicesHtml(map, periods, null).matchAll(/placeAt\(/g)].length, 4);
+});
+
 test('buildPlacementChoicesHtml: no legal cell → reasons still shown (open), no chips', () => {
     const html = H.buildPlacementChoicesHtml(
         { slot_id: 1, cells: [{ day: 0, period_id: 5, ok: false, reason: 'Ο καθηγητής <Χ> διδάσκει ήδη' }] }, [],

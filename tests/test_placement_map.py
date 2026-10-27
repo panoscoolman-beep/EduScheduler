@@ -295,6 +295,52 @@ def test_agreement_with_drop_enforcer(env):
     assert res.status_code == 200, f"map said ok but PUT failed: {good}"
 
 
+# ─── Ο ίδιος ο στόχος: ανύπαρκτη ώρα, διάλειμμα, μέρα εκτός εβδομάδας, αίθουσα ───
+
+def _put(env, slot, day, period_id, **extra):
+    return env.put(f"/api/solver/solutions/{env.sol.id}/slots/{slot.id}",
+                   json={"day_of_week": day, "period_id": period_id, **extra})
+
+
+def test_drop_on_a_missing_period_is_400_not_500(env):
+    slot = _slot(env, _lesson(env, env.t1, env.c1))
+    res = _put(env, slot, 0, 9999)
+    assert res.status_code == 400 and "#9999" in res.json()["detail"] and "δεν υπάρχει" in res.json()["detail"]
+    env.s.refresh(slot)
+    assert slot.is_unplaced is True
+
+
+def test_drop_on_a_break_is_a_placement_conflict(env):
+    br = env.s.query(Period).filter(Period.is_break == True).first()  # noqa: E712
+    slot = _slot(env, _lesson(env, env.t1, env.c1))
+    res = _put(env, slot, 0, br.id)
+    assert res.status_code == 400 and "διάλειμμα" in res.json()["detail"]
+    # Ο χάρτης δεν προσφέρει ποτέ διάλειμμα (συμφωνία με τον enforcer).
+    assert all(c["period_id"] != br.id for c in build_placement_map(env.s, slot)["cells"])
+
+
+def test_drop_on_a_day_outside_the_week_is_a_placement_conflict(env):
+    slot = _slot(env, _lesson(env, env.t1, env.c1))
+    res = _put(env, slot, 5, env.p1.id)                                # Σάββατο με 5 ημέρες
+    assert res.status_code == 400 and "Σάββατο" in res.json()["detail"] and "5 ημέρες" in res.json()["detail"]
+    assert all(c["day"] < 5 for c in build_placement_map(env.s, slot)["cells"])
+    assert _put(env, slot, 4, env.p1.id).status_code == 200            # Παρασκευή: ΟΚ
+
+
+def test_drop_with_a_missing_or_archived_explicit_room_is_400(env):
+    import datetime as dt
+    slot = _slot(env, _lesson(env, env.t1, env.c1))
+    res = _put(env, slot, 0, env.p1.id, classroom_id=9999)
+    assert res.status_code == 400 and "#9999" in res.json()["detail"]
+    env.regular.archived_at = dt.datetime(2026, 9, 1)
+    env.s.commit()
+    res = _put(env, slot, 0, env.p1.id, classroom_id=env.regular.id)
+    assert res.status_code == 400 and "αρχειοθετημένη" in res.json()["detail"]
+    env.s.refresh(slot)
+    assert slot.is_unplaced is True
+    assert _put(env, slot, 0, env.p1.id, classroom_id=env.lab.id).status_code == 200
+
+
 # ─── ⏳ μέγιστες ώρες/μέρα του καθηγητή (bug: το drag&drop το αγνοούσε) ───
 
 def _limit_env(env, limit=1):

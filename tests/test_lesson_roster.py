@@ -231,6 +231,28 @@ def test_changing_the_class_of_a_card_clears_its_overrides(env):
     assert lesson_roster.students_of(env.s, env.la) == {env.dimitra.id}
 
 
+def test_changing_the_class_with_overrides_asks_first_without_force(env):
+    """Ποτέ σιωπηλά: χωρίς force → 409 με πλήθος και ονόματα, τίποτα δεν σβήνεται."""
+    lesson_roster.set_roster(env.s, env.la, [env.dimitra.id])   # −Ιγνάτης, +Δήμητρα
+    env.s.commit()
+    body = {"subject_id": env.la.subject_id, "teacher_id": env.la.teacher_id,
+            "class_id": env.lb.class_id, "periods_per_week": 1, "term_id": env.la.term_id}
+    r = env.put(f"/api/lessons/{env.la.id}", json=body)
+    assert r.status_code == 409, r.text
+    d = r.json()["detail"]
+    assert d["code"] == "class_change_clears_overrides" and d["requires_force"] is True
+    assert d["overrides"] == ["ΜΟΥΤΑΦΗΣ ΙΓΝΑΤΗΣ (εξαίρεση)", "ΠΑΣΒΟΥΡΗ ΔΗΜΗΤΡΑ (προσθήκη)"]
+    assert d["message"].startswith("Η αλλαγή τμήματος θα σβήσει 2 εξαιρέσεις μαθητών (👥)")
+    assert len(_override_rows(env.s)) == 2                       # τίποτα δεν σβήστηκε
+    env.s.expire_all()
+    assert env.s.get(Lesson, env.la.id).class_id != env.lb.class_id
+    # Ίδιο τμήμα (άλλη αλλαγή) → καμία ερώτηση, οι εξαιρέσεις μένουν.
+    same = env.put(f"/api/lessons/{env.la.id}", json={**body, "class_id": env.la.class_id,
+                                                        "periods_per_week": 2})
+    assert same.status_code == 200, same.text
+    assert len(_override_rows(env.s)) == 2
+
+
 def test_feasibility_counts_the_card_roster_not_just_the_class(env):
     from backend.services import feasibility
     report = feasibility.FeasibilityReport()

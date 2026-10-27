@@ -73,7 +73,7 @@ def test_unplaced_double_and_missing_lab_become_one_palette_card_per_hour():
     l1, l2 = _lesson(env, 2, "2"), _lesson(env, 2, "2")
     l3 = _lesson(env, 3, subject=env.lab)                        # δεν υπάρχει εργαστήριο
     res = TimetableSolver(env.s, max_time_seconds=10, mode="permissive", term_id=1).solve()
-    assert res.message.endswith("τοποθετήθηκαν 2 ώρες, 5 ώρες έμειναν στο parking lot.")
+    assert res.message.endswith("τοποθετήθηκαν 2 ώρες, 5 ώρες έμειναν στην Παλέτα.")
     assert res.stats["total_hours_unplaced"] == 5
     _persist_solver_result(env.s, env.sol, res)
     rows = _rows(env)
@@ -100,7 +100,7 @@ def test_single_hour_blocks_are_counted_as_before():
     env = _env(n_periods=2, days=1, n_rooms=2)                   # ο καθηγητής χωράει 2 από τις 3
     les = _lesson(env, 3)
     res = TimetableSolver(env.s, max_time_seconds=10, mode="permissive", term_id=1).solve()
-    assert res.message == "Βρέθηκε λύση — τοποθετήθηκαν 2 ώρες, 1 ώρες έμειναν στο parking lot."
+    assert res.message == "Βρέθηκε λύση — τοποθετήθηκαν 2 ώρες, 1 ώρες έμειναν στην Παλέτα."
     _persist_solver_result(env.s, env.sol, res)
     assert _rows(env)[les.id] == [2, 1]
 

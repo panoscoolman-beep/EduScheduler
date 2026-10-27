@@ -244,6 +244,7 @@ const GenerateView = {
             // explanation and offer to re-poll the solutions list in
             // case the run actually finished.
             const isNetworkError =
+                err.network === true ||
                 err instanceof TypeError ||
                 /failed to fetch|networkerror|load failed/i.test(err.message || '');
             if (isNetworkError) {
@@ -326,7 +327,7 @@ const GenerateView = {
                                 <td>${TimetableHelpers.formatServerTime(s.created_at, 'locale', '—')}</td>
                                 <td class="actions">
                                     <button class="btn btn-sm btn-primary view-sol" data-id="${s.id}" ${s.status === 'error' || s.status === 'generating' ? 'disabled' : ''}>📋 Προβολή</button>
-                                    <button class="btn btn-sm btn-danger del-sol" data-id="${s.id}">🗑️</button>
+                                    <button class="btn btn-sm btn-danger del-sol" data-id="${s.id}" ${s.status === 'generating' ? 'disabled title="Ο υπολογισμός τρέχει ακόμα — περίμενε να τελειώσει"' : ''}>🗑️</button>
                                 </td>
                             </tr>`;
                         }).join('')}

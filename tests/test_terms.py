@@ -326,6 +326,28 @@ def test_shift_drops_out_of_range_and_unplaces_slots_with_counts(client):
     s.refresh(slot)
     assert slot.is_unplaced is True
     assert slot.period_id is None
+    # Η παλιά θέση (μέρα, ώρα, αίθουσα) μένει στη σημείωση της κάρτας.
+    assert slot.unplaced_reason == "Εκτός εύρους ωρών μετά τη μετατόπιση — ήταν Δευτέρα 4η, R1"
+
+
+def test_shift_out_of_range_reason_keeps_the_lock_mark(client):
+    s = client.session
+    seed = _seed_catalog(s, n_periods=4)
+    term = _seed_term_with_inputs(s, seed, availability_periods=())
+    lesson = s.query(Lesson).filter(Lesson.term_id == term.id).first()
+    sol = TimetableSolution(name="p1", status="optimal", term_id=term.id)
+    s.add(sol)
+    s.commit()
+    slot = TimetableSlot(solution_id=sol.id, lesson_id=lesson.id, day_of_week=2,
+                         period_id=seed["periods"][0].id, classroom_id=seed["room"].id,
+                         is_locked=True)
+    s.add(slot)
+    s.commit()
+    assert client.post(f"/api/terms/{term.id}/shift-times", json={"offset": -1}).status_code == 200
+    s.expire_all()
+    s.refresh(slot)
+    assert slot.is_unplaced is True
+    assert slot.unplaced_reason == "Εκτός εύρους ωρών μετά τη μετατόπιση — ήταν Τετάρτη 1η, R1, 🔒"
 
 
 def test_shift_wiping_whole_scenario_is_refused(client):
@@ -370,6 +392,32 @@ def test_delete_term_with_data_needs_force_and_reports_counts(client):
     detail = res.json()["detail"]
     assert detail["requires_force"] is True
     assert detail["lessons"] == 1
+
+
+def test_delete_term_counts_publications_and_asks_even_when_only_they_exist(client):
+    """Οι 📢 δημοσιεύσεις σβήνονται μαζί (ON DELETE CASCADE) — πρέπει να
+    μετρούν στο 409, και να το προκαλούν ακόμα κι όταν είναι το μόνο που υπάρχει."""
+    from backend.models import SolutionPublication
+
+    s = client.session
+    term = Term(name="Μόνο δημοσιεύσεις", is_active=True)
+    other = Term(name="Άλλο", is_active=False)
+    s.add_all([term, other])
+    s.commit()
+    s.add_all([SolutionPublication(term_id=term.id, solution_id=None, solution_name="Π",
+                                   snapshot_json="[]", messages_json="[]") for _ in range(2)])
+    s.commit()
+
+    res = client.delete(f"/api/terms/{term.id}")
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["requires_force"] is True
+    assert (detail["lessons"], detail["solutions"], detail["publications"]) == (0, 0, 2)
+    assert "0 μαθήματα, 0 προγράμματα και 2 δημοσιεύσεις" in detail["message"]
+    assert s.query(SolutionPublication).count() == 2               # τίποτα δεν σβήστηκε
+    assert client.delete(f"/api/terms/{term.id}?force=true").status_code == 204
+    s.expire_all()
+    assert s.query(SolutionPublication).count() == 0
 
 
 def test_delete_active_term_with_force_reactivates_next(client):

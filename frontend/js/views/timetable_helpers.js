@@ -175,7 +175,7 @@ const TimetableHelpers = {
         const metricLabels = {
             score:               'Σκορ (penalty)',
             placed_count:        '✅ Τοποθετήθηκαν',
-            unplaced_count:      '🅿️ Στο parking',
+            unplaced_count:      '🅿️ Στην Παλέτα',
             teacher_gap_total:   'Παράθυρα καθηγητών (σύνολο)',
             workload_stddev:     'Ανισορροπία ωρών (σ)',
             avg_days_per_class:  'Μέσος όρος ημερών/τμήμα',
@@ -206,11 +206,11 @@ const TimetableHelpers = {
 
         return `
             <p class="text-muted" style="font-size:0.85em; margin-bottom:0.5rem;">
-                ⭐ = καλύτερη τιμή για κάθε metric (lower is better, εκτός από Τοποθετήθηκαν).
+                ⭐ = καλύτερη τιμή για κάθε μέτρηση (μικρότερο = καλύτερο, εκτός από Τοποθετήθηκαν).
             </p>
             <table class="data-table" style="font-size:0.9em;">
                 <thead>
-                    <tr><th>Metric</th>${headerCells}</tr>
+                    <tr><th>Μέτρηση</th>${headerCells}</tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
@@ -927,8 +927,9 @@ const TimetableHelpers = {
      * collapsible «Γιατί όχι αλλού» list with the named reason of every
      * blocked cell. Pure: map + periods in, HTML out ('' only when the map
      * has no cells at all — with zero legal cells the reasons still show).
+     * `operatingWindow`: κελιά εκτός ωραρίου λειτουργίας δεν προσφέρονται.
      */
-    buildPlacementChoicesHtml(map, periods) {
+    buildPlacementChoicesHtml(map, periods, operatingWindow = null) {
         const DAY_NAMES = ['Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο', 'Κυριακή'];
         const esc = TimetableHelpers.esc;
         const cells = (map && map.cells) || [];
@@ -951,8 +952,15 @@ const TimetableHelpers = {
                 .map(day => [day, byDay.get(day).slice().sort((a, b) => sortOrder(a) - sortOrder(b))]);
         };
 
-        const okCells = cells.filter(c => c.ok);
-        const blocked = cells.filter(c => !c.ok);
+        // Κελιά εκτός ωραρίου λειτουργίας (κλειστά στο πλέγμα): ποτέ «νόμιμες
+        // θέσεις» — πάνε στα μπλοκαρισμένα με αιτία, όπως στο buildMoveChoicesHtml.
+        const open = (c) => {
+            const p = periodById.get(c.period_id);
+            return !p || TimetableHelpers.isCellOpen(p, c.day, operatingWindow);
+        };
+        const okCells = cells.filter(c => c.ok && open(c));
+        const blocked = cells.filter(c => !c.ok)
+            .concat(cells.filter(c => c.ok && !open(c)).map(c => ({ ...c, ok: false, reason: 'εκτός ωραρίου λειτουργίας' })));
 
         const rows = groupByDay(okCells).map(([day, list]) => {
             const chips = list.map(c => `<button class="btn btn-secondary btn-sm placement-chip"

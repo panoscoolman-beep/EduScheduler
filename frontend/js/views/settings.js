@@ -23,6 +23,9 @@ const SettingsView = {
                             <select class="form-select" id="s-days">
                                 <option value="5" ${settings.days_per_week === 5 ? 'selected' : ''}>5 (Δευ-Παρ)</option>
                                 <option value="6" ${settings.days_per_week === 6 ? 'selected' : ''}>6 (Δευ-Σάβ)</option>
+                                ${settings.days_per_week && ![5, 6].includes(settings.days_per_week)
+                                    ? `<option value="${settings.days_per_week}" selected>${settings.days_per_week} (τρέχουσα ρύθμιση)</option>`
+                                    : ''}
                             </select>
                         </div>
                         <div class="form-group">
@@ -150,17 +153,17 @@ const SettingsView = {
             const c = preview.will_create;
             const s = preview.will_skip;
             const confirmMsg =
-                `Φόρτωση template: ${label}\n\n` +
+                `Φόρτωση προτύπου: ${label}\n\n` +
                 `Θα δημιουργηθούν:\n` +
-                `  • ${c.subjects} subjects\n` +
-                `  • ${c.classes} classes\n` +
-                `  • ${c.classrooms} classrooms\n` +
-                `  • ${c.constraints} constraints\n\n` +
+                `  • ${c.subjects} μαθήματα\n` +
+                `  • ${c.classes} τμήματα\n` +
+                `  • ${c.classrooms} αίθουσες\n` +
+                `  • ${c.constraints} περιορισμοί\n\n` +
                 `Θα παραλειφθούν (ήδη υπάρχουν):\n` +
-                `  • ${s.subjects} subjects\n` +
-                `  • ${s.classes} classes\n` +
-                `  • ${s.classrooms} classrooms\n` +
-                `  • ${s.constraints} constraints\n\n` +
+                `  • ${s.subjects} μαθήματα\n` +
+                `  • ${s.classes} τμήματα\n` +
+                `  • ${s.classrooms} αίθουσες\n` +
+                `  • ${s.constraints} περιορισμοί\n\n` +
                 `Συνέχεια;`;
             if (!confirm(confirmMsg)) return;
 

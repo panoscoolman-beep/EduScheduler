@@ -30,6 +30,8 @@ TEACHER_UNAVAILABLE = "teacher_unavailable"
 STUDENT_UNAVAILABLE = "student_unavailable"
 SHARED_STUDENT = "shared_student"
 TEACHER_DAY_LIMIT = "teacher_day_limit"
+BREAK_HOUR = "break_hour"              # η ώρα-στόχος είναι διάλειμμα
+DAY_OUT_OF_RANGE = "day_out_of_range"  # μέρα ≥ «Ημέρες / εβδομάδα» των Ρυθμίσεων
 
 MAX_NAMES = 3  # πόσα ονόματα μαθητών/αιθουσών γράφουμε πριν το «και N ακόμα»
 

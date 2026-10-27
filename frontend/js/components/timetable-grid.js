@@ -201,10 +201,17 @@ const TimetableGrid = {
                         ? 'Κλικ για ξεκλείδωμα'
                         : 'Κλικ για κλείδωμα — θα διατηρηθεί στο επόμενο regenerate';
 
+                    // Με πληκτρολόγιο: Tab στην κάρτα, Enter/Space = πληροφορίες (όχι role="button":
+                    // περιέχει το κουμπί 🔒).
+                    const cardLabel = TimetableGrid.esc([line1, line2, line3].filter(Boolean).join(' · '));
+
                     return `
                         <div class="lesson-card ${slot.is_locked ? 'locked' : ''}"
                              data-slot-id="${slot.id}"
                              draggable="${slot.is_locked ? 'false' : 'true'}"
+                             tabindex="0"
+                             aria-label="${cardLabel}"
+                             onkeydown="TimetableGrid.handleCardKey(event)"
                              ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
                              ondragend="TimetableGrid.handleDragEnd(event)"
                              onclick="TimetableGrid.showDetails(this)"
@@ -361,6 +368,9 @@ const TimetableGrid = {
                                      data-slot-id="${slot.id}"
                                      data-entity="${entity}"
                                      draggable="${locked ? 'false' : 'true'}"
+                                     tabindex="0"
+                                     aria-label="${esc([line1, line2].filter(Boolean).join(' · '))}"
+                                     onkeydown="TimetableGrid.handleCardKey(event)"
                                      ondragstart="TimetableGrid.handleDragStart(event, ${slot.id})"
                                      ondragend="TimetableGrid.handleDragEnd(event)"
                                      onclick="TimetableGrid.showDetails(this)"
@@ -618,6 +628,17 @@ const TimetableGrid = {
         }
     },
 
+    /**
+     * Enter/Space σε κάρτα του πλέγματος = «Πληροφορίες» (όπως το κλικ). Πλήκτρα
+     * από το 🔒 μέσα της αγνοούνται — έχει δικό του χειρισμό.
+     */
+    handleCardKey(event) {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        if (event.key === ' ') event.preventDefault();
+        this.showDetails(event.currentTarget);
+    },
+
     handleDragStart(event, slotId) {
         event.dataTransfer.setData('text/plain', slotId);
         event.dataTransfer.effectAllowed = 'move';
@@ -827,7 +848,7 @@ const TimetableGrid = {
             `.lesson-card[data-slot-id="${slotId}"]`
         );
         if (!sourceCard) {
-            Toast.error('Δεν βρέθηκε το card στο DOM');
+            Toast.error('Η σελίδα άλλαξε στο μεταξύ — δοκίμασε ξανά.');
             return;
         }
 
@@ -855,7 +876,7 @@ const TimetableGrid = {
         try {
             slotData = JSON.parse(sourceCard.dataset.json);
         } catch (e) {
-            Toast.error('Σφάλμα ανάγνωσης δεδομένων card');
+            Toast.error('Η σελίδα άλλαξε στο μεταξύ — δοκίμασε ξανά.');
             return;
         }
         const prev = {
@@ -899,6 +920,10 @@ const TimetableGrid = {
             const newRoom = (res && res.slot) ? res.slot : null;
             const roomChanged = targetRoom == null && !!newRoom && prevRoomId != null
                 && newRoom.classroom_id !== prevRoomId;
+            // Palette drop: η καρφωμένη αίθουσα της κάρτας ήταν πιασμένη και η
+            // ώρα μπήκε αλλού — ο server το σημαίνει (pinned_room_busy).
+            const pinnedBusy = !roomChanged && targetRoom == null && !!res && res.pinned_room_busy
+                && !!res.pinned_classroom_name;
             if (newRoom && newRoom.classroom_id != null) {
                 slotData.classroom_id = newRoom.classroom_id;
                 if (newRoom.classroom_name) slotData.classroom_name = newRoom.classroom_name;
@@ -924,11 +949,22 @@ const TimetableGrid = {
             });
             Toast.success(roomChanged
                 ? `Μετακινήθηκε — άλλαξε αίθουσα σε «${TimetableGrid.esc(slotData.classroom_name)}» (η προηγούμενη ήταν κατειλημμένη)`
+                : pinnedBusy
+                ? `Η αίθουσα «${TimetableGrid.esc(res.pinned_classroom_name)}» ήταν πιασμένη — η ώρα μπήκε στην «${TimetableGrid.esc(slotData.classroom_name)}».`
                 : (targetRoom != null && slotData.classroom_name
                     ? `Η κάρτα μπήκε στην αίθουσα «${TimetableGrid.esc(slotData.classroom_name)}»`
                     : 'Η κάρτα μετακινήθηκε επιτυχώς!'));
             if (wasParkingCard) {
                 this._notifyParkingLotChanged();
+                // Η κάρτα κρατούσε το markup της Παλέτας (χωρίς 🔒 και αίθουσα):
+                // ξανασχεδίασε το πλέγμα από τα slots, όπως κάνει το placeAt. Το
+                // redraw σκοτώνει το dragged element — ρητό cleanup όπως στο _doSwap.
+                this._dragSlotId = null;
+                this._dragIsParking = false;
+                this._clearPlacementMap();
+                if (typeof TimetableView !== 'undefined' && TimetableView._rerenderGrid) {
+                    TimetableView._rerenderGrid();
+                }
             }
             this._notifyHistoryChanged();
         } catch (err) {
@@ -1081,7 +1117,7 @@ const TimetableGrid = {
             `.lesson-lock-btn[data-slot-id="${slotId}"]`
         );
         if (!card || !btn) {
-            Toast.error('Δεν βρέθηκε το slot στο DOM');
+            Toast.error('Η σελίδα άλλαξε στο μεταξύ — δοκίμασε ξανά.');
             return;
         }
         if (btn.disabled) return;  // already in flight

@@ -14,7 +14,17 @@ const API = {
             config.body = JSON.stringify(config.body);
         }
 
-        const response = await fetch(url, config);
+        let response;
+        try {
+            response = await fetch(url, config);
+        } catch (cause) {
+            // Χωρίς δίκτυο/διακομιστή ο browser πετά αγγλικό «Failed to fetch»:
+            // ελληνικό μήνυμα, με σήμανση για όσες σελίδες το χειρίζονται ειδικά.
+            const err = new Error('Δεν υπάρχει σύνδεση με τον διακομιστή — έλεγξε το δίκτυο και δοκίμασε ξανά.');
+            err.network = true;
+            err.cause = cause;
+            throw err;
+        }
 
         if (response.status === 204) return null;
 
@@ -77,7 +87,10 @@ const API = {
         get: (id) => API.get(`/students/${id}`),
         create: (data) => API.post('/students/', data),
         update: (id, data) => API.put(`/students/${id}`, data),
-        delete: (id) => API.delete(`/students/${id}`),
+        // force: μαθητής με τμήματα/εξαιρέσεις/κωλύματα → 409 + επιβεβαίωση στο
+        // DataTable, που ξαναστέλνει με ?force=true.
+        delete: (id, force = false) =>
+            API.delete(`/students/${id}${force ? '?force=true' : ''}`),
         getAvailability: (id) => API.get(`/students/${id}/availability`),
         gradeOptions: () => API.get('/students/grade-options'),
         crmPreview: () => API.get('/integration/crm/students/preview'),

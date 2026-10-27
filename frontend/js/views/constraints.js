@@ -18,25 +18,25 @@ const RULE_TYPES = {
     // ─── No-param soft rules ────────────────────────────────────────────
     min_teacher_gaps: {
         label: 'Ελάχιστα κενά καθηγητή',
-        description: 'Penalty αν ο καθηγητής έχει 1ωρα παράθυρα ανάμεσα σε μαθήματα.',
+        description: 'Ποινή αν ο καθηγητής έχει 1ωρα παράθυρα ανάμεσα σε μαθήματα.',
         params: [],
         defaultCategory: 'teacher',
     },
     min_class_gaps: {
         label: 'Ελάχιστα κενά τμήματος',
-        description: 'Penalty αν το τμήμα έχει σπασμένο πρόγραμμα σε μία μέρα.',
+        description: 'Ποινή αν το τμήμα έχει σπασμένο πρόγραμμα σε μία μέρα.',
         params: [],
         defaultCategory: 'class',
     },
     subject_distribution: {
         label: 'Κατανομή μαθήματος σε διαφορετικές μέρες',
-        description: 'Penalty όταν το ίδιο μάθημα γίνεται >1 φορά την ίδια μέρα.',
+        description: 'Ποινή όταν το ίδιο μάθημα γίνεται >1 φορά την ίδια μέρα.',
         params: [],
         defaultCategory: 'subject',
     },
     teacher_day_balance: {
         label: 'Ισορροπία ωρών καθηγητή ανά μέρα',
-        description: 'Penalty όταν ένας καθηγητής έχει πολύ φορτωμένη μέρα ή πολύ ελαφριά.',
+        description: 'Ποινή όταν ένας καθηγητής έχει πολύ φορτωμένη μέρα ή πολύ ελαφριά.',
         params: [],
         defaultCategory: 'teacher',
     },
@@ -48,7 +48,7 @@ const RULE_TYPES = {
     },
     class_compactness: {
         label: 'Συμπτυγμένο πρόγραμμα τμήματος',
-        description: 'Penalty για κάθε επιπλέον μέρα παρουσίας τμήματος πέρα από το ελάχιστο.',
+        description: 'Ποινή για κάθε επιπλέον μέρα παρουσίας τμήματος πέρα από το ελάχιστο.',
         params: [],
         defaultCategory: 'class',
     },
@@ -58,7 +58,9 @@ const RULE_TYPES = {
         label: 'Όχι μάθημα μετά από συγκεκριμένη ώρα',
         description: 'Π.χ. "Β\' Λυκείου όχι μετά τις 14:00". Διαλέγεις την τελευταία επιτρεπόμενη ώρα και (προαιρετικά) το συγκεκριμένο τμήμα ή καθηγητή.',
         params: [
-            { key: 'max_period_index', label: 'Τελευταία επιτρεπόμενη ώρα (0-indexed)', type: 'number', min: 0, max: 12, default: 5 },
+            // Δείκτης διδακτικής ώρας (χωρίς διαλείμματα, με τη σειρά τους) — όπως
+            // τον μετρά ο solver (backend/solver/engine.py)· ο χρήστης βλέπει «6η (19:00–20:00)».
+            { key: 'max_period_index', label: 'Τελευταία επιτρεπόμενη ώρα', type: 'select-period', default: 5 },
             { key: 'scope', label: 'Εφαρμογή σε', type: 'select', options: [
                 { value: 'all', label: 'Όλους' },
                 { value: 'class', label: 'Συγκεκριμένο τμήμα' },
@@ -70,7 +72,7 @@ const RULE_TYPES = {
     },
     teacher_preferred_days: {
         label: 'Προτιμώμενες ημέρες καθηγητή',
-        description: 'Penalty όταν ο καθηγητής διδάσκει σε μη-προτιμώμενες μέρες.',
+        description: 'Ποινή όταν ο καθηγητής διδάσκει σε μη-προτιμώμενες μέρες.',
         params: [
             { key: 'teacher_id', label: 'Καθηγητής', type: 'select-teacher' },
             { key: 'days', label: 'Προτιμώμενες ημέρες', type: 'days-checkbox', default: [0, 1, 2, 3, 4] },
@@ -79,8 +81,8 @@ const RULE_TYPES = {
     },
 
     custom: {
-        label: 'Custom (raw JSON)',
-        description: 'Για advanced χρήση. Γράψε JSON όπως καταλαβαίνει το engine.',
+        label: 'Προσαρμοσμένος (JSON)',
+        description: 'Για προχωρημένη χρήση. Γράψε JSON όπως τον καταλαβαίνει ο αλγόριθμος.',
         params: [{ key: '__raw_json__', label: 'JSON', type: 'textarea', rows: 4, default: '{"type": "custom"}' }],
         defaultCategory: 'general',
     },
@@ -103,15 +105,18 @@ const ConstraintsView = {
     async render(container) {
         // Pre-fetch teachers + classes so the entity pickers can populate
         // synchronously when the form re-renders on rule-type change.
-        let teachers = [], classes = [];
+        let teachers = [], classes = [], periods = [];
         try {
-            [teachers, classes] = await Promise.all([
+            [teachers, classes, periods] = await Promise.all([
                 API.teachers.list(),
                 API.classes.list(),
+                // Για το dropdown «Τελευταία επιτρεπόμενη ώρα» (διδακτικές ώρες).
+                API.periods.list().catch(() => []),
             ]);
         } catch (e) {
             // Soft fail — entity pickers will degrade to raw number input
         }
+        this._periods = periods || [];
 
         const table = new DataTable({
             columns: [
@@ -188,7 +193,11 @@ const ConstraintsView = {
                 extras.push(`μέχρι ${r.max_period_index + 1}η ώρα`);
             }
             if (t === 'no_late_day' && r.scope && r.scope !== 'all') {
-                extras.push(r.scope === 'class' ? `τμήμα ${this._esc(String(r.id))}` : `καθηγητής ${this._esc(String(r.id))}`);
+                // Όνομα αντί για id (τα ονόματα φορτώνονται στο render)· αλλιώς το id.
+                const list = r.scope === 'class' ? (this._classes || []) : (this._teachers || []);
+                const found = list.find(x => x.id === r.id);
+                const who = found ? found.name : String(r.id);
+                extras.push(r.scope === 'class' ? `τμήμα ${this._esc(who)}` : `καθηγητής ${this._esc(who)}`);
             }
             if (t === 'teacher_preferred_days' && Array.isArray(r.days)) {
                 extras.push(r.days.map(d => DAY_LABELS[d]?.slice(0, 3)).join(','));
@@ -357,7 +366,8 @@ const ConstraintsView = {
 
         return paramSpecs.map(spec => {
             const id = `f-param-${spec.key}`;
-            const value = prefill[spec.key] !== undefined ? prefill[spec.key] : spec.default;
+            const stored = prefill[spec.key] !== undefined;
+            const value = stored ? prefill[spec.key] : spec.default;
 
             switch (spec.type) {
                 case 'number':
@@ -388,6 +398,38 @@ const ConstraintsView = {
                             </select>
                         </div>
                     `;
+                case 'select-period': {
+                    // Διδακτικές ώρες με τη σειρά του API (sort_order), τιμή = δείκτης i.
+                    const teaching = (this._periods || []).filter(p => !p.is_break);
+                    let idx = Number.isInteger(value) ? value : parseInt(value);
+                    // Without the school's hours (they did not load) keep a plain number,
+                    // so the value can still be seen and changed.
+                    if (!teaching.length) {
+                        return `
+                        <div class="form-group">
+                            <label class="form-label">${spec.label} (αριθμός ώρας, η 1η = 0)</label>
+                            <input type="number" class="form-input" id="${id}" value="${Number.isInteger(idx) ? idx : ''}" min="0" max="12">
+                        </div>
+                    `;
+                    }
+                    // A NEW rule whose default is past the school's last hour: its last hour.
+                    if (!stored && Number.isInteger(idx) && idx >= teaching.length) idx = teaching.length - 1;
+                    const opts = teaching.map((p, i) =>
+                        `<option value="${i}" ${i === idx ? 'selected' : ''}>${i + 1}η (${this._esc(p.start_time)}–${this._esc(p.end_time)})</option>`);
+                    // Αποθηκευμένος δείκτης που δεν αντιστοιχεί πια στις ώρες: μένει
+                    // ως επιλογή, ώστε άνοιγμα + αποθήκευση να μην τον αλλάζουν.
+                    if (stored && Number.isInteger(idx) && idx >= 0 && !(idx < teaching.length)) {
+                        opts.push(`<option value="${idx}" selected>${idx + 1}η ώρα (δεν υπάρχει πια στις ώρες)</option>`);
+                    }
+                    return `
+                        <div class="form-group">
+                            <label class="form-label">${spec.label}</label>
+                            <select class="form-select" id="${id}">
+                                ${opts.join('')}
+                            </select>
+                        </div>
+                    `;
+                }
                 case 'select-teacher':
                     return `
                         <div class="form-group">
@@ -489,6 +531,7 @@ const ConstraintsView = {
 
             switch (spec.type) {
                 case 'number':
+                case 'select-period':
                     if (el && el.value !== '') out[spec.key] = parseInt(el.value);
                     break;
                 case 'select':

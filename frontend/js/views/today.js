@@ -12,12 +12,16 @@ const TodayView = {
 
     async render(container) {
         this._offset = 0;
+        // Ο χρήστης έφυγε σε άλλη σελίδα όσο φορτώναμε: τίποτα δεν γράφεται πάνω της.
+        const token = App._renderToken;
+        const gone = () => App._currentView !== 'today' || App._renderToken !== token;
         try {
             const [all, publications] = await Promise.all([
                 API.solver.listSolutions(),
                 (API.publications && API.publications.list ? API.publications.list() : Promise.resolve([]))
                     .catch(() => []),
             ]);
+            if (gone()) return;
             const solutions = (all || []).filter(s => !s.archived);
             const fallback = TimetableHelpers.defaultSolutionId(solutions, App._currentSolutionId);
             const pick = TodayHelpers.pickSolution(solutions, publications, fallback);
@@ -36,8 +40,10 @@ const TodayView = {
                 optional(API.classrooms && API.classrooms.list),
                 optional(API.teachers && API.teachers.list),
             ]);
+            if (gone()) return;
             this._data = { solution, periods, rooms: rooms || [], teachers: teachers || [], pick };
         } catch (err) {
+            if (gone()) return;
             App.renderError(container, err, () => this.render(container));
             return;
         }
@@ -96,7 +102,15 @@ const TodayView = {
         const built = TodayHelpers.buildDay(this._data.solution.slots, this._data.periods, day, now, filter);
         // Ανοιχτό μάθημα (ενέργειες) μένει ανοιχτό στο ανανέωμα του λεπτού.
         const openId = document.querySelector('#today-list .today-item.is-open')?.dataset.slotId;
+        // Το ίδιο για τις μαζεμένες επόμενες ώρες (<details>) που άνοιξε — κατά την ετικέτα ώρας.
+        const groupTitle = (d) => d.querySelector('.today-group-title')?.textContent || '';
+        const openGroups = new Set([...document.querySelectorAll('#today-list details[open]')].map(groupTitle));
         document.getElementById('today-list').innerHTML = TodayHelpers.buildHtml(built, { now });
+        if (openGroups.size) {
+            document.querySelectorAll('#today-list details').forEach(d => {
+                if (openGroups.has(groupTitle(d))) d.open = true;
+            });
+        }
         if (openId) {
             const item = document.querySelector(`#today-list .today-item[data-slot-id="${openId}"]`);
             if (item) this._toggleItem(item, true);

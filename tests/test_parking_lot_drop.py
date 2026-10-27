@@ -231,6 +231,49 @@ def test_parking_drop_skips_busy_room_if_alternatives_exist(client):
     assert slot.classroom_id == other_room.id
 
 
+def test_parking_drop_reports_when_the_pinned_room_was_busy(client):
+    """Κάρτα με καρφωμένη αίθουσα R1, R1 πιασμένη → μπαίνει στη R2 (200, όπως
+    πριν) ΚΑΙ η απάντηση το λέει, ώστε το toast να το δείξει και για Palette drop."""
+    other_room = Classroom(name="R2", short_name="R2", room_type="regular")
+    other_teacher = Teacher(name="T2", short_name="T2", color="#000")
+    other_class = SchoolClass(name="A2", short_name="A2")
+    client.session.add_all([other_room, other_teacher, other_class])
+    client.session.commit()
+    for o in [other_room, other_teacher, other_class]:
+        client.session.refresh(o)
+
+    lesson = Lesson(subject_id=client.subj.id, teacher_id=client.teacher.id,
+                    class_id=client.cls.id, classroom_id=client.regular.id,
+                    periods_per_week=2, duration=1)
+    blocker = Lesson(subject_id=client.subj.id, teacher_id=other_teacher.id,
+                     class_id=other_class.id, classroom_id=client.regular.id,
+                     periods_per_week=1, duration=1)
+    client.session.add_all([lesson, blocker])
+    client.session.commit()
+    for o in [lesson, blocker]:
+        client.session.refresh(o)
+    client.session.add(TimetableSlot(solution_id=client.sol.id, lesson_id=blocker.id, day_of_week=0,
+                                     period_id=client.period.id, classroom_id=client.regular.id,
+                                     is_unplaced=False))
+    client.session.commit()
+
+    slot = _make_unplaced_slot(client, lesson)
+    res = client.put(f"/api/solver/solutions/{client.sol.id}/slots/{slot.id}",
+                     json={"day_of_week": 0, "period_id": client.period.id})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["slot"]["classroom_id"] == other_room.id
+    assert body["pinned_room_busy"] is True and body["pinned_classroom_name"] == "R1"
+
+    # Ελεύθερη μέρα: μπαίνει στην καρφωμένη, χωρίς σήμα.
+    free = _make_unplaced_slot(client, lesson)
+    res = client.put(f"/api/solver/solutions/{client.sol.id}/slots/{free.id}",
+                     json={"day_of_week": 1, "period_id": client.period.id})
+    assert res.status_code == 200, res.text
+    assert res.json()["slot"]["classroom_id"] == client.regular.id
+    assert res.json()["pinned_room_busy"] is False and res.json()["pinned_classroom_name"] is None
+
+
 def test_grid_to_grid_drop_keeps_existing_classroom(client):
     """Moving a placed card preserves its classroom_id when the body
     doesn't specify one."""

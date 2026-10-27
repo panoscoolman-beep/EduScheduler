@@ -7,6 +7,7 @@ availability / H7 shared-student), covered by the solver test-suite.
 """
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.models import (
@@ -111,6 +112,7 @@ def resolve_and_validate_target_room(
     slot: TimetableSlot,
     data,
     extra_exclude_slot_id: int | None = None,
+    room_info: dict | None = None,
 ) -> int:
     """Resolve the target classroom and run every conflict check for a
     manual slot move. Returns the chosen classroom_id, or raises
@@ -119,6 +121,8 @@ def resolve_and_validate_target_room(
     `data` is a TimetableSlotUpdate (day_of_week, period_id, classroom_id).
     `extra_exclude_slot_id`: σε ανταλλαγή (swap) ο έλεγχος του Α στο κελί
     του Β πρέπει να αγνοήσει τον Β (αδειάζει ταυτόχρονα) — και αντίστροφα.
+    `room_info` (προαιρετικό dict): γεμίζει με `busy_room_id` όταν η αίθουσα που
+    θα έπαιρνε η κάρτα ήταν πιασμένη και επιλέχθηκε αυτόματα άλλη.
     """
     solution_id = slot.solution_id
     slot_id = slot.id
@@ -130,6 +134,28 @@ def resolve_and_validate_target_room(
     # Ονομαστικά μηνύματα: πού (μέρα/ώρα) και ποιος/τι μπλοκάρει. Το period
     # φορτώνεται μία φορά· τα ονόματα του slot που φταίει από describe_slot.
     period = db.query(Period).filter(Period.id == data.period_id).first()
+    # 0. Ο ίδιος ο στόχος: ανύπαρκτη ώρα (πριν: 500 από το FK), ρητή αίθουσα
+    # που δεν υπάρχει/είναι αρχειοθετημένη → 400· διάλειμμα ή μέρα εκτός
+    # εβδομάδας → conflict (το build_placement_map δεν τα προσφέρει ποτέ).
+    if period is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Η ώρα #{data.period_id} δεν υπάρχει (ίσως διαγράφηκε) — φρεσκάρισε τη σελίδα.",
+        )
+    # Only a room that CHANGES: the lock buttons re-send the card's current room, which may
+    # be archived since (archiving is refused only for rooms used in the active scenario).
+    if data.classroom_id is not None and data.classroom_id != slot.classroom_id:
+        room = db.query(Classroom).filter(Classroom.id == data.classroom_id).first()
+        if room is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Η αίθουσα #{data.classroom_id} δεν υπάρχει (ίσως διαγράφηκε) — φρεσκάρισε τη σελίδα.",
+            )
+        if room.archived_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Η αίθουσα «{room.name}» είναι αρχειοθετημένη — επανέφερέ την ή διάλεξε άλλη.",
+            )
     where = pc.cell_label(data.day_of_week, period)
     me = pc.describe_slot(db, slot)
     base = {
@@ -146,6 +172,20 @@ def resolve_and_validate_target_room(
             blocking_slot_id=info.get("slot_id"),
             blocking=info or None,
             **base, **extra,
+        )
+
+    if period.is_break:
+        raise blocked_by(
+            pc.BREAK_HOUR,
+            f"Η «{period.name}» είναι διάλειμμα — δεν μπαίνει μάθημα εκεί.",
+        )
+    settings = db.query(SchoolSettings).first()
+    days_count = settings.days_per_week if settings else 5
+    if not 0 <= data.day_of_week < days_count:
+        raise blocked_by(
+            pc.DAY_OUT_OF_RANGE,
+            f"Η {pc.day_name(data.day_of_week)} είναι εκτός της εβδομάδας του προγράμματος "
+            f"({days_count} ημέρες στις Ρυθμίσεις).",
         )
 
     # Resolve a target classroom up front. Parking-lot slots have
@@ -245,6 +285,8 @@ def resolve_and_validate_target_room(
             db, solution_id, data.day_of_week, data.period_id,
             slot_id, extra_exclude_slot_id,
         )
+        if room_info is not None:
+            room_info["busy_room_id"] = target_room
         target_room = pick_default_classroom(db, slot.lesson, exclude_room_ids=busy)
         if target_room is None:
             occupants = _room_occupants(db, conflict_query)

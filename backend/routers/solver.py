@@ -226,9 +226,10 @@ def solver_status(solution_id: int, db: Session = Depends(get_db)):
     if solution.status == "generating":
         message = "Ο solver τρέχει..."
     elif solution.status in ("optimal", "feasible"):
-        message = f"Ολοκληρώθηκε ({solution.status}) — {placed} μαθήματα τοποθετήθηκαν."
+        status_word = "βέλτιστο" if solution.status == "optimal" else "εφικτό"
+        message = f"Ολοκληρώθηκε ({status_word}) — {placed} μαθήματα τοποθετήθηκαν."
         if unplaced:
-            message += f" {unplaced} στο parking lot."
+            message += f" {unplaced} στην Παλέτα."
         # Ό,τι πρέπει να ξέρει ο χρήστης για τη λύση (σκληρός κανόνας που
         # εφαρμόστηκε ως μαλακός, κλειδωμένες ώρες που ήδη συμπίπτουν, «Max/Εβδ.»).
         try:
@@ -534,10 +535,17 @@ def rename_solution(solution_id: int, data: SolutionRename, db: Session = Depend
 
 @router.delete("/solutions/{solution_id}", status_code=204)
 def delete_solution(solution_id: int, db: Session = Depends(get_db)):
-    """Delete a timetable solution."""
+    """Delete a timetable solution. Όσο υπολογίζεται («generating») → 409: η
+    διαγραφή θα άφηνε τον υπολογισμό να τρέχει ορφανός και το
+    _guard_no_active_solve θα άφηνε δεύτερο παράλληλο."""
     solution = db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
     if not solution:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
+    if solution.status == "generating":
+        raise HTTPException(
+            status_code=409,
+            detail="Ο υπολογισμός αυτού του προγράμματος τρέχει ακόμα — περίμενε να τελειώσει.",
+        )
     db.delete(solution)
     db.commit()
 
@@ -571,10 +579,18 @@ def update_solution_slot(
         and data.day_of_week == slot.day_of_week and data.period_id == slot.period_id
         and data.classroom_id in (None, slot.classroom_id)
     )
+    room_info: dict = {}
     if pure_unlock:
         target_room = slot.classroom_id
     else:
-        target_room = resolve_and_validate_target_room(db, slot, data)
+        target_room = resolve_and_validate_target_room(db, slot, data, room_info=room_info)
+    # Η καρφωμένη αίθουσα της κάρτας ήταν πιασμένη και μπήκε αλλού (αυτόματη
+    # επιλογή, όχι ρητή αίθουσα) — το UI το λέει στο toast και για Palette drop.
+    pinned_id = slot.lesson.classroom_id if slot.lesson else None
+    pinned_room_busy = (
+        data.classroom_id is None and pinned_id is not None
+        and room_info.get("busy_room_id") == pinned_id and target_room != pinned_id
+    )
 
     prev_state = {
         "day_of_week": slot.day_of_week,
@@ -617,10 +633,16 @@ def update_solution_slot(
     if slot.classroom_id is not None:
         room = db.query(Classroom).filter(Classroom.id == slot.classroom_id).first()
         room_name = room.name if room else None
+    pinned_name = None
+    if pinned_room_busy:
+        pinned = db.query(Classroom).filter(Classroom.id == pinned_id).first()
+        pinned_name = pinned.name if pinned else None
     return {
         "status": "ok",
         "message": "Το slot ενημερώθηκε",
         "slot": {"id": slot.id, **new_state, "classroom_name": room_name},
+        "pinned_room_busy": pinned_room_busy,
+        "pinned_classroom_name": pinned_name,
     }
 
 

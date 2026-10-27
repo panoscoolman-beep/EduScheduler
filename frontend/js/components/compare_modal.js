@@ -15,7 +15,7 @@ const CompareModal = {
     open(solutions, currentId) {
         const others = solutions.filter(s => s.id !== currentId);
         if (others.length === 0) {
-            Toast.error('Χρειάζονται ≥2 solutions για σύγκριση. Δημιούργησε άλλο πρώτα.');
+            Toast.error('Χρειάζονται τουλάχιστον 2 προγράμματα για σύγκριση. Δημιούργησε άλλο πρώτα.');
             return;
         }
 
@@ -23,7 +23,7 @@ const CompareModal = {
             `<label style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0;">
                 <input type="checkbox" class="cmp-pick" value="${s.id}">
                 <span><strong>${TimetableHelpers.esc(s.name)}</strong>
-                <span class="text-muted" style="font-size:0.85em">— ${s.status}, βαθμολογία ${s.score?.toFixed(0) || '—'}</span></span>
+                <span class="text-muted" style="font-size:0.85em">— ${TimetableHelpers.esc(TimetableHelpers.statusInfo(s.status).label)}, βαθμολογία ${s.score?.toFixed(0) || '—'}</span></span>
             </label>`
         ).join('');
 

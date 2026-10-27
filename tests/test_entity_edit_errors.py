@@ -109,6 +109,19 @@ def test_availability_with_an_unknown_period_is_400(env, who):
     assert ok.status_code == 200
 
 
+@pytest.mark.parametrize("who", ["teachers", "students"])
+def test_availability_with_a_duplicate_cell_keeps_the_last_item(env, who):
+    """Διπλό (μέρα, ώρα) στο σώμα → όχι 500 (IntegrityError): μένει το τελευταίο."""
+    oid = (env.s.query(Teacher).first() if who == "teachers" else env.s.query(Student).first()).id
+    pid = env.s.query(Period).first().id
+    res = env.put(f"/api/{who}/{oid}/availability", json={"availabilities": [
+        {"day_of_week": 0, "period_id": pid, "status": "unavailable"},
+        {"day_of_week": 1, "period_id": pid, "status": "preferred"},
+        {"day_of_week": 0, "period_id": pid, "status": "preferred"}]})
+    assert res.status_code == 200, res.text
+    assert sorted((r["day_of_week"], r["status"]) for r in res.json()) == [(0, "preferred"), (1, "preferred")]
+
+
 def test_academic_year_longer_than_the_column_is_422(env):
     res = env.put("/api/settings/", json={"academic_year": "Σχολικό έτος 2026-2027"})
     assert res.status_code == 422

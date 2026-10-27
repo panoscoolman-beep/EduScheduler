@@ -4,6 +4,10 @@
 const TimetableView = {
     async render(container) {
         container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Φόρτωση...</p></div>`;
+        // Ο χρήστης έφυγε σε άλλη σελίδα (ή ξανάνοιξε αυτή) όσο φορτώναμε: τίποτα
+        // δεν γράφεται πάνω στη σελίδα που βλέπει τώρα.
+        const token = App._renderToken;
+        const gone = () => App._currentView !== 'timetable' || App._renderToken !== token;
 
         try {
             const [solutions, periods, settings] = await Promise.all([
@@ -12,6 +16,7 @@ const TimetableView = {
                 API.periods.list(),
                 API.settings.get(),
             ]);
+            if (gone()) return;
             // Honour school_settings.days_per_week — until now this was
             // hardcoded to 5, hiding any slots placed on Σάβ/Κυρ.
             const daysCount = settings.days_per_week || 5;
@@ -55,6 +60,11 @@ const TimetableView = {
                 // 📢 Ποιο πρόγραμμα είναι δημοσιευμένο (σήμανση στη λίστα).
                 (API.publications ? API.publications.list() : Promise.resolve([])).catch(() => []),
             ]);
+            if (gone()) return;
+            // The grid's programme, also when the saved view («Ελεύθερες Αίθουσες») draws no
+            // grid: ↩ Αναίρεση checks it before undoing (else it could undo in another programme).
+            TimetableGrid._solutionId = solutionId;
+            TimetableGrid._slots = solution.slots;
             this._lessons = lessons;
             this._periods = periods;
             this._daysCount = daysCount;
@@ -75,6 +85,9 @@ const TimetableView = {
             // teacher_name → teacher_id, for the per-teacher export buttons
             const teacherIdByName = TimetableHelpers.teacherIdByName(solution.slots);
             const status = TimetableHelpers.statusInfo(solution.status);
+            // ⏳ Τρέχει ο αλγόριθμος (Γέμισε τα κενά / Κράτα τα κλειδωμένα): από τη
+            // λίστα (status «generating») ή από αίτημα αυτής της σελίδας που δεν τελείωσε.
+            const solverRunning = solutions.some(s => s.status === 'generating') || Boolean(this._solverBusy);
             const menuItem = (id, icon, label, hint, title) => `
                 <button type="button" class="menu-item" role="menuitem" id="${id}" title="${this._esc(title || '')}">
                     <span class="menu-item-icon" aria-hidden="true">${icon}</span>
@@ -84,6 +97,7 @@ const TimetableView = {
             container.innerHTML = `
                 <div class="card mb-lg tt-card">
                     <img src="img/logo.svg" class="print-logo" style="display:none;" />
+                    <p class="print-caption" id="tt-print-caption"></p>
                     <div class="tt-head print-hide">
                         <div class="tt-title-row">
                             <h2 class="card-title tt-title">📋 ${this._esc(solution.name)}</h2>
@@ -96,6 +110,7 @@ const TimetableView = {
                         <div class="tt-status">
                             <span class="status-chip ${status.cls}" id="tt-solution-status" title="${this._esc(status.title)}">${this._esc(status.label)}</span>
                             <span id="tt-pub-status" class="tt-pub-status"></span>
+                            <span class="status-chip warn" id="tt-solver-running" hidden>⏳ Υπολογίζεται νέο πρόγραμμα… όσες αλλαγές κάνεις τώρα δεν θα είναι μέσα σε αυτό.</span>
                         </div>
                         <div class="tt-actions">
                             <button class="btn btn-secondary" id="tt-substitute" title="Βρες αντικαταστάτη για καθηγητή που λείπει">👤 Αντικατάσταση</button>
@@ -180,6 +195,7 @@ const TimetableView = {
                 <div id="parking-lot-container"></div>
             `;
             if (typeof Menu !== 'undefined') Menu.wire(container);
+            this._paintSolverRunning(solverRunning);
             this._loadPublicationState(solutionId);
 
             // Initial render
@@ -202,6 +218,14 @@ const TimetableView = {
                         params, TimetableHelpers.printClassLabelPref());
                     window.open(`/api/exports/print?${withLabel}`, '_blank');
                 } else {
+                    // Στο χαρτί η μπάρα κρύβεται: λεζάντα «πρόγραμμα · προβολή · φίλτρο».
+                    const vtSel = document.getElementById('tt-view-type');
+                    const fSel = document.getElementById('tt-filter');
+                    const viewLabel = vtSel?.selectedOptions?.[0]?.textContent?.trim() || '';
+                    const filterText = (fSel && fSel.value && fSel.value !== 'all'
+                        && !vtSel.value.startsWith('overview')) ? fSel.value : '';
+                    const caption = document.getElementById('tt-print-caption');
+                    if (caption) caption.textContent = [solution.name, viewLabel, filterText].filter(Boolean).join(' · ');
                     window.print();
                 }
             });
@@ -268,6 +292,8 @@ const TimetableView = {
                     const mode = document.querySelector('input[name="regen-mode"]:checked').value;
                     Modal.close();
                     Toast.success('🧠 Ο υπολογισμός τρέχει στο παρασκήνιο…');
+                    this._solverBusy = true;
+                    this._paintSolverRunning(true);
                     try {
                         const started = await API.solver.regenerateWithLocks(solutionId, {
                             name: newName, max_time_seconds: 120, mode,
@@ -283,6 +309,9 @@ const TimetableView = {
                         }
                     } catch (err) {
                         Toast.error(`Δεν έγινε το νέο πρόγραμμα: ${this._esc(err.message)}`);
+                    } finally {
+                        this._solverBusy = false;
+                        this._paintSolverRunning(false);
                     }
                 }, { saveText: '🚀 Εκτέλεση', saveClass: 'btn-warning' });
             });
@@ -330,11 +359,14 @@ const TimetableView = {
                                 sel.dataset.mode = 'rooms';
                                 sel.innerHTML = '<option value="all">Όλες οι αίθουσες</option>'
                                     + rooms.map(r => `<option value="${TimetableHelpers.esc(r.name)}">${TimetableHelpers.esc(r.name)}</option>`).join('');
-                                sel.value = filterValue || 'all';
                             }
+                            // Αίθουσα που δεν υπάρχει πια στη λίστα (π.χ. από παλιό φίλτρο): «Όλες».
+                            let fv = filterValue || (sel ? sel.value : 'all');
+                            if (sel && ![...sel.options].some(o => o.value === fv)) fv = 'all';
+                            if (sel) sel.value = fv;
+                            App._ttFilter = fv;
                             mount.innerHTML = TimetableHelpers.buildFreeRoomsHtml(
-                                solution.slots, periods, daysCount, rooms,
-                                filterValue || (sel ? sel.value : 'all'),
+                                solution.slots, periods, daysCount, rooms, fv,
                                 TimetableView.freeRoomsWindow(),
                             );
                         })
@@ -370,8 +402,21 @@ const TimetableView = {
                 renderGrid(vt, vt.startsWith('overview') ? null : fv);
             };
 
-            // Initial render (πλέγμα ή, στο κινητό, μία μέρα)
-            renderGrid('class', 'all');
+            // Προβολή και φίλτρο που είχε ο χρήστης πριν το πλήρες re-render (undo,
+            // αλλαγή προγράμματος, 👥, αρχειοθέτηση…): το πλέγμα ζωγραφίζεται ΜΙΑ
+            // φορά, στη σωστή κατάσταση — όχι «Όλα» και μετά διόρθωση.
+            const vtSelect = document.getElementById('tt-view-type');
+            const savedType = (App._ttViewType && App._ttViewType !== 'class'
+                && [...vtSelect.options].some(o => o.value === App._ttViewType)) ? App._ttViewType : null;
+            const savedFilter = App._ttFilter || 'all';
+            if (!savedType) {
+                // Προβολή «Τμήμα»: δεν περνά από το change — το φίλτρο μπαίνει εδώ.
+                const fv = classNames.includes(savedFilter) ? savedFilter : 'all';
+                document.getElementById('tt-filter').value = fv;
+                App._ttFilter = fv;
+                // Initial render (πλέγμα ή, στο κινητό, μία μέρα)
+                renderGrid('class', fv);
+            }
             this._wireModeToggle();
 
             // Event: View type change
@@ -381,6 +426,10 @@ const TimetableView = {
                 const filterLabel = filterGroup?.querySelector('.form-label');
                 const vt = e.target.value;
                 App._ttViewType = vt;  // persist across full re-renders
+                // Αλλαγή προβολής από τον χρήστη: το φίλτρο ξεκινά από «Όλα». Στο
+                // πλήρες re-render το συνθετικό change φέρνει το αποθηκευμένο φίλτρο.
+                const keep = e.ttFilter || 'all';
+                App._ttFilter = 'all';
 
                 const parkingLot = document.getElementById('parking-lot-container');
                 if (vt.startsWith('overview')) {
@@ -399,7 +448,10 @@ const TimetableView = {
                     if (filterLabel) filterLabel.textContent = 'Αίθουσα';
                     if (parkingLot) parkingLot.style.display = 'none';
                     filterSelect.dataset.mode = '';       // force refill
-                    renderGrid(vt, 'all');
+                    // Το φίλτρο αιθουσών γεμίζει ασύγχρονα· ο renderer κρατά την
+                    // αίθουσα μόνο αν υπάρχει ακόμα.
+                    App._ttFilter = keep;
+                    renderGrid(vt, keep);
                     return;
                 }
 
@@ -414,24 +466,28 @@ const TimetableView = {
 
                 filterSelect.innerHTML = `<option value="all">Όλα</option>` +
                                          options.map(n => `<option value="${this._esc(n)}">${this._esc(n)}</option>`).join('');
-                renderGrid(vt, 'all');
+                // Μόνο αν η επιλογή υπάρχει ακόμα (π.χ. ο καθηγητής έχει ώρες στο πρόγραμμα).
+                const fv = options.includes(keep) ? keep : 'all';
+                filterSelect.value = fv;
+                App._ttFilter = fv;
+                renderGrid(vt, fv);
             });
 
             // Event: Filter change
             document.getElementById('tt-filter').addEventListener('change', (e) => {
                 const viewType = document.getElementById('tt-view-type').value;
+                App._ttFilter = e.target.value;   // persist across full re-renders
                 renderGrid(viewType, e.target.value);
             });
 
             // Restore the persisted view type across full re-renders (solution
             // change, undo/redo, regenerate) so the user isn't silently bounced
             // out of e.g. the συνολική overview back to the weekly class grid.
-            if (App._ttViewType && App._ttViewType !== 'class') {
-                const vtSelect = document.getElementById('tt-view-type');
-                if ([...vtSelect.options].some(o => o.value === App._ttViewType)) {
-                    vtSelect.value = App._ttViewType;
-                    vtSelect.dispatchEvent(new Event('change'));
-                }
+            if (savedType) {
+                vtSelect.value = savedType;
+                const ev = new Event('change');
+                ev.ttFilter = savedFilter;   // και το φίλτρο του (αν υπάρχει ακόμα)
+                vtSelect.dispatchEvent(ev);
             }
 
             // Event: Solution change
@@ -535,6 +591,7 @@ const TimetableView = {
             document.addEventListener('keydown', this._activeKeyHandler);
 
             await refreshHistoryButtons();
+            if (gone()) return;
 
             // Από τον Πίνακα Ελέγχου: «📢 Δημοσίευση», «Κενά», «Τοποθέτηση».
             const pending = (typeof App.takePending === 'function') ? App.takePending('timetable') : null;
@@ -545,13 +602,24 @@ const TimetableView = {
             }
 
         } catch (err) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-state-icon">⚠️</div>
-                    <p class="empty-state-text">Σφάλμα: ${this._esc(err.message)}</p>
-                </div>
-            `;
+            // Όχι rethrow: το render() καλείται και απευθείας (undo, αλλαγή προγράμματος).
+            if (gone()) return;
+            App.renderError(container, err, () => this.render(container));
         }
+    },
+
+    /**
+     * ⏳ Όσο τρέχει ο αλγόριθμος («Γέμισε τα κενά» / «Κράτα τα κλειδωμένα»): τα
+     * δύο μενού απενεργά (ο server αρνείται δεύτερη εκτέλεση με 409) και ένδειξη
+     * ότι οι αλλαγές που γίνονται τώρα δεν μπαίνουν στο νέο πρόγραμμα.
+     */
+    _paintSolverRunning(running) {
+        ['tt-fill', 'tt-regen'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.disabled = Boolean(running);
+        });
+        const chip = document.getElementById('tt-solver-running');
+        if (chip) chip.hidden = !running;
     },
 
     /**
@@ -799,6 +867,8 @@ const TimetableView = {
             if (!name) { Toast.error('Δώσε όνομα.'); return; }
             Modal.close();
             Toast.success('🧠 Ο αλγόριθμος γεμίζει τα κενά στο παρασκήνιο…');
+            this._solverBusy = true;
+            this._paintSolverRunning(true);
             try {
                 const started = await API.solver.regenerateWithLocks(solutionId, {
                     name, max_time_seconds: 120, mode: 'permissive', lock_all_placed: true,
@@ -817,6 +887,9 @@ const TimetableView = {
                 }
             } catch (err) {
                 Toast.error(`Δεν έγινε: ${this._esc(err.message)}`);
+            } finally {
+                this._solverBusy = false;
+                this._paintSolverRunning(false);
             }
         }, { saveText: '🧩 Εκτέλεση' });
     },
@@ -895,13 +968,19 @@ const TimetableView = {
         Modal.open('🕘 Ιστορικό αλλαγών',
             '<div class="loading-spinner"><div class="spinner"></div></div>',
             null, { hideFooter: true, wide: true });
+        // Μόνο ΑΥΤΟ το παράθυρο: αν στο μεταξύ έκλεισε ή άνοιξε άλλο, δεν το πειράζουμε.
+        const token = Modal._token;
+        const stillMine = () => Modal._token === token && Modal.isOpen();
         let history;
         try {
             history = await API.solver.history(solutionId);
         } catch (err) {
+            // Όχι σκέτος spinner για πάντα: κλείσε το (δικό μας) παράθυρο.
+            if (stillMine()) Modal.close();
             Toast.error(this._esc(err.message));
             return;
         }
+        if (!stillMine()) return;
         const body = document.getElementById('modal-body');
         if (!body) return;
         body.innerHTML = TimetableHelpers.buildHistoryHtml(history);
@@ -1092,7 +1171,7 @@ const TimetableView = {
         }
         try {
             const map = await API.solver.placementMap(ctx.solutionId, slot.id);
-            const html = TimetableHelpers.buildPlacementChoicesHtml(map, ctx.periods);
+            const html = TimetableHelpers.buildPlacementChoicesHtml(map, ctx.periods, TimetableGrid.operatingWindow);
             const title = `🎯 ${slot.subject_name || 'Μάθημα'} — ${slot.class_name || ''}`;
             if (!html) {
                 Toast.error('Δεν βρέθηκαν διδακτικές ώρες στο πρόγραμμα.');

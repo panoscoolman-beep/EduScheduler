@@ -313,6 +313,8 @@ const StudentsView = {
                     await table.loadData();
                 } catch (err) {
                     Toast.error('Αποτυχία ενημέρωσης τμημάτων: ' + StudentPicker.esc(err.message));
+                    // Μερική αποτυχία: η λίστα δείχνει ό,τι ΠΡΑΓΜΑΤΙΚΑ αποθηκεύτηκε.
+                    await table.loadData();
                 }
             });
         try {
@@ -375,6 +377,8 @@ const StudentsView = {
                     email: r.email, phone: r.phone,
                 })));
                 Toast.success(`✅ Εισήχθησαν ${res.created} μαθητές (${res.skipped} παραλείφθηκαν)`);
+                // Ο Πίνακας Ελέγχου να μη λέει «νέοι μαθητές στο CRM» για 5′ ακόμα.
+                if (typeof DashboardView !== 'undefined') DashboardView._crmCache = null;
                 Modal.close();
                 await this.render(container);
             } catch (err) {
