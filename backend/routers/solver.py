@@ -6,6 +6,7 @@ import json
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
@@ -81,10 +82,21 @@ def _solution_or_404(db: Session, solution_id: int) -> TimetableSolution:
     return sol
 
 
+_NAME_LOCK_NAMESPACE = 0x4544534E   # «EDSN»: advisory locks για τα ονόματα προγραμμάτων
+
+
 def _unique_solution_name(db: Session, term_id: int | None, name: str) -> str:
     """Δύο προγράμματα με το ίδιο όνομα στο ίδιο σενάριο δεν ξεχωρίζουν (dropdown,
     /senario του bot — το rename το αρνείται): νέο πρόγραμμα με υπάρχον όνομα
-    παίρνει αυτόματα «(2)», «(3)» …"""
+    παίρνει αυτόματα «(2)», «(3)» …
+
+    Δύο generate/regenerate την ίδια στιγμή στο ίδιο σενάριο θα διάβαζαν τα ίδια
+    ονόματα και θα έπαιρναν και τα δύο «(2)»: σε Postgres κλειδώνουμε το σενάριο
+    (advisory xact lock) ΠΡΙΝ διαβαστούν τα ονόματα, ως το commit του INSERT που
+    ακολουθεί στην ίδια συναλλαγή. Σε άλλη βάση (SQLite των tests) δεν κάνει τίποτα."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+                   {"ns": _NAME_LOCK_NAMESPACE, "key": int(term_id or 0)})
     taken = {n for (n,) in db.query(TimetableSolution.name)
              .filter(TimetableSolution.term_id == term_id).all()}
     if name not in taken:

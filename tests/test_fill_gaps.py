@@ -99,3 +99,45 @@ def test_same_name_in_a_scenario_gets_an_automatic_suffix(env):
     long = "Α" * 200
     assert _name_of(env, env.post("/api/solver/generate", json={"name": long})) == long
     assert _name_of(env, env.post("/api/solver/generate", json={"name": long})) == "Α" * 196 + " (2)"
+
+
+class _FakeDb:
+    """Session-στέλεχος: ψεύτικο dialect, καταγράφει τα raw execute, κανένα όνομα πιασμένο."""
+
+    def __init__(self, dialect: str):
+        self.dialect, self.executed = dialect, []
+
+    def get_bind(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(dialect=SimpleNamespace(name=self.dialect))
+
+    def execute(self, stmt, params=None):
+        self.executed.append((str(stmt), params))
+
+    def query(self, *a):
+        return self
+
+    def filter(self, *a):
+        return self
+
+    def all(self):
+        return []
+
+
+def test_name_choice_locks_the_scenario_only_on_postgres():
+    """Δύο generate την ίδια στιγμή: σε Postgres το σενάριο κλειδώνει (advisory
+    xact lock) ΠΡΙΝ διαβαστούν τα ονόματα· σε SQLite δεν εκδίδεται τίποτα."""
+    pg = _FakeDb("postgresql")
+    assert solver_router._unique_solution_name(pg, 7, "ΧΕΙΜΕΡΙΝΟ") == "ΧΕΙΜΕΡΙΝΟ"
+    ((sql, params),) = pg.executed
+    assert "pg_advisory_xact_lock" in sql
+    assert params == {"ns": solver_router._NAME_LOCK_NAMESPACE, "key": 7}
+
+    pg = _FakeDb("postgresql")
+    solver_router._unique_solution_name(pg, None, "ΧΕΙΜΕΡΙΝΟ")         # χωρίς σενάριο → κλειδί 0
+    assert pg.executed[0][1]["key"] == 0
+
+    lite = _FakeDb("sqlite")
+    assert solver_router._unique_solution_name(lite, 7, "ΧΕΙΜΕΡΙΝΟ") == "ΧΕΙΜΕΡΙΝΟ"
+    assert lite.executed == []
