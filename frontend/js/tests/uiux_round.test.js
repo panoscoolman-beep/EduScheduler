@@ -470,8 +470,11 @@ test('Πίνακας Ελέγχου: «Χρειάζεται προσοχή» κ�
     }
 });
 
+// A Tuesday at 15:30 in Greece: the 16:00–17:00 lesson below is still to come, whatever the real time.
+const BEFORE_LESSON = '2026-10-27T13:30:00Z';
+
 test('Σήμερα: «Λείπει σήμερα» → αντικαταστάτης → έτοιμο μήνυμα με SMS', async () => {
-    const day = T.edsDay(new Date());
+    const day = T.edsDay(new Date(BEFORE_LESSON));
     const { routes, state } = timetableRoutes({
         'GET /api/teachers/': () => [{ id: 21, name: 'Νικολάου', phone: '' }, { id: 22, name: 'ΕΛΕΝΗ ΦΩΤΙΟΥ', phone: '6912345678' }],
         'GET /api/solver/solutions/*/substitute-suggestions': () => ({
@@ -482,7 +485,7 @@ test('Σήμερα: «Λείπει σήμερα» → αντικαταστάτη
         }),
     });
     state.slots = [slot(1, { day_of_week: day, period_id: 1 })];
-    const app = await start(routes, { hash: '#today' });
+    const app = await start(routes, { hash: '#today', now: BEFORE_LESSON });
     try {
         await waitFor(app.w, () => app.doc.querySelector('.today-item-main'));
         app.doc.querySelector('.today-item-main').click();
@@ -631,13 +634,13 @@ test('«Περισσότερα» → η ίδια σελίδα: το επόμεν
 });
 
 test('«Λείπει σήμερα»: αργή απάντηση δεν γράφει σε άλλο/κλειστό παράθυρο', async () => {
-    const day = T.schoolDate(0).day;
+    const day = T.schoolDate(0, new Date(BEFORE_LESSON)).day;
     let release;
     const { routes, state } = timetableRoutes({
         'GET /api/solver/solutions/*/substitute-suggestions': () => new Promise(r => { release = r; }),
     });
     state.slots = [slot(1, { day_of_week: day, period_id: 1 })];
-    const app = await start(routes, { hash: '#today' });
+    const app = await start(routes, { hash: '#today', now: BEFORE_LESSON });
     try {
         await waitFor(app.w, () => app.doc.querySelector('.today-item-main'));
         app.doc.querySelector('.today-item-main').click();

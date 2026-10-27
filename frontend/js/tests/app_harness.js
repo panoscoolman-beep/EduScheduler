@@ -80,7 +80,7 @@ function timetableRoutes(over = {}) {
     return { routes, state };
 }
 
-function boot(routes, { hash = '', phone = false } = {}) {
+function boot(routes, { hash = '', phone = false, now = null } = {}) {
     const raw = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
     const html = raw.replace(/<script src="[^"]+"><\/script>/g, '');
     const dom = new JSDOM(html, { url: 'http://eds.local/' + hash, runScripts: 'dangerously', pretendToBeVisual: true });
@@ -117,6 +117,15 @@ function boot(routes, { hash = '', phone = false } = {}) {
     w.print = () => null;
     w.scrollTo = () => null;
     w.HTMLElement.prototype.scrollIntoView = function () {};
+    // `now` (ISO): the app's clock is fixed there, so a test of «Σήμερα» does not depend on the
+    // hour it runs at (a lesson at 16:00–17:00 is in the past after 17:00).
+    if (now) {
+        const el = w.document.createElement('script');
+        el.textContent = `(() => { const R = Date, fixed = new R(${JSON.stringify(now)}).getTime();
+            class FixedDate extends R { constructor(...a) { super(...(a.length ? a : [fixed])); } static now() { return fixed; } }
+            window.Date = FixedDate; })();`;
+        w.document.body.appendChild(el);
+    }
     const srcs = [...raw.matchAll(/<script src="([^"?]+)\?v=\d+"><\/script>/g)].map(m => m[1]);
     for (const src of srcs) {
         const el = w.document.createElement('script');
