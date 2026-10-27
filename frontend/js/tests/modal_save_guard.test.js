@@ -7,12 +7,13 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { start, go, sleep, waitFor, baseRoutes } = require('./app_harness.js');
 
-/** Backend με ρυθμιζόμενη καθυστέρηση/απάντηση για το shift-times. */
+/** Backend με ρυθμιζόμενη καθυστέρηση/απάντηση για το shift-times (το dry_run απαντά αμέσως, δεν μετρά). */
 function shiftApp(respond) {
     const posts = [];
     let W = null;
     const routes = baseRoutes({
-        'POST /api/terms/*/shift-times': ({ body }) => {
+        'POST /api/terms/*/shift-times': ({ body, search }) => {
+            if (/dry_run=true/.test(search)) return { ...OK, dry_run: true };
             posts.push(body);
             return respond(posts.length, (ms, v) => new Promise(r => W.setTimeout(() => r(v), ms)));
         },
@@ -29,12 +30,20 @@ async function openShift(app) {
     return app.doc.getElementById('modal-save');
 }
 
+/** Από τη φόρμα στην επιβεβαίωση με τα πλήθη του dry_run — εκεί είναι το «🕐 Μετατόπιση». */
+async function confirmShift(app) {
+    app.doc.getElementById('modal-save').click();
+    await waitFor(app.w, () => /θα πάνε στην Παλέτα/.test(app.doc.getElementById('modal-body').textContent));
+    return app.doc.getElementById('modal-save');
+}
+
 test('διπλό κλικ στη «Μετατόπιση ωρών» όσο τρέχει το αίτημα → ΕΝΑ POST', async () => {
     const be = shiftApp((n, later) => later(150, OK));
     const app = await start(be.routes);
     be.bind(app.w);
     try {
-        const save = await openShift(app);
+        await openShift(app);
+        const save = await confirmShift(app);
         save.click();
         assert.equal(save.disabled, true, 'απενεργό όσο τρέχει');
         save.click();                       // αμέσως
@@ -53,7 +62,8 @@ test('σφάλμα → το κουμπί ξαναενεργοποιείται κ
     const app = await start(be.routes);
     be.bind(app.w);
     try {
-        const save = await openShift(app);
+        await openShift(app);
+        const save = await confirmShift(app);
         save.click();
         await waitFor(app.w, () => app.toasts.some(t => t.type === 'error'));
         await waitFor(app.w, () => save.disabled === false);
@@ -74,7 +84,9 @@ test('έλεγχος φόρμας που αποτυγχάνει (μετατόπ�
         save.click();
         await waitFor(app.w, () => save.disabled === false);
         assert.equal(be.posts.length, 0);
+        assert.ok(!app.calls.some(c => /dry_run=true/.test(c.search)), 'ούτε dry_run με μετατόπιση 0');
         app.doc.getElementById('shift-offset').value = '6';
+        await confirmShift(app);
         save.click();
         await waitFor(app.w, () => be.posts.length === 1);
     } finally { app.close(); }

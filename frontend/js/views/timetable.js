@@ -524,17 +524,17 @@ const TimetableView = {
                 }
             };
 
-            const performUndoRedo = async (op, skipBreak = false) => {
+            const performUndoRedo = async (op, skipBreak = false, force = false) => {
                 try {
                     const res = op === 'undo'
-                        ? await API.solver.undo(solutionId, skipBreak)
-                        : await API.solver.redo(solutionId, skipBreak);
+                        ? await API.solver.undo(solutionId, skipBreak, force)
+                        : await API.solver.redo(solutionId, skipBreak, force);
                     Toast.success(this._esc(res.message) + this._skippedBreakNote(res));
                     await this.render(container);
                 } catch (err) {
-                    // Ώρα που έγινε «Διάλειμμα» / αίτημα με skip_break: βλ. _afterHistoryStepError.
+                    // Ώρα που έγινε «Διάλειμμα» / θέση ακατάλληλη πια / αίτημα με skip_break: βλ. _afterHistoryStepError.
                     if (await this._afterHistoryStepError(err, op, skipBreak, container,
-                        () => performUndoRedo(op, true))) return;
+                        (f) => performUndoRedo(op, skipBreak || !f, force || f))) return;
                     Toast.error(this._esc(err.message));
                     // Και σε 409 (θέση πιασμένη / η ώρα δεν υπάρχει πια) ο server
                     // μπορεί να σημάνει την εγγραφή ως «παραλείφθηκε» — άρα αλλάζουν
@@ -817,15 +817,15 @@ const TimetableView = {
             return;
         }
         // Ίδιος χειρισμός με το «↩️ μέχρι εδώ» (και για ώρα που έγινε διάλειμμα).
-        const restore = async (skipBreak = false) => {
+        const restore = async (skipBreak = false, force = false) => {
             try {
-                const back = await API.solver.undoTo(solutionId, res.first_entry_id, skipBreak);
+                const back = await API.solver.undoTo(solutionId, res.first_entry_id, skipBreak, force);
                 Toast.success(this._esc(back.message) + this._skippedBreakNote(back));
                 Modal.close();
                 await this.render(container);
             } catch (err) {
-                if (await this._afterHistoryStepError(err, 'undo', skipBreak, container,
-                    () => restore(true))) return;
+                if (await this._afterHistoryStepError(err, 'undo-range', skipBreak, container,
+                    (f) => restore(skipBreak || !f, force || f))) return;
                 Toast.error(this._esc(err.message));
             }
         };
@@ -984,15 +984,15 @@ const TimetableView = {
         const body = document.getElementById('modal-body');
         if (!body) return;
         body.innerHTML = TimetableHelpers.buildHistoryHtml(history);
-        const undoTo = async (entryId, skipBreak = false) => {
+        const undoTo = async (entryId, skipBreak = false, force = false) => {
             try {
-                const res = await API.solver.undoTo(solutionId, entryId, skipBreak);
+                const res = await API.solver.undoTo(solutionId, entryId, skipBreak, force);
                 Toast.success(this._esc(res.message) + this._skippedBreakNote(res));
                 Modal.close();
                 await this.render(container);
             } catch (err) {
-                if (await this._afterHistoryStepError(err, 'undo', skipBreak, container,
-                    () => undoTo(entryId, true))) return;
+                if (await this._afterHistoryStepError(err, 'undo-range', skipBreak, container,
+                    (f) => undoTo(entryId, skipBreak || !f, force || f))) return;
                 Toast.error(this._esc(err.message));
             }
         };
@@ -1003,12 +1003,13 @@ const TimetableView = {
     /**
      * Σφάλμα βήματος ιστορικού (↩/↪, «μέχρι εδώ», «Επαναφορά όλων»). true = το
      * χειρίστηκε· false = ο καλών κάνει ό,τι έκανε πάντα.
-     *  - 409 break_hour → επιβεβαίωση → retry() με skip_break=true.
+     *  - 409 break_hour / day_out_of_week / unavailable_now → επιβεβαίωση →
+     *    retry(false) με skip_break=true, ή (μόνο unavailable_now) retry(true) με force=true.
      *  - Αίτημα ΜΕ skip_break: οι παραλείψεις έχουν ήδη γραφτεί → ΠΑΝΤΑ νέα σχεδίαση
      *    (πλέγμα + ↩/↪)· 400 με skipped_break = «δεν έμεινε άλλη αλλαγή» → ενημέρωση.
      */
     async _afterHistoryStepError(err, op, skipBreak, container, retry) {
-        if (this._isBreakHour(err)) {
+        if (this._isStepConflict(err)) {
             this._confirmSkipBreak(err, retry, op);
             return true;
         }
@@ -1024,8 +1025,8 @@ const TimetableView = {
     _skippedNothingLeftText(n, op, serverText) {
         // Αν το γράφει ήδη ο server, μην το διπλασιάσεις.
         if (/παραλείφθηκ/i.test(String(serverText || ''))) return this._esc(serverText);
-        const head = n === 1 ? 'Παραλείφθηκε 1 αλλαγή' : `Παραλείφθηκαν ${n} αλλαγές`;
-        return `${head} σε ώρα που έγινε διάλειμμα — δεν υπάρχει άλλη αλλαγή προς `
+        const head = n === 1 ? 'Παραλείφθηκε 1 αλλαγή σε θέση που δεν είναι πια διαθέσιμη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα)' : `Παραλείφθηκαν ${n} αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα)`;
+        return `${head} — δεν υπάρχει άλλη αλλαγή προς `
             + `${op === 'redo' ? 'επανάληψη' : 'αναίρεση'}.`;
     },
 
@@ -1035,30 +1036,59 @@ const TimetableView = {
             && err.detail.code === 'break_hour');
     },
 
+    /** Τίτλος ανά δομημένο 409 του ιστορικού (βλ. slot_history.StepConflict). */
+    _STEP_CONFLICT_TITLES: {
+        break_hour: '⚠️ Αλλαγή σε ώρα που έγινε διάλειμμα',
+        day_out_of_week: '⚠️ Αλλαγή σε μέρα εκτός εβδομάδας',
+        unavailable_now: '⚠️ Αλλαγή σε θέση που δεν είναι πια κατάλληλη',
+    },
+
+    /** 409 με code break_hour / day_out_of_week / unavailable_now: η θέση-στόχος είναι ΤΩΡΑ ακατάλληλη. */
+    _isStepConflict(err) {
+        return Boolean(err && err.status === 409 && err.detail && typeof err.detail === 'object'
+            && Object.prototype.hasOwnProperty.call(this._STEP_CONFLICT_TITLES, err.detail.code));
+    },
+
     /**
-     * Επιβεβαίωση: παράλειψη των αλλαγών σε ώρα-διάλειμμα και συνέχεια με τις
-     * παλαιότερες (ο server τις προσπερνά με skip_break=true). «Άκυρο» = τίποτα.
+     * Επιβεβαίωση: παράλειψη των αλλαγών σε ώρα-διάλειμμα (ή μέρα εκτός εβδομάδας /
+     * θέση με κώλυμα) και συνέχεια με τις παλαιότερες (ο server τις προσπερνά με
+     * skip_break=true → retry(false)). Σε «unavailable_now» και «Κάν' το παρ' όλα
+     * αυτά» (force=true → retry(true)). «Άκυρο» = τίποτα.
      */
     _confirmSkipBreak(err, retry, op) {
         // Η επανάληψη προχωρά στις ΕΠΟΜΕΝΕΣ αλλαγές· αναίρεση/«μέχρι εδώ» στις παλαιότερες.
         const next = op === 'redo' ? 'επόμενες' : 'παλαιότερες';
-        Modal.open('⚠️ Αλλαγή σε ώρα που έγινε διάλειμμα',
-            `<p>${this._esc((err.detail && err.detail.message) || err.message)}</p>`,
+        const code = (err.detail && err.detail.code) || 'break_hour';
+        // «μέχρι εδώ» / «Επαναφορά όλων»: η επιλογή ισχύει για ΟΛΕΣ τις ακατάλληλες αλλαγές του εύρους.
+        const range = op === 'undo-range';
+        const force = code === 'unavailable_now'
+            ? `<p><button type="button" class="btn btn-warning btn-sm" id="hist-force">${range ? 'Κάν\' τες όλες παρ\' όλα αυτά' : 'Κάν\' το παρ\' όλα αυτά'}</button></p>`
+            : '';
+        const note = range
+            ? '<p class="text-muted">Η επιλογή ισχύει για κάθε αλλαγή του εύρους που δεν είναι πια κατάλληλη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα).</p>'
+            : '';
+        Modal.open(this._STEP_CONFLICT_TITLES[code] || this._STEP_CONFLICT_TITLES.break_hour,
+            `<p>${this._esc((err.detail && err.detail.message) || err.message)}</p>${note}${force}`,
             async () => {
                 Modal.close();
-                await retry();
+                await retry(false);
             },
             { saveText: `Παράλειψη και συνέχεια με τις ${next}`, saveClass: 'btn-warning', cancelText: 'Άκυρο' });
+        document.getElementById('hist-force')?.addEventListener('click', async (e) => {
+            e.currentTarget.disabled = true;   // όχι διπλή εφαρμογή
+            Modal.close();
+            await retry(true);
+        });
     },
 
-    /** « (παραλείφθηκαν N αλλαγές σε ώρα που έγινε διάλειμμα)» όταν ο server παρέλειψε. */
+    /** « (παραλείφθηκαν N αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες …)» όταν ο server παρέλειψε. */
     _skippedBreakNote(res) {
         const n = Number(res && res.skipped_break) || 0;
         // Αν το γράφει ήδη το μήνυμα του server, μην το διπλασιάσεις.
         if (n <= 0 || /παραλείφθηκ/i.test(String((res && res.message) || ''))) return '';
         return n === 1
-            ? ' (παραλείφθηκε 1 αλλαγή σε ώρα που έγινε διάλειμμα)'
-            : ` (παραλείφθηκαν ${n} αλλαγές σε ώρα που έγινε διάλειμμα)`;
+            ? ' (παραλείφθηκε 1 αλλαγή σε θέση που δεν είναι πια διαθέσιμη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα))'
+            : ` (παραλείφθηκαν ${n} αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα))`;
     },
 
     _openRenameSolution(solutionId) {

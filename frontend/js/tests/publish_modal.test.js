@@ -128,6 +128,68 @@ test('τίποτα νέο: email για την τελευταία δημοσίε
     assert.deepEqual(calls, [['emails', 4, { teacher_ids: [2] }]]);      // ΟΧΙ νέα δημοσίευση
 });
 
+test('επαναποστολή: ✅/❌ ανά καθηγητή, «όσους δεν το πήραν», επιβεβαίωση για όσους το έχουν ήδη λάβει', async () => {
+    const detail = { id: 4, email_state: 'done', emails: {}, messages: [
+        { teacher_id: 1, teacher: 'Γεωργέλλης', email: { to: 'g@x.gr', status: 'sent', at: '2026-09-19T10:52:00' } },
+        { teacher_id: 2, teacher: 'Γκούγκη', email: { to: 'k@x.gr', status: 'failed', error: 'SMTP', at: '2026-09-19T10:53:00' } },
+        { teacher_id: 3, teacher: 'Χωρίς mail', email: null },
+    ] };
+    const emails = P.emailStatuses(detail);
+    assert.equal(P.emailStatusText(emails[1]), '✅ στάλθηκε 19/09 13:52');     // ώρα Ελλάδας
+    assert.equal(P.emailStatusText(emails[2]), '❌ απέτυχε');
+    assert.equal(P.emailStatusText(emails[3]), '');
+    assert.equal(P.emailStatusText({ to: 'x@x', status: 'pending' }), '');
+    assert.deepEqual(P.selectionFor(T, 'missing', emails), [2]);               // απέτυχε ή δεν στάλθηκε ποτέ
+    assert.deepEqual(P.selectionFor(T, 'missing', {}), [1, 2]);
+    const resendPreview = { ...PREVIEW, affected: 0, teachers: T.map(t => ({ ...t, changed: false })),
+                            previous: { id: 4, solution_name: 'ΧΕΙΜ', published_at: '2026-09-19T10:52:00' } };
+    const html = P.buildHtml(resendPreview, [], '', emails);
+    assert.ok(html.includes('✅ στάλθηκε 19/09 13:52') && html.includes('❌ απέτυχε'), html);
+    assert.ok(html.includes('data-mode="missing">όσους δεν το πήραν') && !html.includes('data-mode="changed"'));
+    // Νέα δημοσίευση: ούτε ενδείξεις ούτε το νέο κουμπί
+    const fresh = P.buildHtml(PREVIEW, [], '', emails);
+    assert.ok(!fresh.includes('στάλθηκε') && fresh.includes('data-mode="changed"'));
+
+    const dom = new JSDOM('<!DOCTYPE html><body><div id="modal-body"></div></body>');
+    global.window = dom.window;
+    global.document = dom.window.document;
+    const opened = [];
+    global.Modal = {
+        open(title, body, onSave) { opened.push({ title, onSave }); document.getElementById('modal-body').innerHTML = body; },
+        close() {},
+    };
+    const toasts = [];
+    global.Toast = { success: (m) => toasts.push(m), error: (m) => toasts.push(`ERR ${m}`) };
+    const calls = [];
+    global.API = { solver: {
+        publishPreview: async () => resendPreview,
+        publish: async () => { calls.push('publish'); return {}; },
+        publication: async (id) => { calls.push(['detail', id]); return detail; },
+        publicationEmails: async (id, body) => { calls.push(['emails', id, body]);
+            return { id, email_state: 'done', emails: { requested: 2, sent: 2 }, messages: [] }; },
+    } };
+    await P.open(37);
+    assert.deepEqual(calls, [['detail', 4]]);
+    assert.equal(document.getElementById('pub-count').textContent, 'κανένα email');   // προεπιλογή: κανείς
+    document.querySelector('.pub-select[data-mode="missing"]').click();
+    assert.equal(document.getElementById('pub-count').textContent, '1 θα πάρει email');
+    assert.ok(document.querySelector('.pub-mail[data-id="2"]').checked && !document.querySelector('.pub-mail[data-id="1"]').checked);
+    document.querySelector('.pub-mail[data-id="1"]').click();                          // + έναν που το έχει ήδη λάβει
+    assert.equal(document.getElementById('pub-count').textContent, '2 θα πάρουν email');
+    await opened[1].onSave();
+    assert.equal(calls.length, 1, 'πρώτα επιβεβαίωση — κανένα email ακόμα');
+    assert.match(opened[2].title, /Επιβεβαίωση/);
+    assert.ok(document.getElementById('modal-body').textContent.includes('Ξανά σε 1 που το έχουν ήδη λάβει;'));
+    await opened[2].onSave();
+    assert.deepEqual(calls[1], ['emails', 4, { teacher_ids: [2, 1], resend: true }]);
+    // Χωρίς ✅ ανάμεσα στους επιλεγμένους: καμία ερώτηση και χωρίς resend (όπως πριν)
+    const n = opened.length;
+    await P._resend(4, [2], emails);
+    assert.ok(!opened.slice(n).some(o => /Επιβεβαίωση/.test(o.title)));
+    assert.deepEqual(calls.filter(c => c[0] === 'emails'),
+        [['emails', 4, { teacher_ids: [2, 1], resend: true }], ['emails', 4, { teacher_ids: [2] }]]);
+});
+
 test('buildHtml: η ώρα της τελευταίας δημοσίευσης σε ώρα Ελλάδας (ο server στέλνει UTC χωρίς ζώνη)', () => {
     const at = (published_at) => P.buildHtml(
         { ...PREVIEW, previous: { solution_name: 'ΧΕΙΜ', published_at } }, [], '');

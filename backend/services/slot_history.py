@@ -33,6 +33,13 @@ Semantics (standard editor behavior):
     (`skip_break=True`) οι εγγραφές αυτές παραλείπονται ΟΠΩΣ οι «νεκρές»
     (σημαδεύονται, η κάρτα δεν αγγίζεται) και η ίδια ενέργεια ΣΥΝΕΧΙΖΕΙ με την
     επόμενη εφαρμόσιμη — αλλιώς οι παλαιότερες αλλαγές θα ήταν απρόσιτες.
+  • μέρα ΤΩΡΑ εκτός εβδομάδας (μειώθηκαν οι «Ημέρες / εβδομάδα») → ακριβώς όπως
+    το διάλειμμα: 409 `day_out_of_week`, παράλειψη με `skip_break`.
+  • θέση ΤΩΡΑ ακατάλληλη αλλά υπαρκτή — κώλυμα καθηγητή/μαθητή, «μέγιστες
+    ώρες/μέρα», αρχειοθετημένη αίθουσα (οι ίδιοι έλεγχοι με το drag&drop,
+    slot_placement) → 409 `unavailable_now` (`UnavailableNowConflict`) χωρίς
+    αλλαγή· ο χρήστης είτε παραλείπει (`skip_break`) είτε το κάνει έτσι κι
+    αλλιώς (`force=True`). Πριν: η αναίρεση έβαζε την κάρτα εκεί σιωπηλά.
   • σφάλμα βάσης στο flush → rollback + 409 (ποτέ 500).
 """
 
@@ -42,9 +49,12 @@ from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.models import Classroom, Period, Student, TimetableSlot, TimetableSlotHistory
+from backend.models import (
+    Classroom, Period, SchoolSettings, Student, TimetableSlot, TimetableSlotHistory,
+)
 from backend.services import lesson_roster
 from backend.services import placement_conflicts as pc
+from backend.services import slot_placement as sp
 
 _UNDO, _REDO = "undo", "redo"
 _STATE_FIELDS = ("day_of_week", "period_id", "classroom_id", "is_locked", "is_unplaced")
@@ -57,22 +67,59 @@ class HistoryConflict(HTTPException):
         super().__init__(status_code=409, detail=message)
 
 
-class BreakHourConflict(HTTPException):
-    """409 `break_hour`: η ώρα-στόχος είναι τώρα διάλειμμα. Δομημένο detail, ώστε
-    το frontend να προσφέρει «παράλειψη και συνέχεια» (`skip_break=true`)."""
+class StepConflict(HTTPException):
+    """409 με δομημένο detail (`code`, `requires_force`, `entry_id`, `message`): η
+    θέση-στόχος είναι ΤΩΡΑ ακατάλληλη, αναστρέψιμα. Τίποτα δεν άλλαξε· το frontend
+    προσφέρει «παράλειψη και συνέχεια» (`skip_break=true`)."""
+
+    def __init__(self, code: str, entry: TimetableSlotHistory, message: str, **extra):
+        super().__init__(status_code=409, detail={
+            "code": code, "requires_force": True, "entry_id": entry.id, "message": message,
+            **extra,
+        })
+
+
+def _direction_words(direction: str) -> tuple[str, str]:
+    if direction == _UNDO:
+        return "η αναίρεση", "τις παλαιότερες"
+    return "η επανάληψη", "τις επόμενες"
+
+
+class BreakHourConflict(StepConflict):
+    """409 `break_hour`: η ώρα-στόχος είναι τώρα διάλειμμα."""
 
     def __init__(self, entry: TimetableSlotHistory, period_name: str, direction: str):
-        if direction == _UNDO:
-            what, rest = "η αναίρεση", "τις παλαιότερες"
-        else:
-            what, rest = "η επανάληψη", "τις επόμενες"
+        what, rest = _direction_words(direction)
         message = (f"Η «{period_name}» είναι τώρα διάλειμμα — {what} αυτής της αλλαγής θα "
                    "έβαζε την κάρτα σε διάλειμμα. Μπορείς να την παραλείψεις και να συνεχίσεις "
                    f"με {rest} αλλαγές, ή να ξανακάνεις την ώρα διδακτική. Δεν άλλαξε τίποτα.")
-        super().__init__(status_code=409, detail={
-            "code": "break_hour", "requires_force": True, "entry_id": entry.id,
-            "period": period_name, "message": message,
-        })
+        super().__init__("break_hour", entry, message, period=period_name)
+
+
+class DayOutOfWeekConflict(StepConflict):
+    """409 `day_out_of_week`: η μέρα-στόχος είναι τώρα εκτός της εβδομάδας του
+    προγράμματος (μειώθηκαν οι «Ημέρες / εβδομάδα»). Ίδιος μηχανισμός με το διάλειμμα."""
+
+    def __init__(self, entry: TimetableSlotHistory, day: int, days_count: int, direction: str):
+        what, rest = _direction_words(direction)
+        message = (f"Η {pc.day_name(day)} είναι τώρα εκτός της εβδομάδας του προγράμματος "
+                   f"({days_count} ημέρες στις Ρυθμίσεις) — {what} αυτής της αλλαγής θα έβαζε "
+                   "την κάρτα εκτός εβδομάδας. Μπορείς να την παραλείψεις και να συνεχίσεις "
+                   f"με {rest} αλλαγές, ή να αυξήσεις τις ημέρες στις Ρυθμίσεις. Δεν άλλαξε τίποτα.")
+        super().__init__("day_out_of_week", entry, message, day=pc.day_name(day))
+
+
+class UnavailableNowConflict(StepConflict):
+    """409 `unavailable_now`: η θέση-στόχος υπάρχει αλλά είναι τώρα ακατάλληλη
+    (κώλυμα, όριο ωρών/μέρα, αρχειοθετημένη αίθουσα). Παράλειψη με `skip_break`
+    ή εφαρμογή έτσι κι αλλιώς με `force`."""
+
+    def __init__(self, entry: TimetableSlotHistory, reason: str, direction: str):
+        what, rest = _direction_words(direction)
+        message = (f"{what.capitalize()} αυτής της αλλαγής θα έβαζε την κάρτα σε θέση που δεν "
+                   f"είναι πια κατάλληλη: {reason}. Μπορείς να την παραλείψεις και να συνεχίσεις "
+                   f"με {rest} αλλαγές, ή να την κάνεις έτσι κι αλλιώς. Δεν άλλαξε τίποτα.")
+        super().__init__("unavailable_now", entry, message, reason=reason)
 
 
 class _Skip(Exception):
@@ -80,11 +127,15 @@ class _Skip(Exception):
     kind = "dead" (αίθουσα/ώρα διαγράφηκε) ή "break" (ώρα-διάλειμμα, μόνο με
     skip_break)."""
 
-    def __init__(self, entry: TimetableSlotHistory, reason: str, kind: str = "dead"):
+    def __init__(self, entry: TimetableSlotHistory, reason: str, kind: str = "dead",
+                 entries: list[TimetableSlotHistory] | None = None):
         super().__init__(reason)
         self.entry = entry
         self.reason = reason
         self.kind = kind
+        # Όλες οι εγγραφές που παραλείπονται μαζί: και τα δύο μισά ενός swap — αλλιώς το
+        # άλλο μισό θα έβρισκε την κάρτα που δεν μετακινήθηκε και το undo θα κολλούσε.
+        self.entries = entries or [entry]
 
 
 @dataclass
@@ -195,6 +246,54 @@ def _break_now(db: Session, state: dict) -> Period | None:
     return period if period is not None and period.is_break else None
 
 
+def _days_per_week(db: Session) -> int:
+    settings = db.query(SchoolSettings).first()
+    return settings.days_per_week if settings else 5
+
+
+def _out_of_week(state: dict, days_count: int) -> bool:
+    """Η μέρα-στόχος είναι ΤΩΡΑ εκτός εβδομάδας — αναστρέψιμο (Ρυθμίσεις), οπότε
+    ίδια μεταχείριση με την ώρα-διάλειμμα."""
+    return (not state["is_unplaced"] and state["day_of_week"] is not None
+            and state["day_of_week"] >= days_count)
+
+
+def _unavailable_now(db: Session, slot: TimetableSlot, state: dict,
+                     extra_exclude_slot_id: int | None = None) -> str | None:
+    """Γιατί η θέση-στόχος, αν και υπάρχει, είναι ΤΩΡΑ ακατάλληλη (None = εντάξει):
+    κώλυμα καθηγητή/μαθητή, «μέγιστες ώρες/μέρα», αρχειοθετημένη αίθουσα — οι
+    ίδιοι έλεγχοι με το drag&drop (slot_placement). Όπως εκεί: μέσα στο ίδιο κελί
+    δεν ξαναελέγχεται η ώρα (π.χ. αναίρεση κλειδώματος) και η αίθουσα μόνο αν
+    αλλάζει. Pure read."""
+    if state["is_unplaced"]:
+        return None
+    day, pid = state["day_of_week"], state["period_id"]
+    me = pc.describe_slot(db, slot)
+    term_id = slot.solution.term_id if slot.solution else None
+    if slot.is_unplaced or (slot.day_of_week, slot.period_id) != (day, pid):
+        period = db.query(Period).filter(Period.id == pid).first()
+        where = pc.cell_label(day, period)
+        if sp.teacher_unavailable_at(db, term_id, slot.lesson.teacher_id, day, pid):
+            return f"ο καθηγητής {me['teacher'] or ''} έχει δηλώσει κώλυμα {where}"
+        unav_ids = sp.unavailable_students_at(
+            db, term_id, sorted(lesson_roster.students_of(db, slot.lesson)), day, pid)
+        if unav_ids:
+            names = [pc.student_display(st) for st in
+                     db.query(Student).filter(Student.id.in_(unav_ids)).all()]
+            return (f"{'οι μαθητές' if len(names) > 1 else 'ο μαθητής'} {pc.join_names(names)} "
+                    f"{'έχουν' if len(names) > 1 else 'έχει'} δηλώσει κώλυμα {where}")
+        limit_hit = sp.teacher_day_limit_hit(db, slot, day, extra_exclude_slot_id)
+        if limit_hit:
+            count, limit = limit_hit
+            return (f"ο καθηγητής {me['teacher'] or ''} έχει ήδη {count} ώρες "
+                    f"{pc.day_name(day)} (όριο {limit}/μέρα)")
+    if state["classroom_id"] != slot.classroom_id:
+        room = db.query(Classroom).filter(Classroom.id == state["classroom_id"]).first()
+        if room is not None and room.archived_at is not None:
+            return f"η αίθουσα «{room.name}» είναι αρχειοθετημένη"
+    return None
+
+
 def _is_swap_pair(a: TimetableSlotHistory, b: TimetableSlotHistory) -> bool:
     """Τα δύο «move» ενός swap: η μία κάρτα πήγε εκεί από όπου έφυγε η άλλη
     και αντίστροφα (το swap_slots τα γράφει διαδοχικά)."""
@@ -283,13 +382,29 @@ def _apply(slot: TimetableSlot, state: dict, direction: str) -> None:
         slot.unplaced_reason = None
 
 
+def _swap_partner(db: Session, solution_id: int, entry: TimetableSlotHistory,
+                  direction: str) -> TimetableSlotHistory | None:
+    """Το άλλο μισό ενός swap (η επόμενη εγγραφή προς την κατεύθυνση του βήματος), αλλιώς None."""
+    partner = (_latest_active(db, solution_id, before_id=entry.id) if direction == _UNDO
+               else _next_redoable(db, solution_id, after_id=entry.id))
+    return partner if partner is not None and _is_swap_pair(entry, partner) else None
+
+
+def _break_skip(db: Session, solution_id: int, entry: TimetableSlotHistory, direction: str,
+                reason: str) -> _Skip:
+    """Παράλειψη (skip_break) της εγγραφής — μαζί με το άλλο μισό, αν είναι μισό swap."""
+    partner = _swap_partner(db, solution_id, entry, direction)
+    return _Skip(entry, reason, kind="break", entries=[entry] + ([partner] if partner else []))
+
+
 def _step(db: Session, solution_id: int, direction: str,
-          skip_break: bool = False) -> list[TimetableSlotHistory] | None:
+          skip_break: bool = False, force: bool = False) -> list[TimetableSlotHistory] | None:
     """Ένα βήμα undo/redo ΧΩΡΙΣ commit. Επιστρέφει τις εγγραφές που
     εφαρμόστηκαν (1, ή 2 για τα δύο μισά ενός swap) ή None αν δεν υπάρχει
     τίποτα. Σηκώνει `_Skip` (θέση που δεν υπάρχει πια, ή — με skip_break —
-    ώρα-διάλειμμα), `BreakHourConflict` (ώρα-διάλειμμα χωρίς skip_break) ή
-    `HistoryConflict` (διπλοκράτηση). Σε όλα: τίποτα δεν άλλαξε."""
+    ώρα-διάλειμμα / μέρα εκτός εβδομάδας / ακατάλληλη θέση), `BreakHourConflict`,
+    `DayOutOfWeekConflict`, `UnavailableNowConflict` (χωρίς skip_break· το τελευταίο
+    ούτε με force) ή `HistoryConflict` (διπλοκράτηση). Σε όλα: τίποτα δεν άλλαξε."""
     entry = (_latest_active(db, solution_id) if direction == _UNDO
              else _next_redoable(db, solution_id))
     if entry is None:
@@ -305,8 +420,15 @@ def _step(db: Session, solution_id: int, direction: str,
     on_break = _break_now(db, state)
     if on_break is not None:
         if skip_break:
-            raise _Skip(entry, f"η «{on_break.name}» είναι τώρα διάλειμμα", kind="break")
+            raise _break_skip(db, solution_id, entry, direction,
+                              f"η «{on_break.name}» είναι τώρα διάλειμμα")
         raise BreakHourConflict(entry, on_break.name, direction)
+    days_count = _days_per_week(db)
+    if _out_of_week(state, days_count):
+        if skip_break:
+            raise _break_skip(db, solution_id, entry, direction,
+                              f"η {pc.day_name(state['day_of_week'])} είναι τώρα εκτός εβδομάδας")
+        raise DayOutOfWeekConflict(entry, state["day_of_week"], days_count, direction)
 
     group = [(entry, slot, state)]
     clash = _clash_reason(db, solution_id, [(slot, state)], direction)
@@ -318,7 +440,8 @@ def _step(db: Session, solution_id: int, direction: str,
             partner_slot = db.query(TimetableSlot).filter(TimetableSlot.id == partner.slot_id).first()
             partner_state = _target_state(partner, direction)
             if (partner_slot is not None and not _unusable(db, partner_state)
-                    and not _break_now(db, partner_state)):
+                    and not _break_now(db, partner_state)
+                    and not _out_of_week(partner_state, days_count)):
                 both = [(slot, state), (partner_slot, partner_state)]
                 clash = _clash_reason(db, solution_id, both, direction)
                 if not clash:
@@ -327,6 +450,17 @@ def _step(db: Session, solution_id: int, direction: str,
         raise HistoryConflict(
             f"{action} δεν έγινε: {clash}. Δεν άλλαξε τίποτα — μετακίνησε πρώτα την άλλη "
             "κάρτα και ξαναδοκίμασε.")
+
+    # Κώλυμα / όριο ωρών / αρχειοθετημένη αίθουσα (και στα δύο μισά ενός swap, το
+    # καθένα αγνοώντας το άλλο όπως στο swap_slots) — εκτός αν ο χρήστης το ζήτησε ρητά.
+    if not force:
+        for _item, item_slot, item_state in group:
+            other_id = next((s.id for _, s, _ in group if s.id != item_slot.id), None)
+            unavailable = _unavailable_now(db, item_slot, item_state, other_id)
+            if unavailable:
+                if skip_break:
+                    raise _Skip(entry, unavailable, kind="break", entries=[e for e, _, _ in group])
+                raise UnavailableNowConflict(entry, unavailable, direction)
 
     for item, item_slot, item_state in group:
         _apply(item_slot, item_state, direction)
@@ -353,24 +487,29 @@ def _mark_skipped(db: Session, entry: TimetableSlotHistory, *, undone: bool) -> 
 
 
 def _skipped_note(skipped: int) -> str:
-    return f" (Παραλείφθηκαν και {skipped} αλλαγές σε ώρες-διαλείμματα.)" if skipped else ""
+    return (f" (Παραλείφθηκαν και {skipped} αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες: "
+            "διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα.)") if skipped else ""
 
 
-def _run(db: Session, solution_id: int, direction: str, skip_break: bool) -> StepResult:
-    """Undo/redo ενός βήματος. Με skip_break οι εγγραφές σε ώρα-διάλειμμα
-    παραλείπονται (σημαδεύονται όπως οι «νεκρές», η κάρτα δεν αγγίζεται) και
-    συνεχίζει με την επόμενη εφαρμόσιμη. Σε διπλοκράτηση μετά από παραλείψεις
-    → rollback ΟΛΟΥ του αιτήματος (τίποτα δεν κρατιέται) και 409."""
+def _run(db: Session, solution_id: int, direction: str, skip_break: bool,
+         force: bool = False) -> StepResult:
+    """Undo/redo ενός βήματος. Με skip_break οι εγγραφές σε ώρα-διάλειμμα (ή μέρα
+    εκτός εβδομάδας / θέση τώρα ακατάλληλη) παραλείπονται (σημαδεύονται όπως οι
+    «νεκρές», η κάρτα δεν αγγίζεται) και συνεχίζει με την επόμενη εφαρμόσιμη. Με
+    force η ακατάλληλη θέση (κώλυμα κ.λπ.) εφαρμόζεται έτσι κι αλλιώς. Σε
+    διπλοκράτηση μετά από παραλείψεις → rollback ΟΛΟΥ του αιτήματος (τίποτα δεν
+    κρατιέται) και 409."""
     undone = direction == _UNDO
     skipped = 0
     while True:
         try:
-            done = _step(db, solution_id, direction, skip_break=skip_break)
+            done = _step(db, solution_id, direction, skip_break=skip_break, force=force)
         except _Skip as skip:
             if skip.kind == "break":
-                skip.entry.undone = undone
+                for skipped_entry in skip.entries:
+                    skipped_entry.undone = undone
                 db.flush()
-                skipped += 1
+                skipped += len(skip.entries)
                 continue
             _mark_skipped(db, skip.entry, undone=undone)
             if undone:
@@ -388,17 +527,20 @@ def _run(db: Session, solution_id: int, direction: str, skip_break: bool) -> Ste
         return StepResult(done[0] if done else None, skipped)
 
 
-def undo_step(db: Session, solution_id: int, *, skip_break: bool = False) -> StepResult:
+def undo_step(db: Session, solution_id: int, *, skip_break: bool = False,
+              force: bool = False) -> StepResult:
     """Αναίρεση της πιο πρόσφατης αλλαγής (βλ. _run). 409 `HistoryConflict` αν θα
     δημιουργούσε διπλοκράτηση ή αν η παλιά θέση δεν υπάρχει πια (η εγγραφή
-    παραλείπεται — commit εδώ). 409 `BreakHourConflict` αν η ώρα είναι τώρα
-    διάλειμμα και δεν δόθηκε skip_break. Χωρίς commit στην επιτυχία (ο caller)."""
-    return _run(db, solution_id, _UNDO, skip_break)
+    παραλείπεται — commit εδώ). 409 `StepConflict` (break_hour / day_out_of_week /
+    unavailable_now) αν η θέση είναι τώρα ακατάλληλη και δεν δόθηκε skip_break (ή
+    force για την unavailable_now). Χωρίς commit στην επιτυχία (ο caller)."""
+    return _run(db, solution_id, _UNDO, skip_break, force)
 
 
-def redo_step(db: Session, solution_id: int, *, skip_break: bool = False) -> StepResult:
+def redo_step(db: Session, solution_id: int, *, skip_break: bool = False,
+              force: bool = False) -> StepResult:
     """Επανάληψη της πιο πρόσφατα αναιρεμένης αλλαγής — ίδιοι κανόνες με το undo_step."""
-    return _run(db, solution_id, _REDO, skip_break)
+    return _run(db, solution_id, _REDO, skip_break, force)
 
 
 def undo(db: Session, solution_id: int) -> TimetableSlotHistory | None:
@@ -516,7 +658,7 @@ def undo_to(db: Session, solution_id: int, entry_id: int) -> int:
 
 
 def undo_to_counts(db: Session, solution_id: int, entry_id: int, *,
-                   skip_break: bool = False) -> tuple[int, int]:
+                   skip_break: bool = False, force: bool = False) -> tuple[int, int]:
     """Αναίρεση της αλλαγής `entry_id` ΚΑΙ όλων των νεότερων, με τη σωστή σειρά.
     Επιστρέφει (αναιρέθηκαν, παραλείφθηκαν σε ώρα-διάλειμμα).
 
@@ -524,9 +666,10 @@ def undo_to_counts(db: Session, solution_id: int, entry_id: int, *,
     ανήκει στο πρόγραμμα ή έχει ήδη αναιρεθεί, ή αν κάποιο βήμα θα δημιουργούσε
     διπλοκράτηση (τότε ο caller κάνει rollback — τίποτα δεν αλλάζει). Αλλαγές
     που δείχνουν σε αίθουσα/ώρα που δεν υπάρχει πια παραλείπονται (η κάρτα
-    μένει όπου είναι) και δεν μετρούν. Ώρα-διάλειμμα: `BreakHourConflict` (ο
-    caller κάνει rollback), εκτός αν skip_break — τότε παραλείπεται και η
-    αναίρεση συνεχίζει ως το `entry_id`. Αναστρέψιμο με redo()."""
+    μένει όπου είναι) και δεν μετρούν. Ώρα-διάλειμμα / μέρα εκτός εβδομάδας /
+    θέση τώρα ακατάλληλη: `StepConflict` (ο caller κάνει rollback), εκτός αν
+    skip_break — τότε παραλείπεται και η αναίρεση συνεχίζει ως το `entry_id`
+    (ή force: η ακατάλληλη θέση εφαρμόζεται). Αναστρέψιμο με redo()."""
     target = (
         db.query(TimetableSlotHistory)
         .filter(TimetableSlotHistory.id == entry_id,
@@ -549,11 +692,12 @@ def undo_to_counts(db: Session, solution_id: int, entry_id: int, *,
         if latest is None or latest.id < entry_id:
             return count, skipped
         try:
-            done = _step(db, solution_id, _UNDO, skip_break=skip_break)
+            done = _step(db, solution_id, _UNDO, skip_break=skip_break, force=force)
         except _Skip as skip:
-            skip.entry.undone = True
+            for skipped_entry in skip.entries:
+                skipped_entry.undone = True
             db.flush()
-            skipped += skip.kind == "break"
+            skipped += len(skip.entries) if skip.kind == "break" else 0
             continue
         except HistoryConflict as exc:
             raise ValueError(exc.detail) from exc

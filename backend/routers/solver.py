@@ -81,6 +81,24 @@ def _solution_or_404(db: Session, solution_id: int) -> TimetableSolution:
     return sol
 
 
+def _unique_solution_name(db: Session, term_id: int | None, name: str) -> str:
+    """Δύο προγράμματα με το ίδιο όνομα στο ίδιο σενάριο δεν ξεχωρίζουν (dropdown,
+    /senario του bot — το rename το αρνείται): νέο πρόγραμμα με υπάρχον όνομα
+    παίρνει αυτόματα «(2)», «(3)» …"""
+    taken = {n for (n,) in db.query(TimetableSolution.name)
+             .filter(TimetableSolution.term_id == term_id).all()}
+    if name not in taken:
+        return name
+    limit = TimetableSolution.name.property.columns[0].type.length or 200
+    n = 2
+    while True:
+        suffix = f" ({n})"
+        candidate = name[:limit - len(suffix)].rstrip() + suffix   # χωρά πάντα στη στήλη
+        if candidate not in taken:
+            return candidate
+        n += 1
+
+
 @router.get("/solutions/{solution_id}/gaps")
 def solution_gaps(solution_id: int, db: Session = Depends(get_db)):
     """🕳 Ώρες/εβδομάδα και κενά ανά μαθητή και καθηγητή."""
@@ -171,11 +189,12 @@ def generate_timetable(
             for s in prior_slots
         ]
 
+    term_id = get_active_term_id(db)
     solution = TimetableSolution(
-        name=request.name,
+        name=_unique_solution_name(db, term_id, request.name),
         status="generating",
         created_at=utcnow_naive(),
-        term_id=get_active_term_id(db),
+        term_id=term_id,
     )
     db.add(solution)
     db.commit()
@@ -321,7 +340,8 @@ def regenerate_with_locks(
     # HTTP worker for the full solve and survives a mid-run deploy. The UI
     # polls GET /solver/status/{id}.
     solution = TimetableSolution(
-        name=request.name or f"{source.name} (regenerated)",
+        name=_unique_solution_name(db, source.term_id,
+                                   request.name or f"{source.name} (regenerated)"),
         status="generating",
         created_at=utcnow_naive(),
         term_id=source.term_id,  # stay in the same scenario as the source
@@ -618,11 +638,17 @@ def update_solution_slot(
         "is_locked": bool(slot.is_locked),
         "is_unplaced": bool(slot.is_unplaced),
     }
-    operation = "lock" if (
-        prev_state["is_locked"] != new_state["is_locked"]
-        and prev_state["day_of_week"] == new_state["day_of_week"]
-        and prev_state["period_id"] == new_state["period_id"]
-    ) else "move"
+    # 🕘 Ιστορικό: από την Παλέτα = «Τοποθέτηση»· μόνο το 🔒 άλλαξε (ίδιο κελί και
+    # αίθουσα) = «Κλείδωμα»/«Ξεκλείδωμα» κατά το νέο is_locked· αλλιώς «Μετακίνηση».
+    if prev_state["is_unplaced"]:
+        operation = "place"
+    elif (prev_state["is_locked"] != new_state["is_locked"]
+          and prev_state["day_of_week"] == new_state["day_of_week"]
+          and prev_state["period_id"] == new_state["period_id"]
+          and prev_state["classroom_id"] == new_state["classroom_id"]):
+        operation = "lock" if new_state["is_locked"] else "unlock"
+    else:
+        operation = "move"
     slot_history_svc.record_edit(db, slot, prev_state, new_state, operation)
     db.commit()
     # Return the new state so the frontend can keep its in-memory copy in sync
@@ -938,7 +964,8 @@ def _history_step_response(db: Session, solution_id: int, result, skip_break: bo
     db.commit()
     message = done_message
     if result.skipped_break:
-        message += f" (παραλείφθηκαν {result.skipped_break} αλλαγές σε ώρες-διαλείμματα)"
+        message += (f" (παραλείφθηκαν {result.skipped_break} αλλαγές σε θέσεις που δεν είναι πια "
+                    "διαθέσιμες: διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα)")
     return {
         "status": "ok",
         "message": message,
@@ -949,33 +976,37 @@ def _history_step_response(db: Session, solution_id: int, result, skip_break: bo
 
 
 @router.post("/solutions/{solution_id}/undo")
-def undo_last_edit(solution_id: int, skip_break: bool = False, db: Session = Depends(get_db)):
+def undo_last_edit(solution_id: int, skip_break: bool = False, force: bool = False,
+                   db: Session = Depends(get_db)):
     """Roll back the most recent manual edit to this solution.
 
     Αλλαγή που θα έβαζε κάρτα σε ώρα που είναι τώρα διάλειμμα → 409
-    `break_hour`· με `?skip_break=true` παραλείπεται και αναιρείται η επόμενη
-    εφαρμόσιμη (βλ. slot_history)."""
+    `break_hour` (μέρα εκτός εβδομάδας → `day_out_of_week`)· με `?skip_break=true`
+    παραλείπεται και αναιρείται η επόμενη εφαρμόσιμη. Θέση με κώλυμα / όριο
+    ωρών / αρχειοθετημένη αίθουσα → 409 `unavailable_now`· `?force=true` την
+    εφαρμόζει έτσι κι αλλιώς (βλ. slot_history)."""
     solution = (
         db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
     )
     if not solution:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
 
-    result = slot_history_svc.undo_step(db, solution_id, skip_break=skip_break)
+    result = slot_history_svc.undo_step(db, solution_id, skip_break=skip_break, force=force)
     return _history_step_response(db, solution_id, result, skip_break,
                                   "Η αλλαγή αναιρέθηκε", "Δεν υπάρχει αλλαγή προς αναίρεση")
 
 
 @router.post("/solutions/{solution_id}/redo")
-def redo_last_undo(solution_id: int, skip_break: bool = False, db: Session = Depends(get_db)):
-    """Re-apply the most recent undone edit (`?skip_break=true`: όπως στο undo)."""
+def redo_last_undo(solution_id: int, skip_break: bool = False, force: bool = False,
+                   db: Session = Depends(get_db)):
+    """Re-apply the most recent undone edit (`?skip_break=true` / `?force=true`: όπως στο undo)."""
     solution = (
         db.query(TimetableSolution).filter(TimetableSolution.id == solution_id).first()
     )
     if not solution:
         raise HTTPException(status_code=404, detail="Η λύση δεν βρέθηκε")
 
-    result = slot_history_svc.redo_step(db, solution_id, skip_break=skip_break)
+    result = slot_history_svc.redo_step(db, solution_id, skip_break=skip_break, force=force)
     return _history_step_response(db, solution_id, result, skip_break,
                                   "Η αλλαγή επαναλήφθηκε", "Δεν υπάρχει αλλαγή προς επανάληψη")
 
@@ -989,16 +1020,18 @@ def get_history(solution_id: int, limit: int = 20, db: Session = Depends(get_db)
 
 @router.post("/solutions/{solution_id}/history/undo-to/{entry_id}")
 def undo_to_entry(solution_id: int, entry_id: int, skip_break: bool = False,
-                  db: Session = Depends(get_db)):
+                  force: bool = False, db: Session = Depends(get_db)):
     """Αναίρεση μιας αλλαγής ΚΑΙ όλων των νεότερων — όλες ή καμία.
-    Αναστρέψιμο με «↪ Επανάληψη». Ώρα-διάλειμμα στη διαδρομή → 409 `break_hour`·
-    με `?skip_break=true` οι αλλαγές αυτές παραλείπονται και συνεχίζει ως εκεί."""
+    Αναστρέψιμο με «↪ Επανάληψη». Ώρα-διάλειμμα στη διαδρομή → 409 `break_hour`
+    (μέρα εκτός εβδομάδας → `day_out_of_week`, κώλυμα κ.λπ. → `unavailable_now`)·
+    με `?skip_break=true` οι αλλαγές αυτές παραλείπονται και συνεχίζει ως εκεί
+    (`?force=true`: οι `unavailable_now` εφαρμόζονται έτσι κι αλλιώς)."""
     _get_solution_or_404_local(db, solution_id)
     try:
         count, skipped = slot_history_svc.undo_to_counts(
-            db, solution_id, entry_id, skip_break=skip_break)
+            db, solution_id, entry_id, skip_break=skip_break, force=force)
         db.commit()
-    except slot_history_svc.BreakHourConflict:
+    except slot_history_svc.StepConflict:
         db.rollback()
         raise
     except ValueError as exc:
@@ -1010,7 +1043,8 @@ def undo_to_entry(solution_id: int, entry_id: int, skip_break: bool = False,
                             detail="Η αναίρεση δεν μπορεί να γίνει — κάτι άλλαξε στο μεταξύ. Τίποτα δεν πειράχτηκε.")
     message = f"Αναιρέθηκαν {count} αλλαγές — ξαναγίνονται με «↪ Επανάληψη»."
     if skipped:
-        message += f" Παραλείφθηκαν {skipped} αλλαγές σε ώρες-διαλείμματα."
+        message += (f" Παραλείφθηκαν {skipped} αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες "
+                    "(διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα).")
     return {
         "status": "ok", "undone": count,
         "message": message,

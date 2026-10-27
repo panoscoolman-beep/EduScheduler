@@ -303,6 +303,10 @@ def test_shift_drops_out_of_range_and_unplaces_slots_with_counts(client):
     seed = _seed_catalog(s, n_periods=4)
     # Διαθεσιμότητα στις περιόδους 1η και 4η (indexes 0, 3).
     term = _seed_term_with_inputs(s, seed, availability_periods=(0, 3))
+    # Μία «προτιμά» στην 4η: χάνεται κι αυτή, αλλά ΔΕΝ είναι κώλυμα (unavailable_dropped).
+    s.add(TeacherAvailability(teacher_id=seed["teacher"].id, day_of_week=1,
+                              period_id=seed["periods"][3].id, status="preferred", term_id=term.id))
+    s.commit()
     lesson = s.query(Lesson).filter(Lesson.term_id == term.id).first()
     sol = TimetableSolution(name="p1", status="optimal", term_id=term.id)
     s.add(sol)
@@ -320,7 +324,8 @@ def test_shift_drops_out_of_range_and_unplaces_slots_with_counts(client):
     assert res.status_code == 200
     body = res.json()
     assert body["availability_moved"] == 1     # 1η → 2η
-    assert body["availability_dropped"] == 1   # 4η → εκτός
+    assert body["availability_dropped"] == 2   # 4η → εκτός (το κώλυμα και η «προτιμά»)
+    assert body["unavailable_dropped"] == 1    # μόνο το κώλυμα
     assert body["slots_unplaced"] == 1
     s.expire_all()
     s.refresh(slot)
@@ -361,6 +366,53 @@ def test_shift_wiping_whole_scenario_is_refused(client):
     assert res.status_code == 400
     # Τίποτα δεν διαγράφηκε.
     assert len(_availability_pairs(s, term.id)) == 4
+
+
+def test_shift_is_refused_while_a_programme_of_the_term_is_generating(client):
+    s = client.session
+    seed = _seed_catalog(s, n_periods=4)
+    term = _seed_term_with_inputs(s, seed, availability_periods=(0, 1))
+    s.add(TimetableSolution(name="Τρέχει", status="generating", term_id=term.id))
+    s.commit()
+    before = _availability_pairs(s, term.id)
+    res = client.post(f"/api/terms/{term.id}/shift-times", json={"offset": 1})
+    assert res.status_code == 409 and "«Τρέχει»" in res.json()["detail"]
+    s.expire_all()
+    assert _availability_pairs(s, term.id) == before      # τίποτα δεν μετατοπίστηκε
+
+
+def test_shift_dry_run_reports_the_counts_without_changing_anything(client):
+    s = client.session
+    seed = _seed_catalog(s, n_periods=4)
+    term = _seed_term_with_inputs(s, seed, availability_periods=(0, 3))
+    lesson = s.query(Lesson).filter(Lesson.term_id == term.id).first()
+    sol = TimetableSolution(name="p1", status="optimal", term_id=term.id)
+    s.add(sol)
+    s.commit()
+    slot = TimetableSlot(solution_id=sol.id, lesson_id=lesson.id, day_of_week=0,
+                         period_id=seed["periods"][3].id, classroom_id=seed["room"].id)
+    s.add(slot)
+    s.commit()
+    before = _availability_pairs(s, term.id)
+    counts = ("availability_moved", "availability_dropped", "slots_moved", "slots_unplaced")
+
+    res = client.post(f"/api/terms/{term.id}/shift-times?dry_run=true", json={"offset": 1})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["dry_run"] is True
+    assert tuple(body[k] for k in counts) == (1, 1, 0, 1)
+    s.expire_all()
+    assert _availability_pairs(s, term.id) == before      # η διαθεσιμότητα όπως ήταν
+    s.refresh(slot)
+    assert slot.is_unplaced is False and slot.period_id == seed["periods"][3].id
+
+    # Η πραγματική μετατόπιση δίνει ακριβώς τα ίδια πλήθη (ίδια διαδρομή).
+    real = client.post(f"/api/terms/{term.id}/shift-times", json={"offset": 1}).json()
+    assert "dry_run" not in real
+    assert tuple(real[k] for k in counts) == tuple(body[k] for k in counts)
+    s.expire_all()
+    s.refresh(slot)
+    assert slot.is_unplaced is True
 
 
 def test_shift_zero_offset_rejected(client):

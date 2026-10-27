@@ -25,6 +25,8 @@ class PublishRequest(BaseModel):
 
 class EmailRequest(BaseModel):
     teacher_ids: list[int] = Field(..., min_length=1, max_length=100)
+    # Ξαναστείλε ΚΑΙ σε όσους το έχουν ήδη λάβει (αλλιώς μένουν «sent»).
+    resend: bool = False
 
 
 class TestEmailRequest(BaseModel):
@@ -90,9 +92,11 @@ def publication_detail(publication_id: int, db: Session = Depends(get_db)):
 @router.post("/{publication_id}/emails")
 def send_publication_emails(publication_id: int, body: EmailRequest, background: BackgroundTasks,
                             db: Session = Depends(get_db)):
-    """✉️ Email στους επιλεγμένους για την ΤΕΛΕΥΤΑΙΑ δημοσίευση (χωρίς νέα δημοσίευση)."""
+    """✉️ Email στους επιλεγμένους για την ΤΕΛΕΥΤΑΙΑ δημοσίευση (χωρίς νέα δημοσίευση).
+    Όσοι το έχουν ήδη λάβει παραλείπονται, εκτός αν `resend`. Απαντά με τη σύνοψη
+    ΚΑΙ την κατάσταση email ανά καθηγητή (`messages`)."""
     try:
-        pub = pub_service.request_emails(db, publication_id, body.teacher_ids)
+        pub = pub_service.request_emails(db, publication_id, body.teacher_ids, resend=body.resend)
         db.commit()
     except LookupError as e:
         db.rollback()
@@ -101,7 +105,7 @@ def send_publication_emails(publication_id: int, body: EmailRequest, background:
         db.rollback()
         raise HTTPException(409, {"code": e.code, "message": str(e)})
     background.add_task(_send_emails_job, pub.id)
-    return pub_service.publication_summary(pub)
+    return pub_service.publication_detail(db, pub.id)
 
 
 @router.post("/preview/{solution_id}/test-email")

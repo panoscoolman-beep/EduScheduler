@@ -64,7 +64,7 @@ def shift_term_times(db: Session, term_id: int, offset: int, shift_solutions: bo
             f"Μετατόπιση κατά {offset:+d} με μόνο {n_periods} διδακτικές ώρες "
             "θα έβγαζε ΟΛΕΣ τις ώρες του σεναρίου εκτός εύρους — καμία αλλαγή."
         )
-    res = {"availability_moved": 0, "availability_dropped": 0,
+    res = {"availability_moved": 0, "availability_dropped": 0, "unavailable_dropped": 0,
            "slots_moved": 0, "slots_unplaced": 0, "history_remapped": 0}
 
     # ── Availability: snapshot → delete → re-insert shifted (avoids unique clashes)
@@ -81,6 +81,8 @@ def shift_term_times(db: Session, term_id: int, offset: int, shift_solutions: bo
             np = target.get(row["pid"])
             if np is None:
                 res["availability_dropped"] += 1
+                # Μόνο τα κωλύματα (όχι «διαθέσιμος» / «προτιμά»): αυτά δείχνει η επιβεβαίωση.
+                res["unavailable_dropped"] += row["status"] == "unavailable"
                 continue
             key = (row["fk"], row["day"], np)
             if key in seen:

@@ -386,7 +386,7 @@ def test_skipping_breaks_then_hitting_a_deleted_room_keeps_both_skips_and_explai
     res = _undo(env, skip=True)
     assert res.status_code == 409
     msg = res.json()["detail"]
-    assert "αίθουσά της δεν υπάρχει πια" in msg and "1 αλλαγές σε ώρες-διαλείμματα" in msg
+    assert "αίθουσά της δεν υπάρχει πια" in msg and "1 αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες" in msg
     assert _flags(env) == [True, True]                   # και οι δύο παραλείψεις κρατήθηκαν
     assert _state(env, k)[:2] == (2, env.p4.id)
     assert _summary(env) == {"can_undo": 0, "can_redo": 2, "total": 2}

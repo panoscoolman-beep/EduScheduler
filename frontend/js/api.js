@@ -140,7 +140,8 @@ const API = {
         update: (id, data) => API.put(`/terms/${id}`, data),
         activate: (id) => API.post(`/terms/${id}/activate`, {}),
         clone: (id, data) => API.post(`/terms/${id}/clone`, data),
-        shiftTimes: (id, data) => API.post(`/terms/${id}/shift-times`, data),
+        // dryRun: μόνο τα πλήθη (Παλέτα / χαμένα κωλύματα) — καμία αλλαγή.
+        shiftTimes: (id, data, dryRun = false) => API.post(`/terms/${id}/shift-times${dryRun ? '?dry_run=true' : ''}`, data),
         delete: (id, force = false) => API.delete(`/terms/${id}${force ? '?force=true' : ''}`),
     },
     lessonsBulkImport: {
@@ -210,16 +211,21 @@ const API = {
         publishTestEmail: (solutionId, data) => API.post(`/publications/preview/${solutionId}/test-email`, data),
         publication: (id) => API.get(`/publications/${id}`),
         publicationEmails: (id, data) => API.post(`/publications/${id}/emails`, data),
-        // skipBreak: παράλειψη αλλαγών σε ώρα που έγινε διάλειμμα (409 «break_hour»).
-        undoTo: (solutionId, entryId, skipBreak = false) =>
-            API.post(`/solver/solutions/${solutionId}/history/undo-to/${entryId}${skipBreak ? '?skip_break=true' : ''}`, {}),
+        // skipBreak: παράλειψη αλλαγών σε ώρα που έγινε διάλειμμα (409 «break_hour»)·
+        // force: εφαρμογή παρ' όλα αυτά σε θέση με κώλυμα κ.λπ. (409 «unavailable_now»).
+        _stepQuery: (skipBreak, force) => {
+            const q = [skipBreak ? 'skip_break=true' : '', force ? 'force=true' : ''].filter(Boolean).join('&');
+            return q ? `?${q}` : '';
+        },
+        undoTo: (solutionId, entryId, skipBreak = false, force = false) =>
+            API.post(`/solver/solutions/${solutionId}/history/undo-to/${entryId}${API.solver._stepQuery(skipBreak, force)}`, {}),
         unplaceBulk: (solutionId, body) => API.post(`/solver/solutions/${solutionId}/unplace-bulk`, body),
         unplaceSlot: (solutionId, slotId) =>
             API.post(`/solver/solutions/${solutionId}/slots/${slotId}/unplace`, {}),
-        undo: (solutionId, skipBreak = false) =>
-            API.post(`/solver/solutions/${solutionId}/undo${skipBreak ? '?skip_break=true' : ''}`, {}),
-        redo: (solutionId, skipBreak = false) =>
-            API.post(`/solver/solutions/${solutionId}/redo${skipBreak ? '?skip_break=true' : ''}`, {}),
+        undo: (solutionId, skipBreak = false, force = false) =>
+            API.post(`/solver/solutions/${solutionId}/undo${API.solver._stepQuery(skipBreak, force)}`, {}),
+        redo: (solutionId, skipBreak = false, force = false) =>
+            API.post(`/solver/solutions/${solutionId}/redo${API.solver._stepQuery(skipBreak, force)}`, {}),
         historySummary: (solutionId) => API.get(`/solver/solutions/${solutionId}/history-summary`),
         substituteSuggestions: (solutionId, teacherId, dayOfWeek) =>
             API.get(`/solver/solutions/${solutionId}/substitute-suggestions?teacher_id=${teacherId}&day_of_week=${dayOfWeek}`),

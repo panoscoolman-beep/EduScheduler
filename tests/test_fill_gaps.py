@@ -75,3 +75,27 @@ def test_plain_lock_and_regenerate_is_unchanged(env):
     env.post(f"/api/solver/regenerate/{env.src.id}", json={"name": "v2", "mode": "strict"})
     ((_, _, mode, _, locked, meta),) = env.runs
     assert mode == "strict" and [a["day_of_week"] for a in locked] == [0] and meta["fill_gaps"] is False
+
+
+def _name_of(env, res):
+    assert res.status_code == 200, res.text
+    sol = env.session.get(TimetableSolution, res.json()["solution_id"])
+    sol.status = "optimal"                     # ο solver είναι mock: «τελείωσε» για το επόμενο
+    env.session.commit()
+    return sol.name
+
+
+def test_same_name_in_a_scenario_gets_an_automatic_suffix(env):
+    from backend.models import Term
+
+    env.session.add(Term(id=1, name="Σενάριο", is_active=True))   # το ενεργό = του ΧΕΙΜΕΡΙΝΟ
+    env.session.commit()
+    regen = f"/api/solver/regenerate/{env.src.id}"
+    assert _name_of(env, env.post(regen, json={"name": "ΧΕΙΜΕΡΙΝΟ"})) == "ΧΕΙΜΕΡΙΝΟ (2)"
+    assert _name_of(env, env.post(regen, json={"name": "ΧΕΙΜΕΡΙΝΟ"})) == "ΧΕΙΜΕΡΙΝΟ (3)"
+    assert _name_of(env, env.post("/api/solver/generate", json={"name": "Νέο"})) == "Νέο"
+    assert _name_of(env, env.post("/api/solver/generate", json={"name": "Νέο"})) == "Νέο (2)"
+    # Όνομα 200 χαρακτήρων (το όριο): το « (2)» χωρά, κόβοντας το τέλος του ονόματος.
+    long = "Α" * 200
+    assert _name_of(env, env.post("/api/solver/generate", json={"name": long})) == long
+    assert _name_of(env, env.post("/api/solver/generate", json={"name": long})) == "Α" * 196 + " (2)"

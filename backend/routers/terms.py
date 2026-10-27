@@ -96,18 +96,42 @@ def clone_term(term_id: int, data: TermCloneRequest, db: Session = Depends(get_d
 
 
 @router.post("/{term_id}/shift-times")
-def shift_times(term_id: int, data: TermShiftRequest, db: Session = Depends(get_db)):
+def shift_times(
+    term_id: int,
+    data: TermShiftRequest,
+    dry_run: bool = Query(False, description="Μόνο τα πλήθη (τι θα πάει στην Παλέτα, "
+                                             "πόσα κωλύματα θα χαθούν) — καμία αλλαγή."),
+    db: Session = Depends(get_db),
+):
     """Uniformly shift this scenario's hours (availability + its programs'
-    slots) by `offset` teaching periods — e.g. morning → afternoon."""
+    slots) by `offset` teaching periods — e.g. morning → afternoon.
+
+    Όσο υπολογίζεται πρόγραμμα του σεναρίου → 409 (ο solver θα έγραφε τις
+    ώρες του στο παλιό ωράριο πάνω στο μετατοπισμένο). `?dry_run=true`: ίδια
+    διαδρομή, rollback αντί για commit — τα ίδια πλήθη, τίποτα δεν αλλάζει."""
     term = db.query(Term).filter(Term.id == term_id).first()
     if not term:
         raise HTTPException(status_code=404, detail="Το σενάριο δεν βρέθηκε")
     if data.offset == 0:
         raise HTTPException(status_code=400, detail="Η μετατόπιση δεν μπορεί να είναι 0.")
+    generating = (
+        db.query(TimetableSolution)
+        .filter(TimetableSolution.term_id == term_id, TimetableSolution.status == "generating")
+        .first()
+    )
+    if generating:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Το πρόγραμμα «{generating.name}» υπολογίζεται αυτή τη στιγμή — "
+                   "περίμενε να τελειώσει και ξαναδοκίμασε τη μετατόπιση.",
+        )
     try:
         res = term_time_shift.shift_term_times(db, term_id, data.offset, data.shift_solutions)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if dry_run:
+        db.rollback()
+        return {"status": "ok", "dry_run": True, **res}
     db.commit()
     return {"status": "ok", **res}
 

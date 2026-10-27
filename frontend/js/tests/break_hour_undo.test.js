@@ -38,7 +38,7 @@ test('↩ σε ώρα-διάλειμμα: επιβεβαίωση → ξανά μ
         assert.equal(toastTexts(app).length, 0, 'κανένα μήνυμα σφάλματος');
         app.doc.getElementById('modal-save').click();
         await waitFor(app.w, () => toastTexts(app).some(t => /Αναιρέθηκε/.test(t)));
-        assert.ok(toastTexts(app).includes('Αναιρέθηκε: Φυσική Β2 (παραλείφθηκαν 2 αλλαγές σε ώρα που έγινε διάλειμμα)'),
+        assert.ok(toastTexts(app).includes('Αναιρέθηκε: Φυσική Β2 (παραλείφθηκαν 2 αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα))'),
             toastTexts(app).join(' | '));
         assert.deepEqual(calls(app, /\/undo$/), ['', '?skip_break=true']);
         await waitFor(app.w, () => app.doc.getElementById('tt-undo') && !overlayOpen(app));
@@ -100,7 +100,7 @@ test('🕘 «μέχρι εδώ» σε ώρα-διάλειμμα: επιβεβα�
         await waitFor(app.w, () => /διάλειμμα/.test(app.doc.getElementById('modal-title').textContent));
         app.doc.getElementById('modal-save').click();
         await waitFor(app.w, () => toastTexts(app).some(t => /Αναιρέθηκαν/.test(t)));
-        assert.ok(toastTexts(app).includes('Αναιρέθηκαν 3 αλλαγές (παραλείφθηκε 1 αλλαγή σε ώρα που έγινε διάλειμμα)'),
+        assert.ok(toastTexts(app).includes('Αναιρέθηκαν 3 αλλαγές (παραλείφθηκε 1 αλλαγή σε θέση που δεν είναι πια διαθέσιμη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα))'),
             toastTexts(app).join(' | '));
         assert.deepEqual(calls(app, /\/undo-to\/9$/), ['', '?skip_break=true']);
         await waitFor(app.w, () => app.doc.getElementById('tt-undo') && !overlayOpen(app));
@@ -246,7 +246,7 @@ test('«↩️ Επαναφορά όλων» σε ώρα-διάλειμμα: ί�
         assert.equal(app.doc.getElementById('modal-cancel').textContent, 'Άκυρο');
         app.doc.getElementById('modal-save').click();
         await waitFor(app.w, () => toastTexts(app).some(t => /Αναιρέθηκαν/.test(t)));
-        assert.ok(toastTexts(app).includes('Αναιρέθηκαν 2 αλλαγές (παραλείφθηκε 1 αλλαγή σε ώρα που έγινε διάλειμμα)'),
+        assert.ok(toastTexts(app).includes('Αναιρέθηκαν 2 αλλαγές (παραλείφθηκε 1 αλλαγή σε θέση που δεν είναι πια διαθέσιμη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα))'),
             toastTexts(app).join(' | '));
         assert.deepEqual(calls(app, /\/undo-to\/11$/), ['', '?skip_break=true']);
         await waitFor(app.w, () => app.doc.getElementById('tt-undo') && !overlayOpen(app));
@@ -275,7 +275,7 @@ test('skip_break που τελειώνει σε 400 με skipped_break: ενημ
         await waitFor(app.w, () => toastTexts(app).some(t => t.startsWith('Παραλείφθηκαν 3')));
         const toast = [...app.doc.querySelectorAll('#toast-container .toast')].find(t => /Παραλείφθηκαν 3/.test(t.textContent));
         assert.equal(toast.querySelector('.toast-message').textContent,
-            'Παραλείφθηκαν 3 αλλαγές σε ώρα που έγινε διάλειμμα — δεν υπάρχει άλλη αλλαγή προς αναίρεση.');
+            'Παραλείφθηκαν 3 αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα) — δεν υπάρχει άλλη αλλαγή προς αναίρεση.');
         assert.ok(toast.classList.contains('warning'));
         assert.ok(!toastTexts(app).includes('Δεν υπάρχει αλλαγή προς αναίρεση'), 'όχι σκέτο σφάλμα');
         await waitFor(app.w, () => solutionGets(app) > before);   // ξαναζωγραφίστηκε (οι παραλείψεις γράφτηκαν)
@@ -284,7 +284,7 @@ test('skip_break που τελειώνει σε 400 με skipped_break: ενημ
         app.doc.getElementById('tt-redo').click();
         await confirmSkip('Παράλειψη και συνέχεια με τις επόμενες');   // η επανάληψη πάει μπροστά
         await waitFor(app.w, () => toastTexts(app).includes(
-            'Παραλείφθηκαν 3 αλλαγές σε ώρα που έγινε διάλειμμα — δεν υπάρχει άλλη αλλαγή προς επανάληψη.'));
+            'Παραλείφθηκαν 3 αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα) — δεν υπάρχει άλλη αλλαγή προς επανάληψη.'));
         await sleep(app.w, 30);
     } finally { app.close(); }
 });
@@ -350,15 +350,104 @@ test('χωρίς skip_break τα σφάλματα μένουν όπως πριν
     } finally { app.close(); }
 });
 
+// ── Δομημένα 409 του ιστορικού πέρα από το διάλειμμα: unavailable_now (και «Κάν' το
+//    παρ' όλα αυτά» → force=true), day_out_of_week (μόνο παράλειψη) ──
+
+const UNAVAILABLE = { __status: 409, data: { detail: {
+    code: 'unavailable_now', requires_force: true, entry_id: 5, reason: 'ο Νικολάου έχει κώλυμα Δευ 1η',
+    message: 'Η αναίρεση αυτής της αλλαγής θα έβαζε την κάρτα σε θέση που δεν είναι πια κατάλληλη: '
+        + 'ο Νικολάου έχει κώλυμα Δευ 1η. Μπορείς να την παραλείψεις ή να την κάνεις έτσι κι αλλιώς. Δεν άλλαξε τίποτα.' } } };
+const DAY_OUT = { __status: 409, data: { detail: {
+    code: 'day_out_of_week', requires_force: true, entry_id: 5, day: 'Παρασκευή',
+    message: 'Η Παρασκευή είναι τώρα εκτός της εβδομάδας του προγράμματος (4 ημέρες στις Ρυθμίσεις). Δεν άλλαξε τίποτα.' } } };
+
+test('↩ σε θέση με κώλυμα (unavailable_now): «Κάν\' το παρ\' όλα αυτά» → force=true· «Παράλειψη» → skip_break=true', async () => {
+    const { routes } = undoApp(({ search }) => {
+        if (/force=true/.test(search)) return { message: 'Αναιρέθηκε: Φυσική Β2' };
+        if (/skip_break=true/.test(search)) return { message: 'Αναιρέθηκε: Χημεία Γ1', skipped_break: 1 };
+        return UNAVAILABLE;
+    });
+    const app = await start(routes);
+    try {
+        await go(app, 'timetable', '#tt-undo');
+        await waitFor(app.w, () => !app.doc.getElementById('tt-undo').disabled);
+        const summaries = () => app.calls.filter(c => /history-summary$/.test(c.path)).length;
+        app.doc.getElementById('tt-undo').click();
+        await waitFor(app.w, () => /δεν είναι πια κατάλληλη/.test(app.doc.getElementById('modal-title').textContent));
+        const body = app.doc.getElementById('modal-body');
+        assert.match(body.textContent, /κώλυμα Δευ 1η/);
+        assert.equal(app.doc.getElementById('modal-save').textContent, 'Παράλειψη και συνέχεια με τις παλαιότερες');
+        assert.equal(app.doc.getElementById('modal-cancel').textContent, 'Άκυρο');
+        assert.equal(app.doc.getElementById('hist-force').textContent, 'Κάν\' το παρ\' όλα αυτά');
+        assert.equal(toastTexts(app).length, 0, 'κανένα μήνυμα σφάλματος');
+        let before = summaries();
+        app.doc.getElementById('hist-force').click();
+        await waitFor(app.w, () => toastTexts(app).includes('Αναιρέθηκε: Φυσική Β2'));
+        assert.deepEqual(calls(app, /\/undo$/), ['', '?force=true']);
+        await waitFor(app.w, () => summaries() > before && !overlayOpen(app));   // ξαναζωγραφίστηκε
+        await waitFor(app.w, () => !app.doc.getElementById('tt-undo').disabled);
+
+        // Δεύτερη φορά: «Παράλειψη» → skip_break=true, ακριβώς όπως στο διάλειμμα
+        before = summaries();
+        app.doc.getElementById('tt-undo').click();
+        await waitFor(app.w, () => overlayOpen(app) && app.doc.getElementById('hist-force') && !app.doc.getElementById('hist-force').disabled);
+        app.doc.getElementById('modal-save').click();
+        await waitFor(app.w, () => toastTexts(app).some(t => /Χημεία/.test(t)));
+        assert.ok(toastTexts(app).includes('Αναιρέθηκε: Χημεία Γ1 (παραλείφθηκε 1 αλλαγή σε θέση που δεν είναι πια διαθέσιμη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα))'),
+            toastTexts(app).join(' | '));
+        assert.deepEqual(calls(app, /\/undo$/), ['', '?force=true', '', '?skip_break=true']);
+        await waitFor(app.w, () => summaries() > before && !overlayOpen(app));
+        await sleep(app.w, 20);
+    } finally { app.close(); }
+});
+
+test('↩ σε μέρα εκτός εβδομάδας (day_out_of_week): ίδια επιβεβαίωση, χωρίς «παρ\' όλα αυτά» → skip_break=true', async () => {
+    const { routes, state } = undoApp(({ search }) => (/skip_break=true/.test(search)
+        ? { message: 'Αναιρέθηκε: Φυσική Β2', skipped_break: 1 } : DAY_OUT));
+    const app = await start(routes);
+    try {
+        await go(app, 'timetable', '#tt-undo');
+        await waitFor(app.w, () => !app.doc.getElementById('tt-undo').disabled);
+        app.doc.getElementById('tt-undo').click();
+        await waitFor(app.w, () => /εκτός εβδομάδας/.test(app.doc.getElementById('modal-title').textContent));
+        assert.match(app.doc.getElementById('modal-body').textContent, /Η Παρασκευή είναι τώρα εκτός/);
+        assert.equal(app.doc.getElementById('hist-force'), null, 'χωρίς force: η μέρα δεν υπάρχει');
+        assert.equal(app.doc.getElementById('modal-save').textContent, 'Παράλειψη και συνέχεια με τις παλαιότερες');
+        app.doc.getElementById('modal-save').click();
+        await waitFor(app.w, () => toastTexts(app).some(t => /Αναιρέθηκε/.test(t)));
+        assert.deepEqual(calls(app, /\/undo$/), ['', '?skip_break=true']);
+        assert.equal(state.undoCalls, 2);
+        await waitFor(app.w, () => app.doc.getElementById('tt-undo') && !overlayOpen(app));
+        await sleep(app.w, 20);
+    } finally { app.close(); }
+});
+
+test('API: force=true μόνο όταν ζητηθεί — μαζί με skip_break=true στο ίδιο URL', async () => {
+    const { routes } = timetableRoutes({
+        'POST /api/solver/solutions/*/history/undo-to/*': () => ({ message: 'ok' }),
+    });
+    const app = await start(routes);
+    try {
+        const S = app.G.API.solver;
+        await S.undo(7, false, true); await S.redo(7, false, true); await S.undoTo(7, 3, true, true);
+        const urls = app.calls.filter(c => c.method === 'POST').map(c => c.path + c.search);
+        assert.deepEqual(urls, [
+            '/api/solver/solutions/7/undo?force=true',
+            '/api/solver/solutions/7/redo?force=true',
+            '/api/solver/solutions/7/history/undo-to/3?skip_break=true&force=true',
+        ]);
+    } finally { app.close(); }
+});
+
 test('το κείμενο «Παραλείφθηκαν… — δεν υπάρχει άλλη αλλαγή»: ενικός/πληθυντικός, χωρίς διπλό του server', async () => {
     const { routes } = timetableRoutes();
     const app = await start(routes);
     try {
         const V = app.G.TimetableView;
         assert.equal(V._skippedNothingLeftText(1, 'undo', 'Δεν υπάρχει αλλαγή προς αναίρεση'),
-            'Παραλείφθηκε 1 αλλαγή σε ώρα που έγινε διάλειμμα — δεν υπάρχει άλλη αλλαγή προς αναίρεση.');
+            'Παραλείφθηκε 1 αλλαγή σε θέση που δεν είναι πια διαθέσιμη (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα) — δεν υπάρχει άλλη αλλαγή προς αναίρεση.');
         assert.equal(V._skippedNothingLeftText(2, 'redo', ''),
-            'Παραλείφθηκαν 2 αλλαγές σε ώρα που έγινε διάλειμμα — δεν υπάρχει άλλη αλλαγή προς επανάληψη.');
+            'Παραλείφθηκαν 2 αλλαγές σε θέσεις που δεν είναι πια διαθέσιμες (διάλειμμα, μέρα εκτός εβδομάδας ή κώλυμα) — δεν υπάρχει άλλη αλλαγή προς επανάληψη.');
         // Ο server το λέει ήδη → το δικό του κείμενο (escaped), όχι και το δικό μας
         assert.equal(V._skippedNothingLeftText(2, 'undo', 'Παραλείφθηκαν 2 αλλαγές <b>x</b>'),
             'Παραλείφθηκαν 2 αλλαγές &lt;b&gt;x&lt;/b&gt;');

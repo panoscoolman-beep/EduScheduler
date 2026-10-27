@@ -196,6 +196,40 @@ def test_teacher_gap_independent_per_day(db):
     assert m.teacher_gap_total == 2
 
 
+def test_break_between_two_teaching_hours_is_not_a_gap(db):
+    """Οι ώρες μετρούν με τον δείκτη τους στις διδακτικές ώρες (sort_order),
+    όχι με raw period_id — ένα διάλειμμα ανάμεσα δεν είναι κενό."""
+    sol = _add_solution(db)
+    l1, _ = db.test_lessons
+    p = db.test_periods
+    p[1].is_break = True                      # 2η → διάλειμμα: 1η και 3η συνεχόμενες πια
+    db.commit()
+    _add_placed(db, sol, l1, day=0, period=p[0])
+    _add_placed(db, sol, l1, day=0, period=p[2])
+    assert sm.compute(sol.id, db).teacher_gap_total == 0
+    _add_placed(db, sol, l1, day=1, period=p[0])
+    _add_placed(db, sol, l1, day=1, period=p[3])   # 1η, (διάλειμμα), —3η—, 4η → 1 κενό
+    assert sm.compute(sol.id, db).teacher_gap_total == 1
+
+
+def test_late_periods_follow_sort_order_not_ids(db):
+    """«Αργή» = δείκτης > LATE_THRESHOLD_INDEX, ίδιο κατώφλι για κάθε λύση."""
+    sol = _add_solution(db)
+    l1, _ = db.test_lessons
+    p = db.test_periods
+    early = Period(name="0η", short_name="0", start_time="07:00", end_time="08:00",
+                   is_break=False, sort_order=0)          # νεότερο id, αλλά ΠΡΩΤΗ ώρα
+    late = [Period(name=f"{i}η", short_name=str(i), start_time="08:00", end_time="09:00",
+                   is_break=False, sort_order=i) for i in (6, 7)]
+    db.add_all([early, *late])
+    db.commit()
+    _add_placed(db, sol, l1, day=0, period=early)          # δείκτης 0: όχι αργή
+    _add_placed(db, sol, l1, day=1, period=late[1])        # δείκτης 7: αργή
+    _add_placed(db, sol, l1, day=2, period=p[4])           # δείκτης 5: αργή
+    _add_placed(db, sol, l1, day=3, period=p[0])           # δείκτης 1: όχι
+    assert sm.compute(sol.id, db).late_periods_used == 2
+
+
 # ---------------------------------------------------------------------------
 # workload_stddev
 # ---------------------------------------------------------------------------

@@ -95,9 +95,12 @@ def test_unlock_works_after_a_new_teacher_unavailability(env):
     assert (slot.day_of_week, slot.period_id, slot.classroom_id) == (0, env.p[0].id, env.r1.id)
     entry = env.s.query(TimetableSlotHistory).filter_by(slot_id=slot.id).one()
     assert entry.prev_is_locked is True and entry.new_is_locked is False
-    # …και τώρα φεύγει κανονικά στην Παλέτα, και το undo το ξανακλειδώνει.
+    # …και τώρα φεύγει κανονικά στην Παλέτα. Το undo ΔΕΝ την ξαναβάζει σιωπηλά στο
+    # κώλυμα (409 `unavailable_now`)· με ρητό force γίνεται, και το επόμενο undo ξανακλειδώνει.
     assert env.post(f"/api/solver/solutions/{env.sol.id}/slots/{slot.id}/unplace").status_code == 200
-    assert env.post(f"/api/solver/solutions/{env.sol.id}/undo").status_code == 200
+    refused = env.post(f"/api/solver/solutions/{env.sol.id}/undo")
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "unavailable_now"
+    assert env.post(f"/api/solver/solutions/{env.sol.id}/undo?force=true").status_code == 200
     assert env.post(f"/api/solver/solutions/{env.sol.id}/undo").status_code == 200
     env.s.expire_all()
     assert env.s.get(TimetableSlot, env.slot.id).is_locked is True

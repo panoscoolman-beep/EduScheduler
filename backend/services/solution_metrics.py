@@ -17,7 +17,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, joinedload
 
-from backend.models import TimetableSolution, TimetableSlot, Lesson
+from backend.models import TimetableSolution, TimetableSlot, Lesson, Period
 
 
 @dataclass
@@ -72,6 +72,17 @@ def compute(solution_id: int, db: Session) -> Optional[SolutionMetrics]:
     placed = [s for s in slots if not s.is_unplaced]
     unplaced = [s for s in slots if s.is_unplaced]
 
+    # Οι ώρες συγκρίνονται με τον δείκτη τους στις sort_order-ταξινομημένες
+    # διδακτικές ώρες (ΟΧΙ raw period_id) — όπως στο violations_report, ώστε
+    # κενά και «αργές» ώρες να μετρούν το ίδιο σε κάθε πρόγραμμα της σύγκρισης.
+    teaching = (
+        db.query(Period)
+        .filter(Period.is_break == False)  # noqa: E712
+        .order_by(Period.sort_order)
+        .all()
+    )
+    order_index = {p.id: i for i, p in enumerate(teaching)}
+
     return SolutionMetrics(
         solution_id=sol.id,
         name=sol.name,
@@ -79,11 +90,11 @@ def compute(solution_id: int, db: Session) -> Optional[SolutionMetrics]:
         score=sol.score,
         placed_count=len(placed),
         unplaced_count=len(unplaced),
-        teacher_gap_total=_count_teacher_gaps(placed),
+        teacher_gap_total=_count_teacher_gaps(placed, order_index),
         workload_stddev=_workload_stddev(placed),
         avg_days_per_class=_avg_days_per_class(placed),
         max_days_per_class=_max_days_per_class(placed),
-        late_periods_used=_late_periods_used(placed),
+        late_periods_used=_late_periods_used(placed, order_index),
     )
 
 
@@ -146,29 +157,26 @@ def compare(solution_ids: list[int], db: Session) -> dict:
 # Per-metric helpers
 # ---------------------------------------------------------------------------
 
-def _count_teacher_gaps(placed: list[TimetableSlot]) -> int:
+def _count_teacher_gaps(placed: list[TimetableSlot], order_index: dict[int, int]) -> int:
     """Count 1-period gaps in each teacher's daily schedule.
 
-    Walks each (teacher, day) pair, sorts the period IDs, and adds
-    1 to the gap count for every period that's missing between two
-    occupied ones (a gap of N periods counts as N).
+    Walks each (teacher, day) pair over the teaching-period indices
+    (`order_index`: period_id → θέση στις sort_order-ταξινομημένες διδακτικές
+    ώρες) and adds 1 for every index missing between two occupied ones
+    (a gap of N periods counts as N). Διαλείμματα δεν είναι ώρες, άρα δεν
+    μετρούν ως κενό.
     """
-    by_teacher_day: dict[tuple[int, int], list[int]] = defaultdict(list)
+    by_teacher_day: dict[tuple[int, int], set[int]] = defaultdict(set)
     for s in placed:
         if s.lesson and s.lesson.teacher_id is not None and s.day_of_week is not None:
-            by_teacher_day[(s.lesson.teacher_id, s.day_of_week)].append(s.period_id)
+            idx = order_index.get(s.period_id)
+            if idx is not None:
+                by_teacher_day[(s.lesson.teacher_id, s.day_of_week)].add(idx)
 
     total_gaps = 0
-    for periods in by_teacher_day.values():
-        if len(periods) < 2:
-            continue
-        sorted_p = sorted(periods)
-        for i in range(len(sorted_p) - 1):
-            # period_id may not be sequential; treat any non-adjacent
-            # pair as a gap of (delta - 1) periods.
-            delta = sorted_p[i + 1] - sorted_p[i]
-            if delta > 1:
-                total_gaps += delta - 1
+    for indices in by_teacher_day.values():
+        lo, hi = min(indices), max(indices)
+        total_gaps += sum(1 for i in range(lo + 1, hi) if i not in indices)
     return total_gaps
 
 
@@ -203,19 +211,11 @@ def _max_days_per_class(placed: list[TimetableSlot]) -> int:
     return max(len(d) for d in by_class_days.values())
 
 
-def _late_periods_used(placed: list[TimetableSlot]) -> int:
-    """Count slots placed at a period_id higher than the threshold.
-
-    Note: period_id is the DB primary key, not the period's index.
-    For a meaningful comparison across solutions we'd need the
-    teaching-period ordinals. Approximation: just count slots whose
-    period_id is among the top half. Caller can override the
-    threshold if needed.
-    """
-    if not placed:
-        return 0
-    ids = sorted({s.period_id for s in placed if s.period_id is not None})
-    if not ids:
-        return 0
-    threshold = ids[len(ids) // 2]
-    return sum(1 for s in placed if (s.period_id or 0) > threshold)
+def _late_periods_used(placed: list[TimetableSlot], order_index: dict[int, int]) -> int:
+    """Count slots placed at a teaching-period index past LATE_THRESHOLD_INDEX
+    (ίδιο σταθερό κατώφλι για κάθε λύση — όπως στο violations_report)."""
+    threshold = SolutionMetrics.LATE_THRESHOLD_INDEX
+    return sum(
+        1 for s in placed
+        if (idx := order_index.get(s.period_id)) is not None and idx > threshold
+    )

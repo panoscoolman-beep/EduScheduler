@@ -9,6 +9,8 @@ SQLite με PRAGMA foreign_keys=ON, ώστε τα FK να συμπεριφέρο
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -19,7 +21,8 @@ from sqlalchemy.pool import StaticPool
 from backend.database import Base, get_db
 from backend.models import (
     Classroom, Lesson, Period, SchoolClass, SchoolSettings, Student, StudentClassEnrollment,
-    Subject, Teacher, Term, TimetableSlot, TimetableSlotHistory, TimetableSolution,
+    Subject, Teacher, TeacherAvailability, Term, TimetableSlot, TimetableSlotHistory,
+    TimetableSolution,
 )
 from backend.routers import classrooms as classrooms_router
 from backend.routers import lessons as lessons_router
@@ -425,6 +428,215 @@ def test_time_shift_keeps_history_positions_on_break_hours(env):
     assert (entry.prev_day_of_week, entry.prev_period_id, entry.prev_classroom_id,
             entry.prev_is_unplaced) == (0, env.p[2].id, env.r1.id, False)
     assert (entry.new_period_id, entry.new_is_unplaced) == (env.p[4].id, False)
+
+
+# ─── ES-1: η θέση υπάρχει αλλά ΤΩΡΑ δεν δέχεται την κάρτα (κώλυμα / όριο ωρών /
+# αρχειοθετημένη αίθουσα) ή η μέρα βγήκε από την εβδομάδα — ίδιοι έλεγχοι με το drag&drop.
+
+def _undo_with(env, flag):
+    return env.post(f"/api/solver/solutions/{env.sol.id}/undo?{flag}=true")
+
+
+def _teacher_unavailable(env, teacher, day, period):
+    env.s.add(TeacherAvailability(term_id=env.term.id, teacher_id=teacher.id, day_of_week=day,
+                                  period_id=period.id, status="unavailable"))
+    env.s.commit()
+
+
+def test_undo_onto_a_new_teacher_unavailability_is_refused_and_skippable(env):
+    k = _slot(env, _lesson(env, env.t2, env.c2, env.subj_f), 3, env.p[0], env.r2)
+    _move(env, k, 3, env.p[1])                                   # παλαιότερη, εφαρμόσιμη
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    _move(env, a, 0, env.p[1])
+    _teacher_unavailable(env, env.t1, 0, env.p[0])               # η παλιά θέση έχει τώρα κώλυμα
+    before = _summary(env)
+    res = _undo(env)
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "unavailable_now" and detail["requires_force"] is True
+    assert "Τ1" in detail["reason"] and "κώλυμα" in detail["reason"]
+    assert "Δεν άλλαξε τίποτα" in detail["message"]
+    assert _pos(env, a)[:2] == (0, env.p[1].id) and _summary(env) == before   # ανέγγιχτα
+
+    res = _undo_with(env, "skip_break")                          # παράλειψη + η παλαιότερη
+    assert res.status_code == 200, res.text
+    assert res.json()["skipped_break"] == 1 and res.json()["slot_id"] == k.id
+    assert _pos(env, a)[:2] == (0, env.p[1].id)                  # δεν μπήκε στο κώλυμα
+    assert _pos(env, k)[:2] == (3, env.p[0].id)
+    assert _summary(env) == {"can_undo": 0, "can_redo": 2, "total": 2}
+
+
+def test_undo_with_force_applies_the_now_unavailable_position(env):
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    _move(env, a, 0, env.p[1])
+    _teacher_unavailable(env, env.t1, 0, env.p[0])
+    assert _undo(env).status_code == 409
+    res = _undo_with(env, "force")
+    assert res.status_code == 200, res.text
+    assert _pos(env, a) == (0, env.p[0].id, env.r1.id, False)
+    assert _redo(env).status_code == 200                         # η επανάληψη πάει σε καθαρή θέση
+    assert _pos(env, a)[:2] == (0, env.p[1].id)
+
+
+def test_undo_that_would_exceed_the_teacher_day_limit_is_refused(env):
+    env.t1.max_periods_per_day = 1
+    env.s.commit()
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    _move(env, a, 1, env.p[0])                                   # Δευ → Τρι
+    _slot(env, _lesson(env, env.t1, env.c2, env.subj_f), 0, env.p[2], env.r2)   # η Δευτέρα γέμισε
+    res = _undo(env)
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "unavailable_now"
+    assert "όριο 1/μέρα" in res.json()["detail"]["reason"]
+    assert _pos(env, a)[:2] == (1, env.p[0].id)
+
+
+def test_undo_into_an_archived_room_is_refused_unless_forced(env):
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r3)
+    _move(env, a, 0, env.p[1], env.r1)                           # R3 → R1
+    env.r3.archived_at = datetime(2026, 10, 1)
+    env.s.commit()
+    res = _undo(env)
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "unavailable_now"
+    assert "«R3» είναι αρχειοθετημένη" in res.json()["detail"]["reason"]
+    assert _pos(env, a) == (0, env.p[1].id, env.r1.id, False)
+    assert _undo_with(env, "force").status_code == 200
+    assert _pos(env, a) == (0, env.p[0].id, env.r3.id, False)
+
+
+def test_undo_onto_a_day_now_outside_the_week_behaves_like_a_break_hour(env):
+    settings = env.s.query(SchoolSettings).first()
+    settings.days_per_week = 6
+    env.s.commit()
+    k = _slot(env, _lesson(env, env.t2, env.c2, env.subj_f), 3, env.p[0], env.r2)
+    _move(env, k, 3, env.p[1])                                   # παλαιότερη
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 5, env.p[0], env.r1)   # Σάββατο
+    _move(env, a, 0, env.p[0])
+    settings.days_per_week = 5                                   # το Σάββατο βγήκε από τις Ρυθμίσεις
+    env.s.commit()
+    before = _summary(env)
+    res = _undo(env)
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["code"] == "day_out_of_week" and detail["requires_force"] is True
+    assert detail["day"] == "Σάββατο" and "5 ημέρες" in detail["message"]
+    assert _pos(env, a)[:2] == (0, env.p[0].id) and _summary(env) == before
+    assert _undo_with(env, "force").status_code == 409           # το force δεν «ξαναφτιάχνει» Σάββατο
+
+    res = _undo_with(env, "skip_break")                          # ίδιος μηχανισμός με το διάλειμμα
+    assert res.status_code == 200, res.text
+    assert res.json()["skipped_break"] == 1
+    assert _pos(env, a)[:2] == (0, env.p[0].id)                  # δεν πήγε Σάββατο
+    assert _pos(env, k)[:2] == (3, env.p[0].id)                  # αναιρέθηκε η παλαιότερη
+
+
+def test_undo_to_refuses_an_unavailable_step_all_or_nothing(env):
+    k = _slot(env, _lesson(env, env.t2, env.c2, env.subj_f), 3, env.p[0], env.r2)
+    _move(env, k, 3, env.p[1])
+    target = env.s.query(TimetableSlotHistory).order_by(TimetableSlotHistory.id).first()
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    _move(env, a, 0, env.p[1])
+    _teacher_unavailable(env, env.t1, 0, env.p[0])
+    before = _summary(env)
+    url = f"/api/solver/solutions/{env.sol.id}/history/undo-to/{target.id}"
+    res = env.post(url)
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "unavailable_now"
+    assert _summary(env) == before and _pos(env, k)[:2] == (3, env.p[1].id)
+    res = env.post(url + "?skip_break=true")
+    assert res.status_code == 200 and (res.json()["undone"], res.json()["skipped_break"]) == (1, 1)
+    assert _pos(env, a)[:2] == (0, env.p[1].id) and _pos(env, k)[:2] == (3, env.p[0].id)
+
+
+def test_undo_of_a_swap_checks_both_halves(env):
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    b = _slot(env, _lesson(env, env.t2, env.c1, env.subj_f), 0, env.p[1], env.r1)
+    assert env.post(f"/api/solver/solutions/{env.sol.id}/slots/swap",
+                    json={"slot_a_id": a.id, "slot_b_id": b.id}).status_code == 200
+    _teacher_unavailable(env, env.t2, 0, env.p[1])               # η παλιά θέση της b (άλλο μισό)
+    res = _undo(env)
+    assert res.status_code == 409 and res.json()["detail"]["code"] == "unavailable_now"
+    assert "Τ2" in res.json()["detail"]["reason"]
+    assert _pos(env, a)[:2] == (0, env.p[1].id) and _pos(env, b)[:2] == (0, env.p[0].id)
+    assert _clashes(env) == []
+    assert _undo_with(env, "force").status_code == 200           # και τα δύο μισά μαζί
+    assert _pos(env, a)[:2] == (0, env.p[0].id) and _pos(env, b)[:2] == (0, env.p[1].id)
+    assert _clashes(env) == []
+
+
+
+def test_skipping_one_half_of_a_swap_skips_the_whole_swap(env):
+    """«Παράλειψη» σε μισό swap με κώλυμα: παραλείπονται ΚΑΙ τα δύο μισά (αλλιώς το άλλο
+    μισό έβρισκε την κάρτα που δεν μετακινήθηκε → διπλοκράτηση → το undo κολλούσε)."""
+    k = _slot(env, _lesson(env, env.t2, env.c2, env.subj_f), 3, env.p[0], env.r2)
+    _move(env, k, 3, env.p[1])                                   # παλαιότερη, εφαρμόσιμη
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 1, env.p[0], env.r1)
+    b = _slot(env, _lesson(env, env.t1, env.c1, env.subj_f), 1, env.p[1], env.r1)
+    assert env.post(f"/api/solver/solutions/{env.sol.id}/slots/swap",
+                    json={"slot_a_id": a.id, "slot_b_id": b.id}).status_code == 200
+    _teacher_unavailable(env, env.t1, 1, env.p[0])               # η παλιά θέση της a
+    assert _undo(env).json()["detail"]["code"] == "unavailable_now"
+    res = _undo_with(env, "skip_break")
+    assert res.status_code == 200, res.text
+    assert res.json()["skipped_break"] == 2 and res.json()["slot_id"] == k.id
+    assert _pos(env, a)[:2] == (1, env.p[1].id) and _pos(env, b)[:2] == (1, env.p[0].id)   # ανέγγιχτα
+    assert _pos(env, k)[:2] == (3, env.p[0].id)
+    assert _clashes(env) == []
+    assert _summary(env)["can_undo"] == 0
+
+
+def test_undo_to_skips_a_whole_swap_with_an_unavailable_half(env):
+    k = _slot(env, _lesson(env, env.t2, env.c2, env.subj_f), 3, env.p[0], env.r2)
+    _move(env, k, 3, env.p[1])
+    target = env.s.query(TimetableSlotHistory).order_by(TimetableSlotHistory.id).first()
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 1, env.p[0], env.r1)
+    b = _slot(env, _lesson(env, env.t1, env.c1, env.subj_f), 1, env.p[1], env.r1)
+    assert env.post(f"/api/solver/solutions/{env.sol.id}/slots/swap",
+                    json={"slot_a_id": a.id, "slot_b_id": b.id}).status_code == 200
+    _teacher_unavailable(env, env.t1, 1, env.p[1])               # η παλιά θέση της b (το άλλο μισό)
+    res = env.post(f"/api/solver/solutions/{env.sol.id}/history/undo-to/{target.id}?skip_break=true")
+    assert res.status_code == 200, res.text
+    assert (res.json()["undone"], res.json()["skipped_break"]) == (1, 2)
+    assert _pos(env, a)[:2] == (1, env.p[1].id) and _pos(env, k)[:2] == (3, env.p[0].id)
+    assert _clashes(env) == []
+
+# ─── ES-5: το 🕘 Ιστορικό λέει τι έγινε (Τοποθέτηση / Κλείδωμα / Ξεκλείδωμα / Μετακίνηση) ──
+
+def _last_operation(env):
+    env.s.expire_all()
+    row = env.s.query(TimetableSlotHistory).order_by(TimetableSlotHistory.id.desc()).first()
+    items = env.get(f"/api/solver/solutions/{env.sol.id}/history").json()["items"]
+    return row.operation, items[0]["operation_label"]
+
+
+def _put(env, slot, **body):
+    res = env.put(f"/api/solver/solutions/{env.sol.id}/slots/{slot.id}", json=body)
+    assert res.status_code == 200, res.text
+
+
+def test_history_records_a_placement_from_the_palette(env):
+    slot = TimetableSlot(solution_id=env.sol.id, lesson_id=_lesson(env, env.t1, env.c1, env.subj_m).id,
+                         is_unplaced=True)
+    env.s.add(slot)
+    env.s.commit()
+    _put(env, slot, day_of_week=0, period_id=env.p[0].id)
+    assert _last_operation(env) == ("place", "Τοποθέτηση")
+
+
+def test_history_records_a_lock(env):
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    _put(env, a, day_of_week=0, period_id=env.p[0].id, classroom_id=env.r1.id, is_locked=True)
+    assert _last_operation(env) == ("lock", "Κλείδωμα")
+
+
+def test_history_records_an_unlock(env):
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1, locked=True)
+    _put(env, a, day_of_week=0, period_id=env.p[0].id, classroom_id=env.r1.id, is_locked=False)
+    assert _last_operation(env) == ("unlock", "Ξεκλείδωμα")
+
+
+def test_history_records_a_move_even_with_a_lock_change(env):
+    a = _slot(env, _lesson(env, env.t1, env.c1, env.subj_m), 0, env.p[0], env.r1)
+    _put(env, a, day_of_week=0, period_id=env.p[1].id, is_locked=True)
+    assert _last_operation(env) == ("move", "Μετακίνηση")
 
 
 def test_database_error_during_undo_is_409_and_rolls_back(env, monkeypatch):

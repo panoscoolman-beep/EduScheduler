@@ -299,46 +299,21 @@ def resolve_and_validate_target_room(
             )
 
     # 4. Teacher availability (scoped στο σενάριο της λύσης)
-    if slot.lesson.teacher_id:
-        teacher_unav_q = (
-            db.query(TeacherAvailability)
-            .filter(
-                TeacherAvailability.teacher_id == slot.lesson.teacher_id,
-                TeacherAvailability.day_of_week == data.day_of_week,
-                TeacherAvailability.period_id == data.period_id,
-                TeacherAvailability.status == "unavailable",
-            )
+    if teacher_unavailable_at(db, solution_term_id, slot.lesson.teacher_id,
+                              data.day_of_week, data.period_id):
+        raise blocked_by(
+            pc.TEACHER_UNAVAILABLE,
+            f"Ο καθηγητής {me['teacher'] or ''} έχει δηλώσει κώλυμα "
+            f"(Μη Διαθέσιμος) {where}.",
+            teacher_id=slot.lesson.teacher_id,
         )
-        if solution_term_id is not None:
-            teacher_unav_q = teacher_unav_q.filter(
-                TeacherAvailability.term_id == solution_term_id
-            )
-        if teacher_unav_q.first():
-            raise blocked_by(
-                pc.TEACHER_UNAVAILABLE,
-                f"Ο καθηγητής {me['teacher'] or ''} έχει δηλώσει κώλυμα "
-                f"(Μη Διαθέσιμος) {where}.",
-                teacher_id=slot.lesson.teacher_id,
-            )
 
     # 5. Student availability
     # Λίστα της ΚΑΡΤΑΣ (τμήμα + προσθήκες − εξαιρέσεις) — βλ. services/lesson_roster.py
     enrolled_student_ids: list[int] = sorted(lesson_roster.students_of(db, slot.lesson))
     if enrolled_student_ids:
-        student_unav_q = (
-            db.query(StudentAvailability.student_id)
-            .filter(
-                StudentAvailability.student_id.in_(enrolled_student_ids),
-                StudentAvailability.day_of_week == data.day_of_week,
-                StudentAvailability.period_id == data.period_id,
-                StudentAvailability.status == "unavailable",
-            )
-        )
-        if solution_term_id is not None:
-            student_unav_q = student_unav_q.filter(
-                StudentAvailability.term_id == solution_term_id
-            )
-        unav_ids = [sid for (sid,) in student_unav_q.all()]
+        unav_ids = unavailable_students_at(db, solution_term_id, enrolled_student_ids,
+                                           data.day_of_week, data.period_id)
         if unav_ids:
             names = _student_names(db, unav_ids)
             many = len(names) > 1
@@ -379,6 +354,46 @@ def resolve_and_validate_target_room(
             )
 
     return target_room
+
+
+def teacher_unavailable_at(db: Session, term_id: int | None, teacher_id: int | None,
+                           day: int, period_id: int) -> bool:
+    """Έλεγχος 4: έχει ο καθηγητής δηλώσει κώλυμα στο κελί (scoped στο σενάριο);
+    Κοινό με το undo/redo (slot_history)."""
+    if not teacher_id:
+        return False
+    q = (
+        db.query(TeacherAvailability)
+        .filter(
+            TeacherAvailability.teacher_id == teacher_id,
+            TeacherAvailability.day_of_week == day,
+            TeacherAvailability.period_id == period_id,
+            TeacherAvailability.status == "unavailable",
+        )
+    )
+    if term_id is not None:
+        q = q.filter(TeacherAvailability.term_id == term_id)
+    return q.first() is not None
+
+
+def unavailable_students_at(db: Session, term_id: int | None, student_ids: list[int],
+                            day: int, period_id: int) -> list[int]:
+    """Έλεγχος 5: ποιοι από τους `student_ids` έχουν κώλυμα στο κελί (scoped στο
+    σενάριο). Κοινό με το undo/redo (slot_history)."""
+    if not student_ids:
+        return []
+    q = (
+        db.query(StudentAvailability.student_id)
+        .filter(
+            StudentAvailability.student_id.in_(student_ids),
+            StudentAvailability.day_of_week == day,
+            StudentAvailability.period_id == period_id,
+            StudentAvailability.status == "unavailable",
+        )
+    )
+    if term_id is not None:
+        q = q.filter(StudentAvailability.term_id == term_id)
+    return [sid for (sid,) in q.all()]
 
 
 def teacher_day_limit_hit(db: Session, slot: TimetableSlot, day: int,

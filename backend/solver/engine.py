@@ -263,10 +263,18 @@ class TimetableSolver:
             rooms = self._get_available_rooms(lesson)
             if not rooms:
                 if lesson.classroom_id:
-                    reason = (
-                        f"αίθουσα id={lesson.classroom_id} δεν υπάρχει "
-                        "(διαγράφηκε χωρίς να ενημερωθεί το lesson)"
-                    )
+                    # self.classrooms δεν έχει τις αρχειοθετημένες — αυτές ΔΕΝ «διαγράφηκαν».
+                    pinned = self.db.query(Classroom).filter(Classroom.id == lesson.classroom_id).first()
+                    if pinned is not None and pinned.archived_at is not None:
+                        reason = (
+                            f"η αίθουσα «{pinned.name}» είναι αρχειοθετημένη — "
+                            "επανέφερέ την ή άλλαξε την αίθουσα της κάρτας"
+                        )
+                    else:
+                        reason = (
+                            f"αίθουσα id={lesson.classroom_id} δεν υπάρχει "
+                            "(διαγράφηκε χωρίς να ενημερωθεί το lesson)"
+                        )
                 else:
                     sub = lesson.subject
                     rt = sub.special_room_type if sub else "?"
@@ -839,7 +847,9 @@ class TimetableSolver:
 
         If a locked cell points at an x-var that doesn't exist (e.g.
         because the lesson now has a different classroom_id constraint),
-        we silently skip it rather than make the model infeasible.
+        we skip it rather than make the model infeasible — but ΟΧΙ σιωπηλά:
+        μια ονομαστική προειδοποίηση φτάνει στον χρήστη (/solver/status),
+        γιατί η ώρα θα μετακινηθεί και θα χάσει το 🔒 της.
         Genuinely impossible combinations will surface as INFEASIBLE
         from the regular constraint network.
         """
@@ -861,10 +871,28 @@ class TimetableSolver:
                 logger.warning(
                     "Locked slot %s has no matching x-var, skipping", key
                 )
+                self._warnings.append(self._skipped_lock_warning(*key))
                 continue
             self.model.Add(x_var == 1)
             applied += 1
         logger.info("Applied %d locked assignments", applied)
+
+    def _skipped_lock_warning(self, lesson_id: int, day: int, period_id: int, room_id: int) -> str:
+        """«η κλειδωμένη ώρα Φυσική (Γ1) Δευτέρα 8η δεν κρατήθηκε: η ώρα είναι διάλειμμα»."""
+        lesson = next((l for l in self.lessons if l.id == lesson_id), None)
+        period = self.db.query(Period).filter(Period.id == period_id).first()
+        if lesson is None:
+            why = "η κάρτα δεν υπάρχει πια σε αυτό το σενάριο"
+        elif not 0 <= day < self.days_per_week:
+            why = "η μέρα είναι εκτός εβδομάδας"
+        elif period is None:
+            why = "η ώρα δεν υπάρχει πια"
+        elif period.is_break:
+            why = "η ώρα είναι διάλειμμα"
+        else:
+            why = "η αίθουσα δεν είναι πια διαθέσιμη για την κάρτα"
+        return (f"η κλειδωμένη ώρα {self._short_label(lesson)} {pc.cell_label(day, period)} "
+                f"δεν κρατήθηκε: {why}")
 
     def _apply_warm_start_hints(self):
         """Feed the CP-SAT solver hints from a previous solution.

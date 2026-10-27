@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -135,6 +136,34 @@ def test_teacher_double_booked_in_kept_hours_is_kept():
     b_hours = [x for x in res.slots if x["lesson_id"] == b.id]
     assert len(b_hours) == 2
     assert any("ίδιος καθηγητής" in w for w in res.stats["warnings"])
+
+
+def test_locked_hour_on_a_break_period_is_reported_not_dropped_silently():
+    """ES-6: κλειδωμένη ώρα που ο solver δεν μπορεί να κρατήσει (η ώρα έγινε
+    διάλειμμα) → ονομαστική προειδοποίηση στα warnings, όχι σιωπηλή μετακίνηση."""
+    env = _env()
+    les = _card(env, "Γ1")
+    env.periods[1].is_break = True                                   # η «2η» έγινε διάλειμμα
+    env.s.commit()
+    locked = [_at(les, 0, env.periods[1], env.rooms[0])]
+    res = TimetableSolver(env.s, max_time_seconds=10, mode="permissive", locked_assignments=locked,
+                          term_id=1).solve()
+    assert res.status in ("optimal", "feasible"), res.message
+    assert any("η κλειδωμένη ώρα Φυσική (Γ1) Δευτέρα 2η" in w and "δεν κρατήθηκε: η ώρα είναι διάλειμμα" in w
+               for w in res.stats["warnings"]), res.stats.get("warnings")
+
+
+def test_pinned_archived_room_is_reported_as_archived_not_deleted():
+    """ES-12: η καρφωμένη αίθουσα της κάρτας είναι αρχειοθετημένη — δεν «διαγράφηκε»."""
+    env = _env()
+    les = _card(env, "Γ1")
+    les.classroom_id = env.rooms[2].id
+    env.rooms[2].archived_at = datetime(2026, 10, 1)
+    env.s.commit()
+    res = TimetableSolver(env.s, max_time_seconds=10, mode="strict", term_id=1).solve()
+    assert res.status == "error"
+    assert "η αίθουσα «Α2» είναι αρχειοθετημένη — επανέφερέ την ή άλλαξε την αίθουσα της κάρτας" in res.message
+    assert "διαγράφηκε" not in res.message
 
 
 def test_without_overlap_the_model_is_exactly_as_before(monkeypatch):

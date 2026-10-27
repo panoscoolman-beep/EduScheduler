@@ -7,10 +7,7 @@
 
 Οι ώρες συγκρίνονται με βάση Period.sort_order (ΟΧΙ τα ids) και «αργή»
 ώρα = δείκτης > LATE_THRESHOLD_INDEX στα sort_order-ταξινομημένα teaching
-periods. ΠΡΟΣΟΧΗ: το solution_metrics (καρτέλα «Σύγκριση») χρησιμοποιεί
-ΠΡΟΣΕΓΓΙΣΤΙΚΟΥΣ υπολογισμούς (raw period_ids / διάμεσο) — τα νούμερά του
-μπορεί να διαφέρουν από εδώ· αυτή η αναφορά είναι η πιο ακριβής των δύο.
-TODO: ευθυγράμμιση του solution_metrics με αυτούς τους helpers.
+periods — ίδιος υπολογισμός με το solution_metrics (καρτέλα «Σύγκριση»).
 """
 from __future__ import annotations
 

@@ -252,6 +252,32 @@ def test_emails_for_existing_latest_publication_only(env, monkeypatch):
     assert env.post("/api/publications/999/emails", json={"teacher_ids": [1]}).status_code == 404
 
 
+def test_resending_skips_teachers_who_already_got_it_unless_asked(env, monkeypatch):
+    sent = []
+    monkeypatch.setattr(pub_router, "_send_emails_job",
+                        lambda pid: svc.send_emails(env.s, pid, lambda p: (sent.append(p), (True, None))[1]))
+    pid = env.post(f"/api/publications/solutions/{env.sol.id}",
+                   json={"email_teacher_ids": [env.teacher_id]}).json()["id"]
+    first = env.get(f"/api/publications/{pid}").json()["messages"][0]["email"]
+    assert first["status"] == "sent" and len(sent) == 1
+
+    # Χωρίς resend: ο «sent» δεν αγγίζεται (ούτε η ώρα της πρώτης αποστολής χάνεται).
+    again = env.post(f"/api/publications/{pid}/emails", json={"teacher_ids": [env.teacher_id]})
+    assert again.status_code == 409 and again.json()["detail"]["code"] == "already_sent"
+    assert env.get(f"/api/publications/{pid}").json()["messages"][0]["email"] == first
+    assert len(sent) == 1
+
+    res = env.post(f"/api/publications/{pid}/emails",
+                   json={"teacher_ids": [env.teacher_id], "resend": True})
+    assert res.status_code == 200, res.text
+    queued = res.json()["messages"][0]["email"]                  # κατάσταση ανά καθηγητή στην απάντηση
+    assert queued["status"] == "pending" and queued["previous"] == {
+        "to": "g@example.com", "status": "sent", "at": first["at"]}
+    assert len(sent) == 2
+    mail = env.get(f"/api/publications/{pid}").json()["messages"][0]["email"]
+    assert mail["status"] == "sent" and mail["previous"]["at"] == first["at"]
+
+
 def test_emails_need_someone_with_an_address(env, monkeypatch):
     monkeypatch.setattr(pub_router, "_send_emails_job", lambda pid: None)
     pub = env.post(f"/api/publications/solutions/{env.sol.id}", json={}).json()
@@ -320,6 +346,28 @@ def test_renamed_or_recreated_students_and_groups_are_not_changes():
     ch = svc.teacher_changes(prev, other)[1]
     assert ch["added"] == [] and ch["removed"] == [] and ch["moved"] == []
     assert svc.change_lines(ch) == ["👥 ΜΑΘ (Β2): Δευτέρα 16:00–17:00 — μαθητές: + Νίκος Π. · − Γιώργος Χ."]
+
+
+def test_renamed_room_or_subject_is_not_a_change():
+    def _er(room, subject, room_id=5, subject_id=8):
+        return dict(_ec(1, 2, 0, "16:00", "17:00", "Β2", ["Γιώργος Χ."], [3], room=room, subject=subject),
+                    room_id=room_id, subject_id=subject_id)
+
+    prev = [_er("Αίθ. Α", "ΦΥΣΙΚΗ")]
+    assert svc.teacher_changes(prev, [_er("Αίθ. Α1", "ΦΥΣΙΚΗ")]) == {}      # μετονομασία αίθουσας
+    assert svc.teacher_changes(prev, [_er("Αίθ. Α", "ΦΥΣΙΚΗ Β")]) == {}     # μετονομασία μαθήματος
+    # Άλλη αίθουσα με το ίδιο όνομα / άλλο μάθημα: αλλαγή, όπως πριν.
+    ch = svc.teacher_changes(prev, [_er("Αίθ. Β", "ΦΥΣΙΚΗ", room_id=6)])[1]
+    assert svc.change_lines(ch) == ["ΦΥΣΙΚΗ (Β2): Δευτέρα 16:00–17:00 — αίθουσα Αίθ. Α → Αίθ. Β"]
+    ch = svc.teacher_changes(prev, [_er("Αίθ. Α", "ΧΗΜΕΙΑ", subject_id=9)])[1]
+    assert [e["label"] for e in ch["added"]] == ["ΧΗΜΕΙΑ (Β2)"]
+    assert [e["label"] for e in ch["removed"]] == ["ΦΥΣΙΚΗ (Β2)"]
+    # Παλιό στιγμιότυπο χωρίς ids: σύγκριση με τα ονόματα, όπως πριν.
+    old = [dict(e) for e in prev]
+    for e in old:
+        del e["room_id"], e["subject_id"]
+    assert svc.teacher_changes(old, [_er("Αίθ. Α", "ΦΥΣΙΚΗ")]) == {}
+    assert svc.teacher_changes(old, [_er("Αίθ. Α1", "ΦΥΣΙΚΗ")]) != {}
 
 
 def test_previous_snapshot_without_class_ids_still_compares_as_before_plus_names():

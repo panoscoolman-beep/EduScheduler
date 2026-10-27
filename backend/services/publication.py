@@ -82,10 +82,12 @@ def snapshot_entries(db: Session, solution_id: int) -> list[dict]:
             "klass": klass,
             "students": roster_names.get(lesson.id, []),
             "room_short": room_shorts.get(s.classroom_id, "") if s.classroom_id else "",
-            # Ταυτότητα τμήματος/μαθητών για το «τι άλλαξε» (όχι ονόματα: η
-            # μετονομασία δεν είναι αλλαγή). Παλιά στιγμιότυπα δεν τα έχουν.
+            # Ταυτότητα τμήματος/μαθητών/αίθουσας/μαθήματος για το «τι άλλαξε»
+            # (όχι ονόματα: η μετονομασία δεν είναι αλλαγή). Παλιά στιγμιότυπα δεν τα έχουν.
             "class_id": lesson.class_id,
             "student_ids": sorted(roster_ids.get(lesson.id, ())),
+            "room_id": s.classroom_id,
+            "subject_id": lesson.subject_id,
         })
     return sorted(out, key=_entry_order)
 
@@ -94,9 +96,11 @@ def _entry_order(e: dict):
     return (e["day"], e["start"].zfill(5), e["label"])
 
 
-def _position(e: dict):
-    """Θέση σύγκρισης· η αλλαγή αίθουσας μετρά ως μετακίνηση."""
-    return (e["day"], e["start"].zfill(5), e["period_id"], e["room"])
+def _position(e: dict, by_room_id: bool = False):
+    """Θέση σύγκρισης· η αλλαγή αίθουσας μετρά ως μετακίνηση. Με by_room_id η
+    αίθουσα συγκρίνεται με το id της (η μετονομασία της δεν είναι αλλαγή)."""
+    return (e["day"], e["start"].zfill(5), e["period_id"],
+            e.get("room_id") if by_room_id else e["room"])
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +119,8 @@ def teacher_changes(previous: list[dict], current: list[dict]) -> dict[int, dict
 
     Παλιά στιγμιότυπα (πριν το class_id): ταυτότητα (θέση, μάθημα) και
     ζευγάρωμα ανά μάθημα, όπως πριν· οι μαθητές συγκρίνονται με τα ονόματα.
+    Αίθουσα και μάθημα: με το id τους όταν το έχουν και οι δύο πλευρές
+    (room_id / subject_id), αλλιώς με το όνομα — η μετονομασία δεν είναι αλλαγή.
     """
     def by_teacher(entries):
         grouped: dict[int, list[dict]] = defaultdict(list)
@@ -122,10 +128,13 @@ def teacher_changes(previous: list[dict], current: list[dict]) -> dict[int, dict
             grouped[e["teacher_id"]].append(e)
         return grouped
 
-    by_class = all("class_id" in e for e in previous) and all("class_id" in e for e in current)
+    def both_have(field):
+        return all(field in e for e in previous) and all(field in e for e in current)
+
+    by_class, by_room, by_subject = both_have("class_id"), both_have("room_id"), both_have("subject_id")
 
     def key(e):
-        base = (_position(e), _subject_of(e))
+        base = (_position(e, by_room), e["subject_id"] if by_subject else _subject_of(e))
         return base + (e.get("class_id") or 0,) if by_class else base
 
     def group(k):                      # ζευγάρωμα μετακινήσεων
@@ -633,10 +642,13 @@ def send_emails(db: Session, publication_id: int, sender) -> dict:
     return _email_counts(messages)
 
 
-def request_emails(db: Session, publication_id: int, teacher_ids: list[int]) -> SolutionPublication:
+def request_emails(db: Session, publication_id: int, teacher_ids: list[int],
+                   resend: bool = False) -> SolutionPublication:
     """✉️ Email για ΥΠΑΡΧΟΥΣΑ δημοσίευση (π.χ. δημοσιεύτηκε χωρίς email, ή
     ξαναστείλιμο σε όσους απέτυχαν). Μόνο η πιο πρόσφατη του σεναρίου — μια
-    παλιότερη θα έστελνε ξεπερασμένο πρόγραμμα. Χωρίς commit."""
+    παλιότερη θα έστελνε ξεπερασμένο πρόγραμμα. Όσοι το έχουν ήδη λάβει
+    («sent») μένουν ως έχουν, εκτός αν `resend` — τότε ξαναμπαίνουν στην ουρά
+    κρατώντας την πρώτη αποστολή στο `previous`. Χωρίς commit."""
     pub = db.query(SolutionPublication).filter(SolutionPublication.id == publication_id).first()
     if pub is None:
         raise LookupError("Η δημοσίευση δεν βρέθηκε.")
@@ -649,13 +661,22 @@ def request_emails(db: Session, publication_id: int, teacher_ids: list[int]) -> 
     contacts = {t.id: (t.email or "").strip() for t in db.query(Teacher).all()}
     wanted = set(teacher_ids)
     messages = _messages(pub)
-    queued = 0
+    queued = already_sent = 0
     for m in messages:
         if m["teacher_id"] not in wanted:
             continue
+        mail = m.get("email") or {}
+        if mail.get("status") == "sent" and not resend:
+            already_sent += 1
+            continue
         to = contacts.get(m["teacher_id"], "")
         m["email"] = {"to": to, "status": "pending"} if to else {"to": "", "status": "no_email"}
+        if mail.get("status") == "sent":
+            m["email"]["previous"] = {"to": mail.get("to"), "status": "sent", "at": mail.get("at")}
         queued += bool(to)
+    if not queued and already_sent:
+        raise PublishError("already_sent", "Οι επιλεγμένοι έχουν ήδη λάβει αυτό το email — "
+                           "για να ξανασταλεί, ζήτησέ το ρητά (resend).")
     if not queued:
         raise PublishError("no_recipients", "Κανένας από τους επιλεγμένους δεν έχει email.")
     pub.messages_json = json.dumps(messages, ensure_ascii=False)

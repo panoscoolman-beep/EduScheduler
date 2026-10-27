@@ -22,12 +22,34 @@ const PublishModal = {
         return (teachers || []).filter(t => t.changed && t.email).map(t => t.teacher_id);
     },
 
-    /** Γρήγορες επιλογές: 'changed' | 'all' | 'none'. */
-    selectionFor(teachers, mode) {
+    /** Γρήγορες επιλογές: 'changed' | 'all' | 'none' | 'missing' (επαναποστολή: όσοι δεν το πήραν). */
+    selectionFor(teachers, mode, emails) {
         const withEmail = (teachers || []).filter(t => t.email);
         if (mode === 'all') return withEmail.map(t => t.teacher_id);
         if (mode === 'none') return [];
+        // Απέτυχε ή δεν στάλθηκε ποτέ — όχι όσοι το έχουν ήδη λάβει.
+        if (mode === 'missing') return withEmail.filter(t => !PublishModal.hasReceived(emails, t.teacher_id)).map(t => t.teacher_id);
         return withEmail.filter(t => t.changed).map(t => t.teacher_id);
+    },
+
+    /** Κατάσταση email ανά καθηγητή από το GET /publications/{id} (teacher_id → email). */
+    emailStatuses(detail) {
+        const out = {};
+        ((detail && detail.messages) || []).forEach(m => { if (m.email && m.teacher_id != null) out[m.teacher_id] = m.email; });
+        return out;
+    },
+
+    hasReceived(emails, teacherId) {
+        return Boolean(emails && emails[teacherId] && emails[teacherId].status === 'sent');
+    },
+
+    /** «✅ στάλθηκε ΗΗ/ΜΜ ωω:λλ» (ώρα Ελλάδας) | «❌ απέτυχε» | '' (δεν στάλθηκε ποτέ / εκκρεμεί). */
+    emailStatusText(email) {
+        if (!email) return '';
+        if (email.status === 'failed') return '❌ απέτυχε';
+        if (email.status !== 'sent') return '';
+        const m = /^\d{4}-(\d\d)-(\d\d) (\d\d:\d\d)$/.exec(TimetableHelpers.formatServerTime(email.at, 'ymdhm', ''));
+        return m ? `✅ στάλθηκε ${m[2]}/${m[1]} ${m[3]}` : '✅ στάλθηκε';
     },
 
     changeBadge(t, first) {
@@ -39,7 +61,8 @@ const PublishModal = {
         return `<span class="pub-badge pub-changed">${n} αλλαγ${n === 1 ? 'ή' : 'ές'}</span>`;
     },
 
-    buildHtml(preview, selected, testTo) {
+    /** emails: κατάσταση email ανά καθηγητή (μόνο στην επαναποστολή, βλ. emailStatuses). */
+    buildHtml(preview, selected, testTo, emails) {
         const esc = PublishModal.esc;
         const teachers = (preview && preview.teachers) || [];
         const prev = preview.previous;
@@ -67,7 +90,8 @@ const PublishModal = {
                 </label>
                 <details class="pub-details">
                     <summary><b>${esc(t.teacher)}</b> ${PublishModal.changeBadge(t, preview.first)}
-                        <small class="text-muted">${t.hours} ώρες${t.email ? '' : ' · χωρίς email'}</small></summary>
+                        <small class="text-muted">${t.hours} ώρες${t.email ? '' : ' · χωρίς email'}</small>
+                        ${resend ? `<small class="pub-sent">${esc(PublishModal.emailStatusText((emails || {})[t.teacher_id]))}</small>` : ''}</summary>
                     <pre class="pub-message">${esc(t.message)}</pre>
                     <button class="btn btn-secondary btn-sm pub-copy" data-idx="${i}">📋 Αντιγραφή</button>
                 </details>
@@ -77,7 +101,9 @@ const PublishModal = {
         return `${intro}${warn}
             <div class="pub-toolbar">
                 <b>✉️ Email σε:</b>
-                <button class="btn btn-secondary btn-sm pub-select" data-mode="changed">όσους έχουν αλλαγές</button>
+                ${resend
+                    ? '<button class="btn btn-secondary btn-sm pub-select" data-mode="missing">όσους δεν το πήραν</button>'
+                    : '<button class="btn btn-secondary btn-sm pub-select" data-mode="changed">όσους έχουν αλλαγές</button>'}
                 <button class="btn btn-secondary btn-sm pub-select" data-mode="all">όλους</button>
                 <button class="btn btn-secondary btn-sm pub-select" data-mode="none">κανέναν</button>
                 <span id="pub-count" class="text-muted"></span>
@@ -142,10 +168,17 @@ const PublishModal = {
             return;
         }
         const resend = PublishModal.isResend(preview);
+        // Επαναποστολή: ποιος το πήρε ήδη (✅/❌ ανά καθηγητή από τη δημοσίευση).
+        let emails = {};
+        if (resend) {
+            try {
+                emails = PublishModal.emailStatuses(await API.solver.publication(preview.previous.id));
+            } catch (_) { /* χωρίς ενδείξεις — η αποστολή δουλεύει όπως πριν */ }
+        }
         let selected = resend ? [] : PublishModal.defaultSelection(preview.teachers);
         Modal.open(resend ? '✉️ Email για την τελευταία δημοσίευση' : '📢 Δημοσίευση προγράμματος',
-            PublishModal.buildHtml(preview, selected, PublishModal._loadTestTo()),
-            resend ? () => PublishModal._resend(preview.previous.id, selected)
+            PublishModal.buildHtml(preview, selected, PublishModal._loadTestTo(), emails),
+            resend ? () => PublishModal._resend(preview.previous.id, selected, emails)
                    : () => PublishModal._publish(solutionId, selected),
             { wide: true, saveText: resend ? '✉️ Αποστολή email' : '📢 Δημοσίευση' });
         const body = document.getElementById('modal-body');
@@ -159,7 +192,7 @@ const PublishModal = {
             refresh();
         }));
         body.querySelectorAll('.pub-select').forEach(btn => btn.addEventListener('click', () => {
-            selected = PublishModal.selectionFor(preview.teachers, btn.dataset.mode);
+            selected = PublishModal.selectionFor(preview.teachers, btn.dataset.mode, emails);
             refresh();
         }));
         body.querySelectorAll('.pub-copy').forEach(btn => btn.addEventListener('click', async () => {
@@ -216,14 +249,24 @@ const PublishModal = {
         await PublishModal._track(res);
     },
 
-    async _resend(publicationId, selected) {
+    async _resend(publicationId, selected, emails, resend = false) {
         if (!selected.length) {
             Toast.error('Διάλεξε τουλάχιστον έναν καθηγητή.');
             return;
         }
+        // Όσοι το έχουν ήδη λάβει (✅) ξαναπαίρνουν email ΜΟΝΟ με ρητή επιβεβαίωση (resend: true).
+        const again = selected.filter(id => PublishModal.hasReceived(emails, id)).length;
+        if (again && !resend) {
+            Modal.open('⚠️ Επιβεβαίωση',
+                `<p>Ξανά σε ${again} που το έχουν ήδη λάβει;</p>`,
+                () => PublishModal._resend(publicationId, selected, emails, true),
+                { saveText: '✉️ Ναι, αποστολή ξανά' });
+            return;
+        }
         let res;
         try {
-            res = await API.solver.publicationEmails(publicationId, { teacher_ids: selected });
+            res = await API.solver.publicationEmails(publicationId,
+                resend ? { teacher_ids: selected, resend: true } : { teacher_ids: selected });
         } catch (err) {
             Toast.error(PublishModal.esc(err.message));
             return;

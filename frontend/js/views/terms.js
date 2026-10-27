@@ -98,17 +98,34 @@ const TermsView = {
             async () => {
                 const offset = parseInt(document.getElementById('shift-offset').value, 10);
                 if (!offset) { Toast.error('Δώσε μη-μηδενική μετατόπιση.'); return; }
+                const data = { offset, shift_solutions: document.getElementById('shift-sols').checked };
+                // Πρώτα δοκιμή χωρίς αλλαγή (dry_run): τα πλήθη στην επιβεβαίωση, πριν τη μετατόπιση.
+                let dry;
                 try {
-                    const r = await API.terms.shiftTimes(id, {
-                        offset,
-                        shift_solutions: document.getElementById('shift-sols').checked,
-                    });
+                    dry = await API.terms.shiftTimes(id, data, true);
+                } catch (err) { Toast.error(this._esc(err.message)); return; }
+                this._confirmShift(id, name, data, dry, container);
+            }, { saveText: 'Συνέχεια' });
+    },
+
+    /** Επιβεβαίωση με ό,τι έδειξε το dry_run: τι πάει στην Παλέτα, τι χάνεται. */
+    _confirmShift(id, name, data, dry, container) {
+        const unplaced = dry.slots_unplaced || 0;
+        // Μόνο τα κωλύματα (unavailable_dropped)· παλιός server: όλες οι διαθεσιμότητες εκτός εύρους.
+        const dropped = dry.unavailable_dropped ?? dry.availability_dropped ?? 0;
+        Modal.open('🕐 Μετατόπιση ωρών',
+            `<p>Μετατόπιση του σεναρίου <strong>${this._esc(name)}</strong> κατά <strong>${data.offset > 0 ? '+' : ''}${data.offset}</strong> ώρες${data.shift_solutions ? '' : ' (μόνο διαθεσιμότητες)'}:</p>
+             <p><strong>${unplaced}</strong> ώρες θα πάνε στην Παλέτα, <strong>${dropped}</strong> κωλύματα χάνονται οριστικά.</p>
+             <p class="text-muted">Μετατοπίζονται ${dry.slots_moved || 0} ώρες προγράμματος και ${dry.availability_moved || 0} διαθεσιμότητες. Τίποτα δεν άλλαξε ακόμα.</p>`,
+            async () => {
+                try {
+                    const r = await API.terms.shiftTimes(id, data);
                     Toast.success(`Μετατοπίστηκαν: ${r.availability_moved} διαθεσιμότητες, ${r.slots_moved} ώρες προγράμματος` +
                         (r.availability_dropped || r.slots_unplaced ? ` (εκτός εύρους: ${r.availability_dropped}+${r.slots_unplaced})` : ''));
                     Modal.close();
                     await this.render(container);
                 } catch (err) { Toast.error(this._esc(err.message)); }
-            }, { saveText: '🕐 Μετατόπιση' });
+            }, { saveText: '🕐 Μετατόπιση', saveClass: unplaced || dropped ? 'btn-warning' : 'btn-primary' });
     },
 
     _openDates(id, ds, container) {
